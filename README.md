@@ -38,7 +38,7 @@ cargo build
 ```
 
 Play from the publisher logo through the title, the name entry and the opening into the
-first room (arrows move, X = A, Z = B, Return = START and opens the pause menu, Backspace = SELECT, Esc quits);
+first room (arrows move, X = A, Z = B, Return = START and opens the pause menu, Backspace = SELECT, Esc quits); music and sound effects play through the default audio device;
 `--room` skips straight to the first room; a `<table>_<index>` string id shows that
 script in its box instead; `--dump frame.ppm` writes a frame instead of opening a window:
 
