@@ -1,4 +1,5 @@
-//! Tables of script strings: an array of 32-bit ROM pointers, one per string.
+//! Tables of script strings: an array of 32-bit ROM pointers, one per string;
+//! a null pointer marks an index with no string.
 
 use formats::script_text::{Script, ScriptTextError};
 use thiserror::Error;
@@ -22,10 +23,19 @@ pub struct StringTable {
 pub struct TableString {
     /// Stable identifier: the table name and the zero-based index, e.g. `dialogue_00003`.
     pub id: String,
-    /// Offset of the string's first byte from the start of the ROM.
+    /// Offset of the string's first byte from the start of the ROM; 0 for
+    /// an index whose pointer is null.
     pub offset: usize,
-    /// Decoded script.
+    /// Decoded script, empty for a null pointer.
     pub script: Script,
+}
+
+impl TableString {
+    /// Whether the table holds a string at this index.
+    #[must_use]
+    pub fn is_present(&self) -> bool {
+        self.offset != 0
+    }
 }
 
 /// Why a table could not be read.
@@ -91,6 +101,13 @@ impl StringTable {
     ) -> Result<TableString, StringTableError> {
         let id = format!("{}_{index:05}", self.name);
         let pointer = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]);
+        if pointer == 0 {
+            return Ok(TableString {
+                id,
+                offset: 0,
+                script: Script::default(),
+            });
+        }
         let offset = pointer
             .checked_sub(ROM_BASE)
             .map(|offset| offset as usize)
@@ -174,6 +191,17 @@ mod tests {
                 pointer: 0x0900_0000
             })
         );
+    }
+
+    #[test]
+    fn keeps_null_pointers_as_absent_entries() {
+        let (mut rom, table) = rom_with_table(&[&[0x22], &[0x22]]);
+        rom[0x100..0x104].copy_from_slice(&[0; 4]);
+        let strings = table.read(&rom).unwrap();
+        assert!(!strings[0].is_present());
+        assert_eq!(strings[0].id, "test_00000");
+        assert_eq!(strings[0].script, Script::default());
+        assert!(strings[1].is_present());
     }
 
     #[test]

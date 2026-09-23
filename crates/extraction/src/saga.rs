@@ -23,8 +23,8 @@ pub const STRING_TABLES: &[StringTable] = &[
     },
     StringTable {
         name: "dialogue",
-        offset: 0x0074_FCF4,
-        count: 977,
+        offset: 0x0074_FC54,
+        count: 1017,
     },
     StringTable {
         name: "battle",
@@ -735,6 +735,7 @@ const OBJECT_TABLE_ENTRY_LEN: usize = 8;
 const OBJECT_LEN: usize = 20;
 const OBJECT_SPRITE_LOOKUP: u16 = 0x8000;
 const OBJECT_NO_SCRIPT: u32 = 0x8000_0000;
+const OBJECT_EVENT_FLAG: u32 = 0x8000_0000;
 
 /// An object placed on a map: the player (object 0) or a character.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -747,7 +748,8 @@ pub struct MapObject {
     pub column: usize,
     /// Metatile row the object stands on.
     pub row: usize,
-    /// Script reference, `None` when the object has none.
+    /// Script reference, `None` when the object has none: bit 31 set names a
+    /// dialogue string by index, otherwise it points at code.
     pub script: Option<u32>,
     /// Kind: 0 for the player, 1 or 2 for characters, 4 for invisible triggers.
     pub kind: u16,
@@ -765,6 +767,16 @@ impl MapObject {
     pub fn sprite_sheet_id(&self) -> Option<usize> {
         (self.sprite != 0 && self.sprite & OBJECT_SPRITE_LOOKUP == 0)
             .then_some(usize::from(self.sprite))
+    }
+
+    /// The dialogue string index the object says when spoken to: a script
+    /// reference with bit 31 set names it in the low half-word. Code
+    /// references are not modeled.
+    #[must_use]
+    pub fn event_id(&self) -> Option<u16> {
+        self.script
+            .filter(|script| script & OBJECT_EVENT_FLAG != 0)
+            .and_then(|script| u16::try_from(script & u32::from(u16::MAX)).ok())
     }
 }
 
@@ -994,6 +1006,16 @@ mod tests {
         assert_eq!(objects.len(), 2);
         assert_eq!(objects[0].sprite_sheet_id(), Some(0x98));
         assert_eq!(objects[0].script, None);
+        assert_eq!(objects[0].event_id(), None);
+        assert_eq!(objects[1].event_id(), Some(0x2E2));
+        assert_eq!(
+            MapObject {
+                script: Some(0x0800_C73D),
+                ..objects[1].clone()
+            }
+            .event_id(),
+            None
+        );
         assert_eq!(
             objects[1],
             MapObject {
