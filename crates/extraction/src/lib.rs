@@ -2,6 +2,7 @@
 
 pub mod identify;
 pub mod saga;
+pub mod saga_save;
 pub mod string_table;
 
 pub use identify::{Identification, IdentifyError, KnownRelease, Title, identify};

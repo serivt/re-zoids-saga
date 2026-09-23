@@ -386,6 +386,9 @@ const KEEP_FACING: u16 = 0xFFFF;
 pub struct MapRecord {
     /// Index in the scene table.
     pub scene: usize,
+    /// The record's id; bit 15 is set on some records, and the game keeps
+    /// the low byte in the save as the current area.
+    pub id: u16,
     /// Map tiles per attribute cell side (2 for rooms, 4 for the world map).
     pub metatile_tiles: usize,
     /// ASCII name, e.g. `md0153`.
@@ -448,6 +451,7 @@ pub fn map_record(rom: &[u8], index: usize) -> Result<MapRecord, MapError> {
     let name = name.split(|byte| *byte == 0).next().unwrap_or_default();
     Ok(MapRecord {
         scene: usize::from(half(0)),
+        id: half(2),
         metatile_tiles: usize::from(half(4)),
         name: String::from_utf8_lossy(name).into_owned(),
     })
@@ -944,6 +948,9 @@ pub const PLAYER_SPRITE: usize = 0x98;
 pub const FIRST_ROOM_MAP: usize = 4;
 /// Metatile the player stands on when control begins.
 pub const PLAYER_START: (usize, usize) = (5, 2);
+/// The flag a new game sets on entering the first room; continuing a save
+/// without it plays the opening again.
+pub const OPENING_SEEN_FLAG: u16 = 0x11F;
 /// Animation ids of a walking sprite: idle animations are the facing
 /// direction in sprite sheet order, walking ones follow them.
 pub const WALK_ANIMATION_BASE: usize = 4;
@@ -1529,6 +1536,7 @@ mod tests {
             map_record(&rom, 4).unwrap(),
             MapRecord {
                 scene: 3,
+                id: 0x8001,
                 metatile_tiles: 2,
                 name: "md0153".to_owned(),
             }
