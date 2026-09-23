@@ -774,6 +774,77 @@ fn tiles_8bpp(
     ))
 }
 
+const PAUSE_WALLPAPER_TILES_OFFSET: usize = 0x0056_4748;
+const PAUSE_WALLPAPER_PALETTE_OFFSET: usize = 0x0056_5E64;
+const PAUSE_WALLPAPER_TEXTURE_OFFSET: usize = 0x0056_5F40;
+const PAUSE_WALLPAPER_LOGO_OFFSET: usize = 0x0056_60C4;
+const PAUSE_WALLPAPER_TILE_COUNT: usize = 256;
+const PAUSE_WALLPAPER_MAP_SIDE: usize = 32;
+/// The scripts the pause menu is assembled from: window openers, the item
+/// list (46), the help line and menu (47), the status submenu (48, 49),
+/// the party panel pieces (64–67), the money box (44, 45) and notices.
+pub const PAUSE_MENU_SCRIPTS: StringTable = StringTable {
+    name: "pause-menu",
+    offset: 0x0075_B1BC,
+    count: 698,
+};
+
+/// The scrolling wallpaper behind the pause menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PauseWallpaper {
+    /// 8bpp tiles; the game copies the first 256 of the block into the
+    /// character block the two layers share.
+    pub tiles: Tileset,
+    /// Its 96 colors, palette indices 64–159.
+    pub palette: Vec<u16>,
+    /// The 32×32 map of the logo layer, scrolled one pixel per frame.
+    pub logo: TileMap,
+    /// The 32×32 map of the texture layer behind it.
+    pub texture: TileMap,
+}
+
+/// Reads the pause menu wallpaper.
+///
+/// # Errors
+///
+/// Returns [`BootError`] when a block cannot be read.
+pub fn pause_wallpaper(rom: &[u8]) -> Result<PauseWallpaper, BootError> {
+    let tile_bytes = lz77_block(rom, PAUSE_WALLPAPER_TILES_OFFSET, "pause wallpaper tiles")?;
+    let tiles = Tileset::from_pixels(
+        tile_bytes
+            .chunks_exact(TILE_8BPP_LEN)
+            .take(PAUSE_WALLPAPER_TILE_COUNT)
+            .map(|tile| tile.try_into().unwrap_or([0; TILE_8BPP_LEN]))
+            .collect(),
+    );
+    let palette = lz77_block(
+        rom,
+        PAUSE_WALLPAPER_PALETTE_OFFSET,
+        "pause wallpaper palette",
+    )?
+    .chunks_exact(2)
+    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+    .collect();
+    let map = |offset: usize, what: &'static str| {
+        let bytes = lz77_block(rom, offset, what)?;
+        TileMap::from_le_bytes(PAUSE_WALLPAPER_MAP_SIDE, PAUSE_WALLPAPER_MAP_SIDE, &bytes).ok_or(
+            BootError::TooShort {
+                len: rom.len(),
+                what,
+            },
+        )
+    };
+    Ok(PauseWallpaper {
+        tiles,
+        palette,
+        logo: map(PAUSE_WALLPAPER_LOGO_OFFSET, "pause wallpaper logo map")?,
+        texture: map(
+            PAUSE_WALLPAPER_TEXTURE_OFFSET,
+            "pause wallpaper texture map",
+        )?,
+    })
+}
+
 const SPRITE_TABLE_OFFSET: usize = 0x0031_8DFC;
 const SPRITE_RECORD_LEN: usize = 32;
 const SPRITE_COUNT: usize = 291;
@@ -1483,6 +1554,29 @@ mod tests {
         assert_eq!(graphics.cursor.tiles.len(), 1);
         assert_eq!(graphics.cursor.palette[0], 0x7C1F);
         assert!(title(&rom[..TITLE_TILES_OFFSET]).is_err());
+    }
+
+    #[test]
+    fn reads_the_pause_wallpaper() {
+        let mut rom = vec![0; PAUSE_WALLPAPER_LOGO_OFFSET + 0x1000];
+        let mut tile = vec![0u8; TILE_8BPP_LEN];
+        tile[0] = 5;
+        put(&mut rom, PAUSE_WALLPAPER_TILES_OFFSET, &stored_lz77(&tile));
+        put(
+            &mut rom,
+            PAUSE_WALLPAPER_PALETTE_OFFSET,
+            &stored_lz77(&[0x1F, 0x00]),
+        );
+        let mut map = vec![0u8; PAUSE_WALLPAPER_MAP_SIDE * PAUSE_WALLPAPER_MAP_SIDE * 2];
+        map[2] = 1;
+        put(&mut rom, PAUSE_WALLPAPER_TEXTURE_OFFSET, &stored_lz77(&map));
+        put(&mut rom, PAUSE_WALLPAPER_LOGO_OFFSET, &stored_lz77(&map));
+        let wallpaper = pause_wallpaper(&rom).unwrap();
+        assert_eq!(wallpaper.tiles.len(), 1);
+        assert_eq!(wallpaper.palette, [0x001F]);
+        assert_eq!(wallpaper.logo.wrapping(1, 0), 1);
+        assert_eq!(wallpaper.texture.width, 32);
+        assert_eq!(PAUSE_MENU_SCRIPTS.count, 698);
     }
 
     #[test]
