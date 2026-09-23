@@ -27,6 +27,7 @@ const MENU_KIND: u8 = 1;
 const LIGHT_FRAME_KIND: u8 = 0x20;
 const NO_FRAME_KIND: u8 = 0x40;
 const MENU_MARGIN: usize = 2;
+const FULL_WIDTH_SPACE: char = '\u{3000}';
 const TEXT_MARGIN: usize = 1;
 const PROMPT_FROM_RIGHT: usize = 2;
 const NAME_RESET_MODE: u8 = 1;
@@ -50,9 +51,8 @@ pub struct Window {
     pub lines: Vec<String>,
     /// Pixels each line takes, alongside `lines`.
     pub widths: Vec<usize>,
-    /// Whether every character takes one cell, for grids that align with
-    /// sprites, instead of its own width.
-    pub fixed_cells: bool,
+    /// How characters are spaced.
+    pub layout: TextLayout,
     /// Portrait shown, if any.
     pub portrait: Option<Portrait>,
     /// Whether the "more" prompt is lit.
@@ -63,6 +63,9 @@ pub struct Window {
     pub cursor: Option<usize>,
     /// Line the last menu ended on; the next one starts there.
     pub line: usize,
+    /// A line break waiting for the next character, so a trailing break
+    /// does not scroll the text away.
+    pub pending_break: bool,
     /// Order in which the window was opened; later windows cover earlier ones.
     pub opened: u64,
 }
@@ -114,22 +117,44 @@ impl Window {
     }
 
     fn put_char(&mut self, ch: char, advance: usize, inset: usize) {
-        let (advance, inset) = if self.fixed_cells {
-            (CELL_WIDTH, 0)
-        } else {
-            (advance, inset)
+        let (advance, inset) = match self.layout {
+            TextLayout::Cells => (CELL_WIDTH, 0),
+            TextLayout::Proportional => (advance, inset),
         };
+        self.apply_break();
+        self.ensure_line();
         if self
             .widths
             .last()
             .is_some_and(|width| width + advance > self.pixels())
         {
-            self.line_break();
+            self.new_line();
         }
+        self.push(ch, advance, inset);
+    }
+
+    /// Puts `ch` at cell `column` of the current line, padding with
+    /// full-width spaces up to it and never wrapping: how the game's code
+    /// places values in a window.
+    fn put_at(&mut self, column: usize, ch: char) {
+        self.apply_break();
+        self.ensure_line();
+        let used = self.lines.last().map_or(0, |line| line.chars().count());
+        for _ in used..column {
+            self.push(FULL_WIDTH_SPACE, CELL_WIDTH, 0);
+        }
+        self.push(ch, CELL_WIDTH, 0);
+    }
+
+    fn ensure_line(&mut self) {
         if self.lines.is_empty() {
             self.lines.push(String::new());
             self.widths.push(0);
         }
+    }
+
+    fn push(&mut self, ch: char, advance: usize, inset: usize) {
+        self.ensure_line();
         if let (Some(line), Some(width)) = (self.lines.last_mut(), self.widths.last_mut()) {
             if line.is_empty() {
                 *width = inset;
@@ -139,11 +164,15 @@ impl Window {
         }
     }
 
-    fn line_break(&mut self) {
-        if self.lines.is_empty() {
-            self.lines.push(String::new());
-            self.widths.push(0);
+    fn apply_break(&mut self) {
+        if self.pending_break {
+            self.pending_break = false;
+            self.new_line();
         }
+    }
+
+    fn new_line(&mut self) {
+        self.ensure_line();
         self.lines.push(String::new());
         self.widths.push(0);
         while self.lines.len() > self.rows().max(1) {
@@ -151,6 +180,24 @@ impl Window {
             self.widths.remove(0);
         }
     }
+
+    fn line_break(&mut self) {
+        self.ensure_line();
+        if self.pending_break {
+            self.new_line();
+        }
+        self.pending_break = true;
+    }
+}
+
+/// How a window spaces its characters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextLayout {
+    /// Each character at its own width.
+    #[default]
+    Proportional,
+    /// One cell per character, for grids that align with sprites.
+    Cells,
 }
 
 /// The script windows of a scene, drawn with the game's skin and font.
@@ -192,10 +239,18 @@ impl<'rom> ScriptWindows<'rom> {
         &self.metrics
     }
 
-    /// Gives window `id` one cell per character, or its own widths.
-    pub fn set_fixed_cells(&mut self, id: u8, fixed: bool) {
+    /// Puts `ch` at cell `column` of window `id`'s current line, as the
+    /// game's code places values: padded up to the column, never wrapped.
+    pub fn put_at(&mut self, id: u8, column: usize, ch: char) {
         if let Some(window) = self.window_mut(id) {
-            window.fixed_cells = fixed;
+            window.put_at(column, ch);
+        }
+    }
+
+    /// Gives window `id` one cell per character, or its own widths.
+    pub fn set_layout(&mut self, id: u8, layout: TextLayout) {
+        if let Some(window) = self.window_mut(id) {
+            window.layout = layout;
         }
     }
 
@@ -268,10 +323,13 @@ impl<'rom> ScriptWindows<'rom> {
             }
             for (row, line) in window.lines.iter().enumerate() {
                 let y = origin.1 + i32::try_from(row * LINE_HEIGHT).unwrap_or(i32::MAX);
-                if window.fixed_cells {
-                    painter.draw_cells(frame, origin.0, y, line, skin.palette());
-                } else {
-                    painter.draw(frame, origin.0, y, line, skin.palette());
+                match window.layout {
+                    TextLayout::Cells => {
+                        painter.draw_cells(frame, origin.0, y, line, skin.palette());
+                    }
+                    TextLayout::Proportional => {
+                        painter.draw(frame, origin.0, y, line, skin.palette());
+                    }
                 }
             }
             if window.prompt {
@@ -329,12 +387,13 @@ impl ScriptHost for ScriptWindows<'_> {
                 style,
                 lines: Vec::new(),
                 widths: Vec::new(),
-                fixed_cells: false,
+                layout: TextLayout::Proportional,
                 portrait: None,
                 prompt: false,
                 visible: false,
                 cursor: None,
                 line: 0,
+                pending_break: false,
                 opened,
             });
         }
@@ -376,6 +435,7 @@ impl ScriptHost for ScriptWindows<'_> {
         if let Some(window) = self.window_mut(id) {
             window.lines.clear();
             window.widths.clear();
+            window.pending_break = false;
             window.prompt = false;
         }
     }

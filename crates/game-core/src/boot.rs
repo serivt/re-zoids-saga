@@ -23,7 +23,7 @@ use platform::{Button, Frame, Input, Rgb};
 use crate::script::{ScriptError, ScriptRunner};
 use crate::text::CELL_WIDTH;
 use crate::translation::{AlphabetPage, NAME_ENTRY_TABLE, TITLE_TABLE};
-use crate::windows::ScriptWindows;
+use crate::windows::{ScriptWindows, TextLayout};
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
 const LOGO_BLACK_FRAMES: u32 = 30;
@@ -632,8 +632,8 @@ impl NameEntry {
             0,
         );
         windows.open_window(6, 0x21, (0, 8, 30, 12), 0);
-        windows.set_fixed_cells(5, true);
-        windows.set_fixed_cells(6, true);
+        windows.set_layout(5, TextLayout::Cells);
+        windows.set_layout(6, TextLayout::Cells);
         self.refresh(windows);
         windows.present(None);
     }
