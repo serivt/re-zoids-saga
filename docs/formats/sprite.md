@@ -32,5 +32,5 @@ stepping poses.
 At scene start the game copies the current image of each visible character into OBJ
 VRAM with `CpuSet` (the player to `0x06010000`, tiles 0–15) and the palette to an OBJ
 palette bank. Walking replaces the image in place from the sheet every four frames.
-The player is a single 32×32 OBJ, palette index 0 transparent, at screen (88, 32) when
-the first room starts.
+The player is a single 32×32 OBJ, palette index 0 transparent, at screen (72, 32) when
+the first room starts; the OBJ at (88, 32) next to it is the sitting character.

@@ -40,6 +40,11 @@ local function act(action)
 		local key = C.GBA_KEY[arg]
 		emu:addKey(key)
 		held[key] = HOLD
+	elseif kind == "hold" then
+		local name, n = string.match(arg, "^(%a+)x(%d+)$")
+		local key = C.GBA_KEY[name]
+		emu:addKey(key)
+		held[key] = tonumber(n)
 	elseif kind == "dump" then
 		dump(arg)
 	elseif kind == "exit" then

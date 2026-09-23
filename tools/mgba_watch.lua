@@ -16,6 +16,7 @@ for a in string.gmatch(os.getenv("WATCH_ADDRS") or "", "[^,]+") do
 end
 local from = tonumber(os.getenv("WATCH_FROM") or "0")
 local max_hits = tonumber(os.getenv("WATCH_MAX") or "3")
+local watch_type = C.WATCHPOINT_TYPE[os.getenv("WATCH_TYPE") or "WRITE"]
 
 local HOLD = 4
 local held = {}
@@ -43,7 +44,7 @@ local function arm()
 			end
 			console:log(string.format("WATCH %08x hit %d frame %d:%s\n   %s", a, hits[a], emu:currentFrame(), desc, regs()))
 			if hits[a] >= max_hits then emu:clearBreakpoint(ids[a]) end
-		end, a, C.WATCHPOINT_TYPE.WRITE)
+		end, a, watch_type)
 	end
 	armed = true
 	console:log("armed " .. #addrs .. " watchpoints")
@@ -60,6 +61,9 @@ callbacks:add("frame", function()
 		local kind, arg = string.match(plan[next_item].action, "^(%a+):?(.*)$")
 		if kind == "key" then
 			local key = C.GBA_KEY[arg]; emu:addKey(key); held[key] = HOLD
+		elseif kind == "hold" then
+			local name, n = string.match(arg, "^(%a+)x(%d+)$")
+			local key = C.GBA_KEY[name]; emu:addKey(key); held[key] = tonumber(n)
 		elseif kind == "exit" then
 			os.exit(0)
 		end
