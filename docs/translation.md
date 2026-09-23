@@ -66,7 +66,8 @@ menu window keeps two cells free on each side for the cursor (see
 When a translation is loaded the launcher walks each translated string (and the
 strings it calls) to find the window every message lands in, and enlarges the windows
 whose translated lines do not fit: a window grows to the widest line plus its margins
-(and, for a menu, to the number of choices), sliding left or up to stay on screen.
+(and, for a menu, to the number of choices), keeping its center where it was and
+staying on screen.
 The title menu, for instance, grows from 5 to 13 cells for "Nueva partida". The
 launcher prints how many windows it enlarged and one line per message that cannot fit
 even a screen-wide window; those still wrap mid-word. The story box beside a

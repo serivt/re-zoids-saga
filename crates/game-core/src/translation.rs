@@ -233,8 +233,18 @@ impl Translation {
         };
         let width = usize::from(rect.2).max(fit.columns + 2 * margin);
         let height = usize::from(rect.3).max(if fit.rows > 0 { 2 + 2 * fit.rows } else { 0 });
-        let x = usize::from(rect.0).min(SCREEN_COLUMNS.saturating_sub(width));
-        let y = usize::from(rect.1).min(SCREEN_ROWS.saturating_sub(height));
+        let x = centered(
+            usize::from(rect.0),
+            usize::from(rect.2),
+            width,
+            SCREEN_COLUMNS,
+        );
+        let y = centered(
+            usize::from(rect.1),
+            usize::from(rect.3),
+            height,
+            SCREEN_ROWS,
+        );
         let cell = |value: usize| u8::try_from(value).unwrap_or(u8::MAX);
         (cell(x), cell(y), cell(width), cell(height))
     }
@@ -264,6 +274,15 @@ impl Translation {
     pub fn is_empty(&self) -> bool {
         self.messages.is_empty()
     }
+}
+
+/// Where a window that grew from `size` to `grown` starts so its center
+/// stays where it was, kept within `limit` cells of the screen.
+fn centered(start: usize, size: usize, grown: usize, limit: usize) -> usize {
+    let center = start + size / 2;
+    center
+        .saturating_sub(grown / 2)
+        .min(limit.saturating_sub(grown))
 }
 
 fn split_key(context: &str) -> Option<(&str, usize, usize)> {
@@ -757,8 +776,10 @@ mod tests {
         assert_eq!(translation.enlarged_windows(), 1);
         assert_eq!(
             translation.fit_window("title", 0, 0, 0x21, (10, 10, 9, 8)),
-            (10, 10, 17, 10)
+            (6, 9, 17, 10)
         );
+        assert_eq!(centered(24, 6, 12, 30), 18);
+        assert_eq!(centered(0, 4, 10, 30), 0);
         assert_eq!(
             translation.fit_window("title", 0, 1, 0x21, (10, 10, 9, 8)),
             (10, 10, 9, 8)
