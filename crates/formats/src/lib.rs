@@ -11,4 +11,4 @@ pub use font::{FontError, Glyph, GlyphIndex};
 pub use lz77::Lz77Error;
 pub use rom_header::{HeaderError, RomHeader};
 pub use script_text::{Element, Piece, Script, ScriptTextError};
-pub use tile::Tileset;
+pub use tile::{TileImage, TilePiece, Tileset};

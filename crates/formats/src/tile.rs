@@ -56,6 +56,68 @@ impl Tileset {
     }
 }
 
+/// A rectangle of tiles inside a composed image, in tile units.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TilePiece {
+    /// Column of the piece's top-left tile.
+    pub column: usize,
+    /// Row of the piece's top-left tile.
+    pub row: usize,
+    /// Width in tiles.
+    pub columns: usize,
+    /// Height in tiles.
+    pub rows: usize,
+}
+
+/// An image assembled from tiles: one palette index per pixel, row-major.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TileImage {
+    /// Width in pixels.
+    pub width: usize,
+    /// Height in pixels.
+    pub height: usize,
+    /// `width * height` palette indices.
+    pub indices: Vec<u8>,
+}
+
+impl TileImage {
+    /// Composes an image from consecutive tiles laid out piece by piece, each
+    /// piece filled row-major (the GBA's one-dimensional sprite mapping).
+    /// Missing tiles are left at index 0.
+    #[must_use]
+    pub fn compose(tiles: &Tileset, pieces: &[TilePiece]) -> Self {
+        let width = pieces
+            .iter()
+            .map(|p| p.column + p.columns)
+            .max()
+            .unwrap_or(0)
+            * TILE_SIZE;
+        let height = pieces.iter().map(|p| p.row + p.rows).max().unwrap_or(0) * TILE_SIZE;
+        let mut indices = vec![0u8; width * height];
+        let mut next = 0;
+        for piece in pieces {
+            for row in 0..piece.rows {
+                for column in 0..piece.columns {
+                    if let Some(tile) = tiles.tile(next) {
+                        let origin = ((piece.row + row) * TILE_SIZE * width)
+                            + (piece.column + column) * TILE_SIZE;
+                        for (y, line) in tile.chunks_exact(TILE_SIZE).enumerate() {
+                            let start = origin + y * width;
+                            indices[start..start + TILE_SIZE].copy_from_slice(line);
+                        }
+                    }
+                    next += 1;
+                }
+            }
+        }
+        Self {
+            width,
+            height,
+            indices,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -68,6 +130,38 @@ mod tests {
         let pixels = decode_4bpp(&tile);
         assert_eq!(&pixels[..2], &[1, 0xA]);
         assert_eq!(&pixels[62..], &[0xF, 3]);
+    }
+
+    #[test]
+    fn composes_pieces_in_one_dimensional_order() {
+        let mut data = Vec::new();
+        for i in 1..=6u8 {
+            data.extend([i | i << 4; TILE_LEN]);
+        }
+        let tiles = Tileset::from_4bpp(&data);
+        let pieces = [
+            TilePiece {
+                column: 0,
+                row: 0,
+                columns: 2,
+                rows: 2,
+            },
+            TilePiece {
+                column: 2,
+                row: 0,
+                columns: 1,
+                rows: 2,
+            },
+        ];
+        let image = TileImage::compose(&tiles, &pieces);
+        assert_eq!((image.width, image.height), (24, 16));
+        let at = |x: usize, y: usize| image.indices[y * image.width + x];
+        assert_eq!(at(0, 0), 1);
+        assert_eq!(at(8, 0), 2);
+        assert_eq!(at(0, 8), 3);
+        assert_eq!(at(8, 8), 4);
+        assert_eq!(at(16, 0), 5);
+        assert_eq!(at(16, 8), 6);
     }
 
     #[test]

@@ -3,7 +3,7 @@
 use formats::bgr555::{PALETTE_LEN, parse_palette};
 use formats::font::{FontError, Glyph, GlyphIndex, RANGE_ENTRY_LEN, TILE_LEN};
 use formats::lz77::Lz77Error;
-use formats::tile::Tileset;
+use formats::tile::{TileImage, TilePiece, Tileset};
 use thiserror::Error;
 
 use crate::string_table::StringTable;
@@ -127,4 +127,110 @@ pub fn window_skin(rom: &[u8]) -> Result<WindowSkin, WindowSkinError> {
         tiles: Tileset::from_4bpp(&tile_bytes),
         palette,
     })
+}
+
+const PORTRAIT_TABLE_OFFSET: usize = 0x006D_0A64;
+const PORTRAIT_RECORD_LEN: usize = 16;
+const PORTRAIT_COUNT: usize = 468;
+/// Portraits per character in the table: one per facial expression.
+pub const PORTRAIT_EXPRESSIONS: usize = 9;
+const PORTRAIT_PIECES: [TilePiece; 4] = [
+    TilePiece {
+        column: 0,
+        row: 0,
+        columns: 4,
+        rows: 4,
+    },
+    TilePiece {
+        column: 0,
+        row: 4,
+        columns: 4,
+        rows: 2,
+    },
+    TilePiece {
+        column: 4,
+        row: 0,
+        columns: 2,
+        rows: 4,
+    },
+    TilePiece {
+        column: 4,
+        row: 4,
+        columns: 2,
+        rows: 2,
+    },
+];
+
+/// A character's 48×48 dialogue portrait.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Portrait {
+    /// Palette indices of the portrait; index 0 is transparent.
+    pub image: TileImage,
+    /// The 16-color BGR555 palette.
+    pub palette: [u16; 16],
+}
+
+/// Why a portrait could not be read.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum PortraitError {
+    /// No such character or expression.
+    #[error("no portrait for character {character} expression {expression}")]
+    NoSuchPortrait {
+        /// Character index as the script numbers it.
+        character: usize,
+        /// Expression index.
+        expression: usize,
+    },
+    /// The ROM is too short to hold the record or its data.
+    #[error("ROM of {len} bytes is too short for the portrait table")]
+    TooShort {
+        /// ROM length.
+        len: usize,
+    },
+    /// The tiles or palette block is not valid LZ77.
+    #[error(transparent)]
+    Lz77(#[from] Lz77Error),
+}
+
+/// Reads the portrait of a character (as the script numbers it) with the
+/// given expression. Both are LZ77 blocks referenced by a record table.
+///
+/// # Errors
+///
+/// Returns [`PortraitError`] when the indices are out of range, the ROM is
+/// too short or a block does not decompress.
+pub fn portrait(
+    rom: &[u8],
+    character: usize,
+    expression: usize,
+) -> Result<Portrait, PortraitError> {
+    let record = character
+        .checked_mul(PORTRAIT_EXPRESSIONS)
+        .and_then(|base| base.checked_add(expression))
+        .filter(|record| expression < PORTRAIT_EXPRESSIONS && *record < PORTRAIT_COUNT)
+        .ok_or(PortraitError::NoSuchPortrait {
+            character,
+            expression,
+        })?;
+    let too_short = || PortraitError::TooShort { len: rom.len() };
+    let offset = PORTRAIT_TABLE_OFFSET + record * PORTRAIT_RECORD_LEN;
+    let entry = rom.get(offset..offset + 8).ok_or_else(too_short)?;
+    let tiles_offset = rom_offset(&entry[..4]).ok_or_else(too_short)?;
+    let palette_offset = rom_offset(&entry[4..8]).ok_or_else(too_short)?;
+    let (tile_bytes, _) =
+        formats::lz77::decompress(rom.get(tiles_offset..).ok_or_else(too_short)?)?;
+    let (palette_bytes, _) =
+        formats::lz77::decompress(rom.get(palette_offset..).ok_or_else(too_short)?)?;
+    let palette = parse_palette(&palette_bytes).ok_or_else(too_short)?;
+    Ok(Portrait {
+        image: TileImage::compose(&Tileset::from_4bpp(&tile_bytes), &PORTRAIT_PIECES),
+        palette,
+    })
+}
+
+fn rom_offset(pointer: &[u8]) -> Option<usize> {
+    let address = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]);
+    address
+        .checked_sub(0x0800_0000)
+        .map(|offset| offset as usize)
 }

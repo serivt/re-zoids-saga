@@ -161,6 +161,27 @@ impl Script {
             .collect()
     }
 
+    /// The character and expression the script selects for its first message,
+    /// from the variable-setting opcodes (`0x09`) that precede it: slot 0
+    /// holds the character, slot 1 the expression. `None` when either is unset.
+    #[must_use]
+    pub fn first_speaker(&self) -> Option<(u8, u8)> {
+        let mut character = None;
+        let mut expression = None;
+        for element in &self.elements {
+            match element {
+                Element::Message(_) => break,
+                Element::Opcode { code: 0x09, args } if args.len() == 3 => match args[0] & 7 {
+                    0 => character = Some(args[1]),
+                    1 => expression = Some(args[1]),
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+        Some((character?, expression?))
+    }
+
     /// The readable text of every message, messages separated by a blank line.
     #[must_use]
     pub fn plain_text(&self) -> String {
@@ -399,6 +420,18 @@ mod tests {
             ]
         );
         assert_eq!(script.plain_text(), "王子");
+    }
+
+    #[test]
+    fn reads_the_first_speaker_from_the_variable_opcodes() {
+        let mut bytes = vec![0x09, 0x00, 0x02, 0x00, 0x09, 0x01, 0x03, 0x00, 0x0B];
+        bytes.extend(message("王子"));
+        bytes.extend([0x09, 0x00, 0x05, 0x00]);
+        bytes.push(STRING_END);
+        let (script, _) = Script::decode(&bytes).unwrap();
+        assert_eq!(script.first_speaker(), Some((2, 3)));
+        let (no_speaker, _) = Script::decode(&[STRING_END]).unwrap();
+        assert_eq!(no_speaker.first_speaker(), None);
     }
 
     #[test]

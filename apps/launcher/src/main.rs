@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use extraction::{Identification, Title};
-use game_core::{TextPainter, WindowPainter};
+use game_core::{TextPainter, WindowPainter, draw_sprite};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{Display, Event, Frame, Rgb};
 use platform_sdl3::Sdl3Display;
@@ -16,6 +16,8 @@ const BOX_ROW: usize = 12;
 const BOX_ROWS: usize = 8;
 const BOX_COLUMNS: usize = 30;
 const PORTRAIT_DIVIDER_COLUMN: usize = 7;
+const PORTRAIT_X: i32 = 8;
+const PORTRAIT_Y: i32 = 104;
 const SPEAKER_X: i32 = 64;
 const SPEAKER_Y: i32 = 104;
 const TEXT_Y: i32 = 120;
@@ -101,6 +103,17 @@ fn render_string(rom: &[u8], title: Title, string_id: &str) -> Result<Frame> {
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::new(16, 24, 48));
     window.draw_window(&mut frame, 0, BOX_ROW, BOX_COLUMNS, BOX_ROWS);
     window.draw_divider(&mut frame, PORTRAIT_DIVIDER_COLUMN, BOX_ROW, BOX_ROWS);
+    if let Some((character, expression)) = string.script.first_speaker() {
+        let portrait =
+            extraction::saga::portrait(rom, usize::from(character), usize::from(expression))?;
+        draw_sprite(
+            &mut frame,
+            PORTRAIT_X,
+            PORTRAIT_Y,
+            &portrait.image,
+            &portrait.palette,
+        );
+    }
     let messages = string.script.message_texts();
     let text = messages.first().map(String::as_str).unwrap_or_default();
     let (speaker, body) = text.split_once('\n').unwrap_or((text, ""));
