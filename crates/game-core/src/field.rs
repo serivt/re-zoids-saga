@@ -13,7 +13,9 @@
 //! Characters from the map's object list stand still on their metatile,
 //! block the player and are drawn in back-to-front order, in front of the
 //! player when level with it. Completing a step onto an exit metatile
-//! reports the exit so the caller can warp.
+//! reports the exit so the caller can warp; pressing A while standing and
+//! facing a character turns it to the player (unless it is furniture) and
+//! reports its dialogue so the caller can open a talk box.
 
 use extraction::saga::{
     self, METATILE_TILES, MapError, PLAYER_SPRITE, Scene, SceneError, SpriteSheet,
@@ -30,6 +32,7 @@ const METATILE_SIZE: usize = METATILE_TILES * TILE_SIZE;
 const ANCHOR_OFFSET: (isize, isize) = (8, 16);
 const CAMERA_ANCHOR: (isize, isize) = (120, 80);
 const ANIMATION_SPEED_SHIFT: u32 = 1;
+const FURNITURE_BEHAVIOR: u16 = 2;
 
 /// Where the player faces, in the order the sprite sheet uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,6 +88,30 @@ impl Direction {
             Self::Right => 3,
         }
     }
+
+    const fn opposite(self) -> Self {
+        match self {
+            Self::Up => Self::Down,
+            Self::Down => Self::Up,
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+}
+
+/// Something the field reports after a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FieldEvent {
+    /// The player finished a step onto this exit.
+    Exit(usize),
+    /// The player spoke to the character at this index in `npcs`, whose
+    /// dialogue string this is.
+    Talk {
+        /// Index into the field's characters.
+        npc: usize,
+        /// Dialogue string index.
+        dialogue: usize,
+    },
 }
 
 /// The player's position and animation state.
@@ -146,6 +173,10 @@ pub struct Npc {
     pub animation_id: usize,
     /// Frames spent in the animation.
     pub animation: u32,
+    /// Dialogue string it says when spoken to.
+    pub dialogue: Option<usize>,
+    /// Whether it turns toward the player when spoken to.
+    pub turns: bool,
 }
 
 impl Npc {
@@ -213,6 +244,7 @@ pub struct Field {
     pub player: Player,
     /// The characters standing on the map.
     pub npcs: Vec<Npc>,
+    previous: Input,
 }
 
 impl Field {
@@ -234,6 +266,7 @@ impl Field {
                 walking: false,
             },
             npcs: Vec::new(),
+            previous: Input::default(),
         }
     }
 
@@ -264,15 +297,20 @@ impl Field {
         &self.scene
     }
 
-    /// Advances one frame with the buttons held; returns the exit whose
-    /// metatile the player finished stepping onto, if any.
-    pub fn update(&mut self, input: Input) -> Option<usize> {
+    /// Advances one frame with the buttons held; reports an exit reached or
+    /// a character spoken to.
+    pub fn update(&mut self, input: Input) -> Option<FieldEvent> {
+        let pressed_a = input.is_held(Button::A) && !self.previous.is_held(Button::A);
+        self.previous = input;
         self.player.animation += 1;
         for npc in &mut self.npcs {
             npc.animation += 1;
         }
         if self.player.walking {
-            return self.advance_step();
+            return self.advance_step().map(FieldEvent::Exit);
+        }
+        if pressed_a {
+            return self.talk();
         }
         let direction = Direction::from_input(input)?;
         if self.player.facing != direction {
@@ -290,6 +328,22 @@ impl Field {
             self.advance_step();
         }
         None
+    }
+
+    fn talk(&mut self) -> Option<FieldEvent> {
+        let (dx, dy) = self.player.facing.delta();
+        let (column, row) = self.player.footing();
+        let ahead = (column.checked_add_signed(dx)?, row.checked_add_signed(dy)?);
+        let index = self.npcs.iter().position(|npc| npc.footing() == ahead)?;
+        let npc = &mut self.npcs[index];
+        if npc.turns {
+            npc.animation_id = self.player.facing.opposite().index();
+            npc.animation = 0;
+        }
+        npc.dialogue.map(|dialogue| FieldEvent::Talk {
+            npc: index,
+            dialogue,
+        })
     }
 
     fn blocked(&self, column: usize, row: usize) -> bool {
@@ -425,6 +479,8 @@ fn load_map(rom: &[u8], map: usize) -> Result<(Scene, SpriteSheet, Vec<Npc>), Fi
                 sheet,
                 animation_id: object.animation,
                 animation: 0,
+                dialogue: object.event_id().map(usize::from),
+                turns: object.behavior < FURNITURE_BEHAVIOR,
             }))
         })
         .collect::<Result<_, _>>()?;
@@ -572,18 +628,68 @@ mod tests {
     #[test]
     fn characters_block_the_player() {
         let mut field = field(6, 5);
-        field.npcs.push(Npc {
-            column: 4,
-            row: 1,
-            sheet: sheet(),
-            animation_id: 1,
-            animation: 0,
-        });
+        field.npcs.push(npc(4, 1, Some(7), true));
         field.update(held(Direction::Right));
         assert!(!field.player.walking);
         assert_eq!(field.player.facing, Direction::Right);
         field.update(held(Direction::Down));
         assert!(field.player.walking);
+    }
+
+    fn npc(column: usize, row: usize, dialogue: Option<usize>, turns: bool) -> Npc {
+        Npc {
+            column,
+            row,
+            sheet: sheet(),
+            animation_id: 1,
+            animation: 9,
+            dialogue,
+            turns,
+        }
+    }
+
+    #[test]
+    fn pressing_a_toward_a_character_turns_it_and_reports_its_dialogue() {
+        let mut field = field(6, 5);
+        field.npcs.push(npc(4, 1, Some(738), true));
+        field.update(held(Direction::Right));
+        let a = Input::default().with(Button::A);
+        assert_eq!(
+            field.update(a),
+            Some(FieldEvent::Talk {
+                npc: 0,
+                dialogue: 738
+            })
+        );
+        assert_eq!(field.npcs[0].animation_id, 2);
+        assert_eq!(field.npcs[0].animation, 0);
+        assert_eq!(field.update(a), None);
+        assert_eq!(field.update(Input::default()), None);
+        field.update(held(Direction::Up));
+        assert!(field.player.walking);
+        for _ in 0..16 {
+            field.update(Input::default());
+        }
+        assert_eq!(field.update(a), None);
+    }
+
+    #[test]
+    fn furniture_and_silent_characters_do_not_talk() {
+        let mut field = field(6, 5);
+        field.npcs.push(npc(4, 1, None, true));
+        field.update(held(Direction::Right));
+        assert_eq!(field.update(Input::default().with(Button::A)), None);
+        assert_eq!(field.npcs[0].animation_id, 2);
+        field.npcs[0] = npc(4, 1, Some(1), false);
+        field.update(Input::default());
+        assert_eq!(
+            field.update(Input::default().with(Button::A)),
+            Some(FieldEvent::Talk {
+                npc: 0,
+                dialogue: 1
+            })
+        );
+        assert_eq!(field.npcs[0].animation_id, 1);
     }
 
     #[test]
@@ -593,7 +699,7 @@ mod tests {
         for _ in 0..32 {
             exits.extend(field.update(held(Direction::Left)));
         }
-        assert_eq!(exits, [1]);
+        assert_eq!(exits, [FieldEvent::Exit(1)]);
         assert_eq!(field.player.footing(), (1, 2));
         assert_eq!(field.update(Input::default()), None);
     }
