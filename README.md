@@ -17,7 +17,8 @@ caches it in your user-data directory.
 Early. The workspace and layer boundaries are in place: the launcher identifies a ROM
 (cartridge header + SHA-1 against validated dumps), the script text codec decodes every
 string table of Zoids Saga (names, items, dialogue, battle quotes, menus), and the
-original 8×16 font is extracted and drawn in an SDL3 window. No game runs yet.
+original 8×16 font and text window (LZ77 tiles + palette) are extracted and drawn in
+an SDL3 window. No game runs yet.
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements
