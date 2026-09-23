@@ -1,0 +1,15 @@
+[package]
+name = "launcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+platform-sdl3.workspace = true
+game-saga.workspace = true
+game-legacy.workspace = true
+game-fuzors.workspace = true
+
+[lints]
+workspace = true

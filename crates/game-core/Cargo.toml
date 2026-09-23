@@ -1,0 +1,15 @@
+[package]
+name = "game-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+gba-runtime.workspace = true
+localization.workspace = true
+extraction.workspace = true
+formats.workspace = true
+
+[lints]
+workspace = true

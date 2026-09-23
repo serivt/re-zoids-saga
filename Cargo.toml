@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/platform",
+    "crates/platform-sdl3",
+    "crates/gba-runtime",
+    "crates/formats",
+    "crates/extraction",
+    "crates/localization",
+    "crates/game-core",
+    "crates/games/saga",
+    "crates/games/legacy",
+    "crates/games/fuzors",
+    "apps/launcher",
+    "apps/extractor-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+rust-version = "1.85"
+
+[workspace.dependencies]
+platform = { path = "crates/platform" }
+platform-sdl3 = { path = "crates/platform-sdl3" }
+gba-runtime = { path = "crates/gba-runtime" }
+formats = { path = "crates/formats" }
+extraction = { path = "crates/extraction" }
+localization = { path = "crates/localization" }
+game-core = { path = "crates/game-core" }
+game-saga = { path = "crates/games/saga" }
+game-legacy = { path = "crates/games/legacy" }
+game-fuzors = { path = "crates/games/fuzors" }
+
+[workspace.lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+unwrap_used = "warn"
+expect_used = "warn"

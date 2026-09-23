@@ -1,0 +1,13 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# ROMs and anything derived from them are never committed
+*.gba
+*.zip
+*.sav
+/data/
+
+# Local development state
+.DS_Store
+__pycache__/

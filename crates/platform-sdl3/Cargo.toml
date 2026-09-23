@@ -1,0 +1,13 @@
+[package]
+name = "platform-sdl3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+platform.workspace = true
+sdl3 = "0.20.0"
+
+[lints]
+workspace = true
