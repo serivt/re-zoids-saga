@@ -236,13 +236,16 @@ fn rom_offset(pointer: &[u8]) -> Option<usize> {
         .map(|offset| offset as usize)
 }
 
-const SCENE_TABLE_OFFSET: usize = 0x001E_70BC;
+const SCENE_TABLE_OFFSET: usize = 0x001E_70AC;
 const SCENE_RECORD_LEN: usize = 24;
-const SCENE_COUNT: usize = 47;
+const SCENE_COUNT: usize = 205;
 const BACKDROP_SIDE: usize = 32;
 /// Side of a map attribute cell in map tiles.
 pub const METATILE_TILES: usize = 2;
 const BLOCKED: u16 = 0x8000;
+const EXIT_KIND_MASK: u16 = 0xC000;
+const EXIT_WALK: u16 = 0x4000;
+const EXIT_INDEX_MASK: u16 = 0x00FF;
 
 /// A field scene: a scrolling map over a repeating backdrop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -256,7 +259,8 @@ pub struct Scene {
     /// The 32×32 backdrop tiled behind the map.
     pub backdrop: TileMap,
     /// One entry per 16×16 metatile, row-major, `width / 2` per row;
-    /// bit 15 marks a cell the player cannot enter.
+    /// bit 15 marks a cell the player cannot enter, bits 15–14 = `01`
+    /// an exit whose index is the low byte.
     pub attributes: Vec<u16>,
 }
 
@@ -283,6 +287,19 @@ impl Scene {
         self.attributes
             .get(row * self.attribute_columns() + column)
             .is_none_or(|attribute| attribute & BLOCKED != 0)
+    }
+
+    /// The exit index of metatile `(column, row)` when walking onto it
+    /// warps the player.
+    #[must_use]
+    pub fn exit(&self, column: usize, row: usize) -> Option<usize> {
+        if column >= self.attribute_columns() {
+            return None;
+        }
+        self.attributes
+            .get(row * self.attribute_columns() + column)
+            .filter(|attribute| *attribute & EXIT_KIND_MASK == EXIT_WALK)
+            .map(|attribute| usize::from(attribute & EXIT_INDEX_MASK))
     }
 }
 
@@ -327,23 +344,22 @@ pub fn scene(rom: &[u8], index: usize) -> Result<Scene, SceneError> {
         .get(offset..offset + SCENE_RECORD_LEN)
         .ok_or_else(too_short)?;
     let field = |i: usize| rom_offset(&record[4 * i..4 * i + 4]).ok_or_else(too_short);
-    let size = u32::from_le_bytes([record[4], record[5], record[6], record[7]]);
-    let width = (size & 0xFFFF) as usize;
-    let height = (size >> 16) as usize;
+    let width = usize::from(u16::from_le_bytes([record[20], record[21]]));
+    let height = usize::from(u16::from_le_bytes([record[22], record[23]]));
     let backdrop_len = BACKDROP_SIDE * BACKDROP_SIDE * 2;
     let backdrop_bytes = rom
-        .get(field(0)?..field(0)? + backdrop_len)
+        .get(field(4)?..field(4)? + backdrop_len)
         .ok_or_else(too_short)?;
     let block = |offset: usize| -> Result<Vec<u8>, SceneError> {
         let (bytes, _) = formats::lz77::decompress(rom.get(offset..).ok_or_else(too_short)?)?;
         Ok(bytes)
     };
-    let palettes = parse_palettes(&block(field(2)?)?);
-    let tiles = Tileset::from_4bpp(&block(field(3)?)?);
-    let map = TileMap::from_le_bytes(width, height, &block(field(4)?)?).ok_or_else(too_short)?;
+    let palettes = parse_palettes(&block(field(0)?)?);
+    let tiles = Tileset::from_4bpp(&block(field(1)?)?);
+    let map = TileMap::from_le_bytes(width, height, &block(field(2)?)?).ok_or_else(too_short)?;
     let backdrop = TileMap::from_le_bytes(BACKDROP_SIDE, BACKDROP_SIDE, backdrop_bytes)
         .ok_or_else(too_short)?;
-    let attributes = block(field(5)?)?
+    let attributes = block(field(3)?)?
         .chunks_exact(2)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .take(width / METATILE_TILES * (height / METATILE_TILES))
@@ -354,6 +370,116 @@ pub fn scene(rom: &[u8], index: usize) -> Result<Scene, SceneError> {
         map,
         backdrop,
         attributes,
+    })
+}
+
+const MAP_TABLE_OFFSET: usize = 0x0031_B27C;
+const MAP_RECORD_LEN: usize = 28;
+const MAP_COUNT: usize = 343;
+const MAP_NAME_LEN: usize = 12;
+const WARP_TABLE_OFFSET: usize = 0x0031_FD84;
+const WARP_LEN: usize = 12;
+const KEEP_FACING: u16 = 0xFFFF;
+
+/// A map: a scene plus the data the game attaches to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapRecord {
+    /// Index in the scene table.
+    pub scene: usize,
+    /// Map tiles per attribute cell side (2 for rooms, 4 for the world map).
+    pub metatile_tiles: usize,
+    /// ASCII name, e.g. `md0153`.
+    pub name: String,
+}
+
+/// Where an exit leads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Warp {
+    /// Destination map record.
+    pub map: usize,
+    /// Arrival metatile column.
+    pub column: usize,
+    /// Arrival metatile row.
+    pub row: usize,
+    /// Facing on arrival in sprite sheet order; `None` keeps the current one.
+    pub facing: Option<usize>,
+    /// Sound id: 0 for the default door sound, `0x44` for none.
+    pub sound: u16,
+}
+
+/// Why a map record or warp could not be read.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum MapError {
+    /// No such map.
+    #[error("no map {index}; the table has {MAP_COUNT}")]
+    NoSuchMap {
+        /// Requested index.
+        index: usize,
+    },
+    /// The ROM is too short for the record or warp.
+    #[error("ROM of {len} bytes is too short for map {index}")]
+    TooShort {
+        /// ROM length.
+        len: usize,
+        /// Map index.
+        index: usize,
+    },
+}
+
+/// Reads map record `index`.
+///
+/// # Errors
+///
+/// Returns [`MapError`] when the index is out of range or the ROM is too
+/// short.
+pub fn map_record(rom: &[u8], index: usize) -> Result<MapRecord, MapError> {
+    if index >= MAP_COUNT {
+        return Err(MapError::NoSuchMap { index });
+    }
+    let offset = MAP_TABLE_OFFSET + index * MAP_RECORD_LEN;
+    let record = rom
+        .get(offset..offset + MAP_RECORD_LEN)
+        .ok_or(MapError::TooShort {
+            len: rom.len(),
+            index,
+        })?;
+    let half = |at: usize| u16::from_le_bytes([record[at], record[at + 1]]);
+    let name = &record[MAP_RECORD_LEN - MAP_NAME_LEN..];
+    let name = name.split(|byte| *byte == 0).next().unwrap_or_default();
+    Ok(MapRecord {
+        scene: usize::from(half(0)),
+        metatile_tiles: usize::from(half(4)),
+        name: String::from_utf8_lossy(name).into_owned(),
+    })
+}
+
+/// Reads exit `exit` of map `map`.
+///
+/// # Errors
+///
+/// Returns [`MapError`] when the map is out of range or the ROM is too
+/// short for its warp table.
+pub fn warp(rom: &[u8], map: usize, exit: usize) -> Result<Warp, MapError> {
+    if map >= MAP_COUNT {
+        return Err(MapError::NoSuchMap { index: map });
+    }
+    let too_short = || MapError::TooShort {
+        len: rom.len(),
+        index: map,
+    };
+    let pointer = WARP_TABLE_OFFSET + map * 4;
+    let table =
+        rom_offset(rom.get(pointer..pointer + 4).ok_or_else(too_short)?).ok_or_else(too_short)?;
+    let offset = table + exit * WARP_LEN;
+    let entry = rom.get(offset..offset + WARP_LEN).ok_or_else(too_short)?;
+    let half = |at: usize| u16::from_le_bytes([entry[at], entry[at + 1]]);
+    let facing = half(10);
+    Ok(Warp {
+        map: usize::from(half(2)),
+        column: usize::from(half(4)),
+        row: usize::from(half(6)),
+        facing: (facing != KEEP_FACING).then_some(usize::from(facing)),
+        sound: half(8),
     })
 }
 
@@ -533,5 +659,94 @@ mod tests {
     #[test]
     fn rejects_frames_that_do_not_form_whole_rows() {
         assert_eq!(sheet(1, 6).frame(0), None);
+    }
+
+    /// A ROM holding map record 4 and its two warps.
+    fn rom_with_map_4() -> Vec<u8> {
+        let table = WARP_TABLE_OFFSET + MAP_COUNT * 4;
+        let mut rom = vec![0; table + 2 * WARP_LEN];
+        let record = MAP_TABLE_OFFSET + 4 * MAP_RECORD_LEN;
+        rom[record..record + 6].copy_from_slice(&[3, 0, 1, 0x80, 2, 0]);
+        rom[record + 16..record + 22].copy_from_slice(b"md0153");
+        let pointer = 0x0800_0000u32 + u32::try_from(table).unwrap();
+        rom[WARP_TABLE_OFFSET + 16..WARP_TABLE_OFFSET + 20].copy_from_slice(&pointer.to_le_bytes());
+        let warps: [u16; 12] = [0xFFFF, 5, 8, 16, 0, 0xFFFF, 0xFFFF, 3, 23, 5, 0x44, 1];
+        for (i, half) in warps.iter().enumerate() {
+            rom[table + 2 * i..table + 2 * i + 2].copy_from_slice(&half.to_le_bytes());
+        }
+        rom
+    }
+
+    #[test]
+    fn reads_map_records() {
+        let rom = rom_with_map_4();
+        assert_eq!(
+            map_record(&rom, 4).unwrap(),
+            MapRecord {
+                scene: 3,
+                metatile_tiles: 2,
+                name: "md0153".to_owned(),
+            }
+        );
+        assert_eq!(
+            map_record(&rom, MAP_COUNT),
+            Err(MapError::NoSuchMap { index: MAP_COUNT })
+        );
+        assert!(matches!(
+            map_record(&[0; 16], 4),
+            Err(MapError::TooShort { len: 16, index: 4 })
+        ));
+    }
+
+    #[test]
+    fn reads_warps() {
+        let rom = rom_with_map_4();
+        assert_eq!(
+            warp(&rom, 4, 0).unwrap(),
+            Warp {
+                map: 5,
+                column: 8,
+                row: 16,
+                facing: None,
+                sound: 0,
+            }
+        );
+        assert_eq!(
+            warp(&rom, 4, 1).unwrap(),
+            Warp {
+                map: 3,
+                column: 23,
+                row: 5,
+                facing: Some(1),
+                sound: 0x44,
+            }
+        );
+        assert!(matches!(warp(&rom, 4, 2), Err(MapError::TooShort { .. })));
+        assert!(matches!(warp(&rom, 3, 0), Err(MapError::TooShort { .. })));
+    }
+
+    #[test]
+    fn finds_exits_in_attributes() {
+        let scene = Scene {
+            tiles: Tileset::from_4bpp(&[]),
+            palettes: vec![],
+            map: TileMap {
+                width: 4,
+                height: 4,
+                entries: vec![0; 16],
+            },
+            backdrop: TileMap {
+                width: 32,
+                height: 32,
+                entries: vec![0; 1024],
+            },
+            attributes: vec![0x8000, 0x4001, 0xC002, 0x0001],
+        };
+        assert_eq!(scene.exit(0, 0), None);
+        assert_eq!(scene.exit(1, 0), Some(1));
+        assert_eq!(scene.exit(0, 1), None);
+        assert_eq!(scene.exit(1, 1), None);
+        assert_eq!(scene.exit(2, 0), None);
+        assert_eq!(scene.exit(1, 5), None);
     }
 }
