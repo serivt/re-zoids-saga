@@ -25,26 +25,84 @@ use crate::{ScriptHost, TextPainter, WindowPainter};
 const TALK_START_DELAY: u32 = 3;
 const NAME_TO_ROOM_BLACK_FRAMES: u32 = 60;
 const INTRO_DIALOGUE: usize = 40;
+const INTRO_SECOND_DIALOGUE: usize = 41;
 const INTRO_PLAYER_CELL: (usize, usize) = (6, 2);
 const REGINA_SPRITE: usize = 0x99;
 const REGINA_START: (usize, usize) = (6, 4);
-/// Regina's walk before the first line, as `(frames to wait, order)`.
-const INTRO_PATH: [(u32, NpcCommand); 12] = [
-    (15, NpcCommand::Step(Direction::Left)),
-    (0, NpcCommand::Step(Direction::Left)),
-    (0, NpcCommand::Step(Direction::Left)),
-    (25, NpcCommand::Face(Direction::Right)),
-    (31, NpcCommand::Step(Direction::Right)),
-    (0, NpcCommand::Step(Direction::Right)),
-    (0, NpcCommand::Step(Direction::Right)),
-    (0, NpcCommand::Step(Direction::Right)),
-    (0, NpcCommand::Step(Direction::Right)),
-    (0, NpcCommand::Face(Direction::Left)),
-    (61, NpcCommand::Step(Direction::Left)),
-    (0, NpcCommand::Step(Direction::Left)),
-];
-const INTRO_FACE_UP_DELAY: u32 = 11;
+const INTRO_FADE_FRAMES: u32 = 32;
+const INTRO_DARK_FRAMES: u32 = 158;
 const INTRO_DIALOGUE_DELAY: u32 = 60;
+const INTRO_STAND_UP_DELAY: u32 = 2;
+/// Regina's walk before the first line, as `(frames to wait, order)`.
+const INTRO_ARRIVAL: [(u32, IntroOrder); 13] = [
+    (15, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (25, IntroOrder::Regina(NpcCommand::Face(Direction::Right))),
+    (31, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Face(Direction::Left))),
+    (61, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (11, IntroOrder::Regina(NpcCommand::Face(Direction::Up))),
+];
+/// Regina's pacing while the screen is dark, from the first line's end.
+const INTRO_PACING: [(u32, IntroOrder); 10] = [
+    (4, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Face(Direction::Right))),
+    (61, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
+    (0, IntroOrder::Regina(NpcCommand::Face(Direction::Left))),
+];
+/// Regina's way out after the second line, the player watching her go.
+const INTRO_LEAVING: [(u32, IntroOrder); 15] = [
+    (6, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
+    (23, IntroOrder::Player(Direction::Down)),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
+    (1, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
+    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
+];
+
+/// One order of the opening's choreography.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IntroOrder {
+    /// Regina moves or turns.
+    Regina(NpcCommand),
+    /// The player turns.
+    Player(Direction),
+}
+
+/// Where the opening is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum IntroPhase {
+    Arriving,
+    FirstTalk,
+    FadingOut(u32),
+    Dark(u32),
+    FadingIn(u32),
+    SecondTalkWait,
+    SecondTalk,
+    Leaving,
+    StandingUp,
+}
 
 /// Where the game is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -100,10 +158,30 @@ enum Screen {
 
 struct IntroState {
     regina: usize,
+    path: &'static [(u32, IntroOrder)],
     step: usize,
     wait: u32,
-    dialogue_started: bool,
-    stood_up: bool,
+    phase: IntroPhase,
+}
+
+impl IntroState {
+    fn follow(&mut self, path: &'static [(u32, IntroOrder)]) {
+        self.path = path;
+        self.step = 0;
+        self.wait = path.first().map_or(0, |order| order.0);
+    }
+
+    fn darkness(&self) -> u8 {
+        let level = match self.phase {
+            IntroPhase::FadingOut(frames) => frames * u32::from(FADE_STEPS) / INTRO_FADE_FRAMES,
+            IntroPhase::Dark(_) => u32::from(FADE_STEPS),
+            IntroPhase::FadingIn(frames) => {
+                u32::from(FADE_STEPS) - frames * u32::from(FADE_STEPS) / INTRO_FADE_FRAMES
+            }
+            _ => 0,
+        };
+        u8::try_from(level).unwrap_or(FADE_STEPS)
+    }
 }
 
 /// The running game.
@@ -274,13 +352,15 @@ impl<'rom> Game<'rom> {
         field.player.facing = Direction::Up;
         let regina = field.spawn_npc(self.rom, REGINA_SPRITE, REGINA_START, Direction::Up)?;
         self.field = Some(field);
-        self.screen = Screen::Intro(IntroState {
+        let mut intro = IntroState {
             regina,
+            path: &INTRO_ARRIVAL,
             step: 0,
-            wait: INTRO_PATH[0].0,
-            dialogue_started: false,
-            stood_up: false,
-        });
+            wait: 0,
+            phase: IntroPhase::Arriving,
+        };
+        intro.follow(&INTRO_ARRIVAL);
+        self.screen = Screen::Intro(intro);
         self.sound.play(saga::MUSIC_OPENING)?;
         Ok(())
     }
@@ -292,46 +372,97 @@ impl<'rom> Game<'rom> {
         let Screen::Intro(intro) = &mut self.screen else {
             return Ok(());
         };
-        if intro.dialogue_started {
-            if self.dialogue.update(self.rom, input, &mut self.windows)? {
-                if !intro.stood_up {
-                    intro.stood_up = true;
-                    field.player.facing = Direction::Left;
-                    field.update(Input::default().with(platform::Button::Left));
-                    return Ok(());
-                }
-                if !field.player.walking {
-                    field.npcs.retain(|npc| npc.sheet.tag != "ch01");
-                    self.screen = Screen::Field;
-                    self.sound.play(saga::MUSIC_FIRST_ROOM)?;
+        field.update(Input::default());
+        let path_done = Self::follow_path(field, intro);
+        match intro.phase {
+            IntroPhase::Arriving if path_done => {
+                self.dialogue.start(INTRO_DIALOGUE)?;
+                intro.phase = IntroPhase::FirstTalk;
+            }
+            IntroPhase::FirstTalk => {
+                if self.dialogue.update(self.rom, input, &mut self.windows)? {
+                    intro.phase = IntroPhase::FadingOut(0);
+                    intro.follow(&INTRO_PACING);
                 }
             }
-            field.update(Input::default());
-            return Ok(());
+            IntroPhase::FadingOut(frames) => {
+                intro.phase = if frames + 1 >= INTRO_FADE_FRAMES {
+                    IntroPhase::Dark(0)
+                } else {
+                    IntroPhase::FadingOut(frames + 1)
+                };
+            }
+            IntroPhase::Dark(frames) => {
+                intro.phase = if frames + 1 >= INTRO_DARK_FRAMES {
+                    IntroPhase::FadingIn(0)
+                } else {
+                    IntroPhase::Dark(frames + 1)
+                };
+            }
+            IntroPhase::FadingIn(frames) => {
+                intro.phase = if frames + 1 >= INTRO_FADE_FRAMES {
+                    IntroPhase::SecondTalkWait
+                } else {
+                    IntroPhase::FadingIn(frames + 1)
+                };
+            }
+            IntroPhase::SecondTalkWait if path_done => {
+                self.dialogue.start(INTRO_SECOND_DIALOGUE)?;
+                intro.phase = IntroPhase::SecondTalk;
+            }
+            IntroPhase::SecondTalk => {
+                if self.dialogue.update(self.rom, input, &mut self.windows)? {
+                    intro.phase = IntroPhase::Leaving;
+                    intro.follow(&INTRO_LEAVING);
+                }
+            }
+            IntroPhase::Leaving if path_done => {
+                field.npcs.remove(intro.regina);
+                field.player.facing = Direction::Left;
+                field.update(Input::default().with(platform::Button::Left));
+                intro.phase = IntroPhase::StandingUp;
+            }
+            IntroPhase::StandingUp if !field.player.walking => {
+                self.screen = Screen::Field;
+                self.sound.play(saga::MUSIC_FIRST_ROOM)?;
+            }
+            _ => {}
         }
-        field.update(Input::default());
-        if !field.npc_idle(intro.regina) {
-            return Ok(());
+        Ok(())
+    }
+
+    /// Issues the next order of the intro's path when its wait has passed
+    /// (Regina's orders also wait for her to stand still); returns whether
+    /// the path has ended, its closing wait included.
+    fn follow_path(field: &mut Field, intro: &mut IntroState) -> bool {
+        let Some((_, order)) = intro.path.get(intro.step) else {
+            if intro.wait > 0 {
+                intro.wait -= 1;
+            }
+            return intro.wait == 0 && field.npc_idle(intro.regina);
+        };
+        if matches!(order, IntroOrder::Regina(_)) && !field.npc_idle(intro.regina) {
+            return false;
         }
         if intro.wait > 0 {
             intro.wait -= 1;
-            return Ok(());
+            return false;
         }
-        if let Some((_, command)) = INTRO_PATH.get(intro.step) {
-            field.command_npc(intro.regina, *command);
-            intro.step += 1;
-            intro.wait = INTRO_PATH
-                .get(intro.step)
-                .map_or(INTRO_FACE_UP_DELAY, |next| next.0);
-        } else if intro.step == INTRO_PATH.len() {
-            field.command_npc(intro.regina, NpcCommand::Face(Direction::Up));
-            intro.step += 1;
-            intro.wait = INTRO_DIALOGUE_DELAY;
-        } else {
-            self.dialogue.start(INTRO_DIALOGUE)?;
-            intro.dialogue_started = true;
+        match *order {
+            IntroOrder::Regina(command) => {
+                field.command_npc(intro.regina, command);
+            }
+            IntroOrder::Player(direction) => field.player.facing = direction,
         }
-        Ok(())
+        intro.step += 1;
+        intro.wait = match intro.path.get(intro.step) {
+            Some(next) => next.0,
+            None => match intro.phase {
+                IntroPhase::Leaving => INTRO_STAND_UP_DELAY,
+                _ => INTRO_DIALOGUE_DELAY,
+            },
+        };
+        false
     }
 
     fn update_field(&mut self, input: Input) -> Result<(), GameError> {
@@ -378,7 +509,14 @@ impl<'rom> Game<'rom> {
                 frame.fill(Rgb::default());
                 darken(frame, FADE_STEPS);
             }
-            Screen::Intro(_) | Screen::Field => {
+            Screen::Intro(intro) => {
+                if let Some(field) = &self.field {
+                    field.draw(frame);
+                }
+                self.windows.draw(frame, &self.skin, &self.painter);
+                darken(frame, intro.darkness());
+            }
+            Screen::Field => {
                 if let Some(field) = &self.field {
                     field.draw(frame);
                 }

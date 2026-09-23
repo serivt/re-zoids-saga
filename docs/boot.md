@@ -69,6 +69,12 @@ After 60 black frames the first room (map 4) loads with the player on the chair 
 metatile (6, 2) facing up and Regina (`ch01`, sprite `0x99`) on (6, 4). Her walk, from
 the entity trace: 15 frames, three steps left, 25 frames, turn right, 31 frames, five
 steps right, turn left, 61 frames, two steps left, 11 frames, face up; then dialogue
-string 40 runs with the story box. When it ends the player steps left onto (5, 2) and
-control begins. What the room's own event code does besides this (music, flags) is not
-modeled.
+string 40 runs with the story box. When it closes the screen fades to black over 32
+frames, stays black 158 frames and fades back over 32 while Regina paces: three steps
+left from 4 frames after the box closed, turn right, 61 frames, five steps right, turn
+left. Sixty frames after her last turn dialogue 41 runs. When it closes she leaves 6
+frames later: three steps left, then down and left alternately to (2, 7), then down to
+(2, 12), where she is removed; the player turns to watch her 23 frames into her first
+step down. Two frames after she is gone the player steps left onto (5, 2), the field
+music starts and control begins. What the room's own event code does besides this
+(flags) is not modeled.
