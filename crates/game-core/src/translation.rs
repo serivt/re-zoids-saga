@@ -16,6 +16,8 @@ use extraction::saga::{self, NAME_ENTRY_SCRIPTS, PAUSE_MENU_SCRIPTS, TITLE_MENU_
 use formats::script_ops::{Instruction, MessageStep, decode_instruction, decode_message_step};
 use thiserror::Error;
 
+use crate::boot::{NAME_GRID_ROWS, NAME_HELP, NAME_PAGE_LABELS};
+
 /// Table name of the title menu script.
 pub const TITLE_TABLE: &str = "title";
 /// Table name of the name-entry scripts.
@@ -24,6 +26,11 @@ pub const NAME_ENTRY_TABLE: &str = "name-entry";
 pub const PAUSE_MENU_TABLE: &str = "pause-menu";
 /// Table name of the dialogue strings.
 pub const DIALOGUE_TABLE: &str = "dialogue";
+/// Key prefix of the name entry's character pages: `name-entry/alphabet/N`.
+pub const ALPHABET_PREFIX: &str = "name-entry/alphabet/";
+/// Key of the name entry's help line.
+pub const NAME_HELP_KEY: &str = "name-entry/help";
+const EMPTY_CELL: char = '\u{3000}';
 const STRING_LIMIT: usize = 0x1000;
 const SCREEN_COLUMNS: usize = 30;
 const SCREEN_ROWS: usize = 20;
@@ -53,12 +60,42 @@ pub enum TranslationError {
     Rom(String),
 }
 
-/// Translated messages keyed as [`key`] builds them, and the windows they
-/// need enlarged.
+/// A page of characters the name entry offers: its label and up to five
+/// rows of up to thirteen characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlphabetPage {
+    /// Shown in the label window.
+    pub label: String,
+    /// Characters by row; a full-width space is an empty cell.
+    pub rows: Vec<Vec<char>>,
+}
+
+impl AlphabetPage {
+    /// Parses a label line followed by one line per row.
+    fn parse(text: &str) -> Self {
+        let mut lines = text.lines();
+        let label = lines.next().unwrap_or_default().to_owned();
+        let rows = lines
+            .take(NAME_GRID_ROWS)
+            .map(|line| {
+                line.chars()
+                    .map(|ch| if ch == ' ' { EMPTY_CELL } else { ch })
+                    .collect()
+            })
+            .collect();
+        Self { label, rows }
+    }
+}
+
+/// Translated messages keyed as [`key`] builds them, the windows they
+/// need enlarged, and the name entry's pages and help line if the file
+/// replaces them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Translation {
     messages: HashMap<String, String>,
     fits: HashMap<String, Fit>,
+    alphabet: Vec<AlphabetPage>,
+    name_entry_help: Option<String>,
 }
 
 /// The inner size a window must offer for its translated messages.
@@ -151,10 +188,34 @@ impl Translation {
             last = Some(field);
         }
         entry.store(&mut messages);
+        let name_entry_help = messages.remove(NAME_HELP_KEY);
+        let mut pages: Vec<(usize, AlphabetPage)> = messages
+            .iter()
+            .filter_map(|(context, text)| {
+                let number = context.strip_prefix(ALPHABET_PREFIX)?.parse().ok()?;
+                Some((number, AlphabetPage::parse(text)))
+            })
+            .collect();
+        pages.sort_by_key(|(number, _)| *number);
+        messages.retain(|context, _| !context.starts_with(ALPHABET_PREFIX));
         Ok(Self {
             messages,
             fits: HashMap::new(),
+            alphabet: pages.into_iter().map(|(_, page)| page).collect(),
+            name_entry_help,
         })
+    }
+
+    /// The name entry's character pages, if the file replaces them.
+    #[must_use]
+    pub fn alphabet(&self) -> &[AlphabetPage] {
+        &self.alphabet
+    }
+
+    /// The name entry's help line, if the file replaces it.
+    #[must_use]
+    pub fn name_entry_help(&self) -> Option<&str> {
+        self.name_entry_help.as_deref()
     }
 
     /// Works out which windows the translated messages overflow and remembers
@@ -573,8 +634,49 @@ pub fn template(rom: &[u8], scopes: &[Scope]) -> Result<String, TranslationError
                 let _ = writeln!(out, "msgstr \"\"\n");
             }
         }
+        if scope.table == NAME_ENTRY_TABLE {
+            name_entry_entries(rom, &mut out)?;
+        }
     }
     Ok(out)
+}
+
+/// The name entry's help line and character pages: the pages are keyed
+/// `name-entry/alphabet/N`, their text a label line then one line per row
+/// of characters (a space is an empty cell); a translation may have any
+/// number of pages.
+fn name_entry_entries(rom: &[u8], out: &mut String) -> Result<(), TranslationError> {
+    let table = saga::kana_table(rom).map_err(|error| TranslationError::Rom(error.to_string()))?;
+    let _ = writeln!(out, "#. The help line of the name entry, 20 cells");
+    let _ = writeln!(out, "msgctxt {}", quote(NAME_HELP_KEY));
+    let _ = writeln!(out, "msgid {}", quote(NAME_HELP));
+    let _ = writeln!(out, "msgstr \"\"\n");
+    for (number, label) in NAME_PAGE_LABELS.iter().enumerate() {
+        let mut text = (*label).to_owned();
+        for row in table
+            .iter()
+            .skip(number * NAME_GRID_ROWS)
+            .take(NAME_GRID_ROWS)
+        {
+            text.push('\n');
+            text.extend(
+                row.iter()
+                    .map(|ch| if *ch == EMPTY_CELL { ' ' } else { *ch }),
+            );
+        }
+        let _ = writeln!(
+            out,
+            "#. Page {number} of the name entry: a label of up to 7 cells, then up to 5 rows of up to 13 characters"
+        );
+        let _ = writeln!(
+            out,
+            "msgctxt {}",
+            quote(&format!("{ALPHABET_PREFIX}{number}"))
+        );
+        let _ = writeln!(out, "msgid {}", quote(&text));
+        let _ = writeln!(out, "msgstr \"\"\n");
+    }
+    Ok(())
 }
 
 fn table_offsets(rom: &[u8], table: &str) -> Result<Vec<usize>, TranslationError> {
@@ -790,6 +892,19 @@ mod tests {
         );
         let problems = wide.unwrap().fit(&rom).unwrap();
         assert_eq!(problems.len(), 1);
+    }
+
+    #[test]
+    fn reads_the_name_entry_pages_and_help() {
+        let po = "msgctxt \"name-entry/alphabet/1\"\nmsgid \"\"\nmsgstr \"abc\\nabcdefghijklm\\nn o\"\n\nmsgctxt \"name-entry/alphabet/0\"\nmsgid \"\"\nmsgstr \"ABC\\nABC\"\n\nmsgctxt \"name-entry/help\"\nmsgid \"\"\nmsgstr \"START: done\"\n";
+        let translation = Translation::from_po(po).unwrap();
+        assert!(translation.is_empty());
+        assert_eq!(translation.name_entry_help(), Some("START: done"));
+        let pages = translation.alphabet();
+        assert_eq!(pages.len(), 2);
+        assert_eq!(pages[0].label, "ABC");
+        assert_eq!(pages[1].rows[1], ['n', EMPTY_CELL, 'o']);
+        assert_eq!(pages[1].rows[0].len(), 13);
     }
 
     #[test]

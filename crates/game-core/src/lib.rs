@@ -22,6 +22,6 @@ pub use rng::Rng;
 pub use script::{ScriptError, ScriptHost, ScriptRunner};
 pub use sprite::draw_sprite;
 pub use text::TextPainter;
-pub use translation::{Scope, Translation, TranslationError};
+pub use translation::{AlphabetPage, Scope, Translation, TranslationError};
 pub use window::{DIALOGUE_TEXT_AREA, FrameStyle, WindowPainter};
 pub use windows::{DEFAULT_PLAYER_NAME, ScriptWindows, Window};

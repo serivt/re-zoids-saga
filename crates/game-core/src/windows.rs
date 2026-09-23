@@ -159,6 +159,12 @@ impl<'rom> ScriptWindows<'rom> {
         self.translation = translation;
     }
 
+    /// The translation in use.
+    #[must_use]
+    pub fn translation(&self) -> &Translation {
+        &self.translation
+    }
+
     /// The open windows, by slot.
     #[must_use]
     pub fn windows(&self) -> &[Option<Window>] {

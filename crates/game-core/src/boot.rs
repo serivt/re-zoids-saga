@@ -21,7 +21,7 @@ use gba_runtime::ppu::{
 use platform::{Button, Frame, Input, Rgb};
 
 use crate::script::{ScriptError, ScriptRunner};
-use crate::translation::{NAME_ENTRY_TABLE, TITLE_TABLE};
+use crate::translation::{AlphabetPage, NAME_ENTRY_TABLE, TITLE_TABLE};
 use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
@@ -49,18 +49,27 @@ const GLOW_PALETTE: u16 = 12 << 12;
 const STRIP_PALETTE: u16 = 11 << 12;
 const HFLIP: u16 = 0x0400;
 const NAME_SLOTS: usize = 8;
+const NAME_GRID_ROWS_ROM: usize = 5;
+/// Rows of characters a name-entry page shows.
+pub(crate) const NAME_GRID_ROWS: usize = NAME_GRID_ROWS_ROM;
 const NAME_PAGES: usize = 5;
-const NAME_GRID_ROWS: usize = 5;
+const NAME_LABEL_WINDOW: (u8, u8, u8, u8) = (24, 4, 6, 4);
+const NAME_FIELD_WINDOW: (u8, u8, u8, u8) = (8, 4, 16, 4);
+const NAME_FIELD_MIN_WIDTH: u8 = 13;
+const SCREEN_TILE_COLUMNS: u8 = 30;
 const NAME_GRID_ORIGIN: (i32, i32) = (8, 73);
 const NAME_CELL: i32 = 16;
 const NAME_SLOT_ORIGIN: (i32, i32) = (96, 50);
 const NAME_ARROWS: [(i32, i32); 2] = [(72, 40), (168, 40)];
+const NAME_RIGHT_ARROW_FROM_EDGE: u8 = 3;
 const NAME_PICTURE_PALETTE_START: usize = 64;
 const NAME_PICTURE_COLUMNS: usize = 16;
 const FULL_WIDTH_SPACE: char = '\u{3000}';
-const NAME_PAGE_LABELS: [&str; NAME_PAGES] =
+/// Labels of the ROM's name-entry pages.
+pub(crate) const NAME_PAGE_LABELS: [&str; NAME_PAGES] =
     ["カタカナ", "ひらがな", "英数文字", "特殊文字", "記号文字"];
-const NAME_HELP: &str = "ＳＴＡＲＴ：終了　ＳＥＬＥＣＴ：文字変更";
+/// The ROM's name-entry help line.
+pub(crate) const NAME_HELP: &str = "ＳＴＡＲＴ：終了　ＳＥＬＥＣＴ：文字変更";
 const NAME_FIELD_PREFIX: &str = "\u{3000}\u{3000}\u{3000}";
 const CONFIRM_SCRIPT: usize = 1;
 const PLAYER_PORTRAIT: (u8, u8) = (0, 0);
@@ -496,7 +505,9 @@ pub struct NameEntry {
     graphics: NameEntryGraphics,
     picture_palette: FullPalette,
     picture: TileMap,
-    table: Vec<Vec<char>>,
+    pages: Vec<AlphabetPage>,
+    help: String,
+    arrows: [(i32, i32); 2],
     page: usize,
     cursor: (usize, usize),
     name: Vec<char>,
@@ -526,11 +537,27 @@ impl NameEntry {
                     u16::try_from(row * NAME_PICTURE_COLUMNS + column).unwrap_or(0);
             }
         }
+        let table = saga::kana_table(rom)?;
+        let pages = NAME_PAGE_LABELS
+            .iter()
+            .enumerate()
+            .map(|(number, label)| AlphabetPage {
+                label: (*label).to_owned(),
+                rows: table
+                    .iter()
+                    .skip(number * NAME_GRID_ROWS)
+                    .take(NAME_GRID_ROWS)
+                    .cloned()
+                    .collect(),
+            })
+            .collect();
         Ok(Self {
             graphics,
             picture_palette,
             picture,
-            table: saga::kana_table(rom)?,
+            pages,
+            help: NAME_HELP.to_owned(),
+            arrows: NAME_ARROWS,
             page: 0,
             cursor: (0, 0),
             name: name.chars().take(NAME_SLOTS).collect(),
@@ -546,17 +573,59 @@ impl NameEntry {
         self.name.iter().collect()
     }
 
-    /// Opens the screen's windows on `windows`.
-    pub fn open(&self, windows: &mut ScriptWindows<'_>) {
+    /// Opens the screen's windows on `windows`, taking the character pages
+    /// and help line of its translation when it has them; the label window
+    /// grows to the left for longer labels, leaving the name its field.
+    pub fn open(&mut self, windows: &mut ScriptWindows<'_>) {
+        let translation = windows.translation();
+        if !translation.alphabet().is_empty() {
+            self.pages = translation.alphabet().to_vec();
+            self.page = 0;
+        }
+        if let Some(help) = translation.name_entry_help() {
+            self.help = help.to_owned();
+        }
+        let label_cells = self
+            .pages
+            .iter()
+            .map(|page| page.label.chars().count())
+            .max()
+            .unwrap_or(0);
+        let label_width = u8::try_from(label_cells + 2)
+            .unwrap_or(u8::MAX)
+            .max(NAME_LABEL_WINDOW.2)
+            .min(SCREEN_TILE_COLUMNS - NAME_FIELD_WINDOW.0 - NAME_FIELD_MIN_WIDTH);
+        let label_x = SCREEN_TILE_COLUMNS - label_width;
+        self.arrows[1].0 = i32::from(label_x - NAME_RIGHT_ARROW_FROM_EDGE) * TILE_PIXELS_I32;
         windows.close_window(None);
         windows.open_window(0, 0x10, (0, 0, 8, 8), 2);
         windows.portrait(0, PLAYER_PORTRAIT.0, PLAYER_PORTRAIT.1);
         windows.open_window(1, 0x40, (8, 0, 22, 4), 0);
-        for ch in NAME_HELP.chars() {
+        for ch in self.help.chars() {
             windows.put_char(1, ch);
         }
-        windows.open_window(4, 0x20, (24, 4, 6, 4), 0);
-        windows.open_window(5, 0x20, (8, 4, 16, 4), 0);
+        windows.open_window(
+            4,
+            0x20,
+            (
+                label_x,
+                NAME_LABEL_WINDOW.1,
+                label_width,
+                NAME_LABEL_WINDOW.3,
+            ),
+            0,
+        );
+        windows.open_window(
+            5,
+            0x20,
+            (
+                NAME_FIELD_WINDOW.0,
+                NAME_FIELD_WINDOW.1,
+                label_x - NAME_FIELD_WINDOW.0,
+                NAME_FIELD_WINDOW.3,
+            ),
+            0,
+        );
         windows.open_window(6, 0x21, (0, 8, 30, 12), 0);
         self.refresh(windows);
         windows.present(None);
@@ -564,7 +633,7 @@ impl NameEntry {
 
     fn refresh(&self, windows: &mut ScriptWindows<'_>) {
         windows.clear_window(4);
-        for ch in NAME_PAGE_LABELS[self.page].chars() {
+        for ch in self.pages[self.page].label.chars() {
             windows.put_char(4, ch);
         }
         windows.clear_window(6);
@@ -591,8 +660,7 @@ impl NameEntry {
     }
 
     fn page_rows(&self) -> &[Vec<char>] {
-        let start = self.page * NAME_GRID_ROWS;
-        self.table.get(start..start + NAME_GRID_ROWS).unwrap_or(&[])
+        self.pages.get(self.page).map_or(&[], |page| &page.rows)
     }
 
     /// Advances one frame; returns `true` when the name was confirmed.
@@ -650,7 +718,7 @@ impl NameEntry {
                 self.refresh_name(windows);
             }
         } else if pressed(Button::Select) {
-            self.page = (self.page + 1) % NAME_PAGES;
+            self.page = (self.page + 1) % self.pages.len().max(1);
             self.cursor = (0, 0);
             self.refresh(windows);
         } else if pressed(Button::Start) && !self.name.is_empty() {
@@ -679,7 +747,7 @@ impl NameEntry {
         );
         windows.draw(frame, skin, painter);
         if self.state == NameState::Editing {
-            for (i, (x, y)) in NAME_ARROWS.iter().enumerate() {
+            for (i, (x, y)) in self.arrows.iter().enumerate() {
                 draw_block(frame, &self.graphics.arrows, (1 - i) * 4, 2, 2, *x, *y);
             }
         }

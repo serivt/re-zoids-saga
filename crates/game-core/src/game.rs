@@ -299,7 +299,7 @@ impl<'rom> Game<'rom> {
                     self.sound.play(saga::SOUND_TITLE_START)?;
                 }
                 if title.update(self.rom, input, &mut self.windows)? == Some(TitleChoice::NewGame) {
-                    let entry = NameEntry::new(self.rom, &self.player_name, input)?;
+                    let mut entry = NameEntry::new(self.rom, &self.player_name, input)?;
                     entry.open(&mut self.windows);
                     self.screen = Screen::NameEntry(entry);
                     self.sound.play(saga::MUSIC_NAME_ENTRY)?;
