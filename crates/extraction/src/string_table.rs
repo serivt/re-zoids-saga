@@ -93,6 +93,43 @@ impl StringTable {
             .collect()
     }
 
+    /// Reads only where each string starts (0 for a null pointer), without
+    /// decoding, so tables holding undecodable strings can still be run.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StringTableError`] when the table or a pointer falls
+    /// outside the ROM.
+    pub fn offsets(&self, rom: &[u8]) -> Result<Vec<usize>, StringTableError> {
+        let end = self
+            .offset
+            .checked_add(self.count.saturating_mul(POINTER_LEN))
+            .filter(|end| *end <= rom.len())
+            .ok_or(StringTableError::TableOutOfBounds {
+                name: self.name,
+                offset: self.offset,
+                count: self.count,
+            })?;
+        rom[self.offset..end]
+            .chunks_exact(POINTER_LEN)
+            .enumerate()
+            .map(|(index, bytes)| {
+                let pointer = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+                if pointer == 0 {
+                    return Ok(0);
+                }
+                pointer
+                    .checked_sub(ROM_BASE)
+                    .map(|offset| offset as usize)
+                    .filter(|offset| *offset < rom.len())
+                    .ok_or_else(|| StringTableError::PointerOutOfBounds {
+                        id: format!("{}_{index:05}", self.name),
+                        pointer,
+                    })
+            })
+            .collect()
+    }
+
     fn read_entry(
         &self,
         rom: &[u8],
@@ -191,6 +228,15 @@ mod tests {
                 pointer: 0x0900_0000
             })
         );
+    }
+
+    #[test]
+    fn lists_offsets_without_decoding() {
+        let (mut rom, table) = rom_with_table(&[&[0x22], &[0x20, 0x5D]]);
+        let offsets = table.offsets(&rom).unwrap();
+        assert_eq!(offsets, [0x108, 0x109]);
+        rom[0x104..0x108].copy_from_slice(&[0; 4]);
+        assert_eq!(table.offsets(&rom).unwrap(), [0x108, 0]);
     }
 
     #[test]

@@ -9,6 +9,7 @@ rust-version.workspace = true
 formats.workspace = true
 sha1 = "0.11.0"
 thiserror = "2.0.20"
+encoding_rs = "0.8"
 
 [lints]
 workspace = true

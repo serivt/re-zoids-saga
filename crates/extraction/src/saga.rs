@@ -483,6 +483,297 @@ pub fn warp(rom: &[u8], map: usize, exit: usize) -> Result<Warp, MapError> {
     })
 }
 
+const LOGO_PALETTE_OFFSET: usize = 0x0005_EFC0;
+const LOGO_TILES_OFFSET: usize = 0x0005_EFE0;
+const LOGO_MAP_OFFSET: usize = 0x0006_12A0;
+const LOGO_MAP_COLUMNS: usize = 30;
+const LOGO_MAP_ROWS: usize = 20;
+const TILE_8BPP_LEN: usize = 64;
+const TITLE_TILES_OFFSET: usize = 0x0006_1750;
+const TITLE_PICTURE_OFFSET: usize = 0x0006_3414;
+const TITLE_TEXT_TILES_OFFSET: usize = 0x0006_310C;
+const TITLE_PALETTES_OFFSET: usize = 0x0006_78C0;
+const TITLE_PALETTE_COUNT: usize = 11;
+const TITLE_EXTRA_PALETTES: [usize; 4] = [0x0006_3394, 0x0006_33B4, 0x0006_33D4, 0x0006_33F4];
+const NAME_ENTRY_PICTURE_OFFSET: usize = 0x0041_42B8;
+const NAME_ENTRY_PICTURE_PALETTE_OFFSET: usize = 0x0042_5D58;
+const NAME_ENTRY_SPRITES: [(usize, usize); 3] = [
+    (0x004B_6788, 0x004B_6834),
+    (0x004B_6A54, 0x004B_6A68),
+    (0x004B_6940, 0x004B_69C0),
+];
+const KANA_TABLE_OFFSET: usize = 0x006D_4884;
+const KANA_TABLE_ROWS: usize = 30;
+/// Characters per kana table row.
+pub const KANA_COLUMNS: usize = 13;
+/// ROM offset of the title menu script (window, three choices, menu).
+pub const TITLE_MENU_SCRIPT_OFFSET: usize = 0x006C_04FE;
+/// The name entry's scripts: 0 refreshes the name field, 1 asks for
+/// confirmation, 2 and 3 draw the special and symbol character pages.
+pub const NAME_ENTRY_SCRIPTS: StringTable = StringTable {
+    name: "name-entry",
+    offset: 0x006D_08F8,
+    count: 5,
+};
+
+/// The publisher logo shown at power-on: a 256-color tiled picture.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Logo {
+    /// 8bpp tiles, one palette index per pixel.
+    pub tiles: Tileset,
+    /// The 16 colors the tiles use, indices 0–15 of the 256-color palette.
+    pub palette: [u16; 16],
+    /// The 30×20 tilemap.
+    pub map: TileMap,
+}
+
+/// Graphics of the title screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TitleGraphics {
+    /// 4bpp tiles the game loads at VRAM tile 0x102: glow, subtitle and,
+    /// from tile 175 on, the logo sprites.
+    pub tiles: Tileset,
+    /// 8bpp tiles of the background picture, 30 per row from VRAM tile 0x115.
+    pub picture: Tileset,
+    /// 4bpp tiles of the copyright sprites, at OBJ tile 112.
+    pub text_tiles: Tileset,
+    /// Background palettes 0–14.
+    pub palettes: Vec<[u16; 16]>,
+    /// Sprite palettes 0 and 1.
+    pub sprite_palettes: [[u16; 16]; 2],
+}
+
+/// Graphics of the name entry screen besides the windows and the font.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameEntryGraphics {
+    /// 8bpp tiles of the 128×128 picture behind the portrait, 16 per row.
+    pub picture: Tileset,
+    /// Its 64 colors, palette indices 64–127.
+    pub picture_palette: Vec<u16>,
+    /// The name field arrows: two 16×16 sprites, tiles 0–3 the right one
+    /// (`R►`) and 4–7 the left one (`◄L`).
+    pub arrows: SpriteBlock,
+    /// The 8×8 mark under each name slot.
+    pub slot_mark: SpriteBlock,
+    /// The 8×16 grid cursor.
+    pub cursor: SpriteBlock,
+}
+
+/// A block of 4bpp sprite tiles with its palette.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpriteBlock {
+    /// The tiles.
+    pub tiles: Tileset,
+    /// The 16-color palette.
+    pub palette: [u16; 16],
+}
+
+/// Why boot screen data could not be read.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum BootError {
+    /// The ROM is too short for a block.
+    #[error("ROM of {len} bytes is too short for the {what}")]
+    TooShort {
+        /// ROM length.
+        len: usize,
+        /// Which block.
+        what: &'static str,
+    },
+    /// A compressed block is not valid LZ77.
+    #[error(transparent)]
+    Lz77(#[from] Lz77Error),
+}
+
+/// Reads the publisher logo.
+///
+/// # Errors
+///
+/// Returns [`BootError`] when the ROM is too short.
+pub fn logo(rom: &[u8]) -> Result<Logo, BootError> {
+    let map_len = LOGO_MAP_COLUMNS * LOGO_MAP_ROWS * 2;
+    let map_bytes = slice(rom, LOGO_MAP_OFFSET, map_len, "logo map")?;
+    let map = TileMap::from_le_bytes(LOGO_MAP_COLUMNS, LOGO_MAP_ROWS, map_bytes).ok_or(
+        BootError::TooShort {
+            len: rom.len(),
+            what: "logo map",
+        },
+    )?;
+    let tile_count = map
+        .entries
+        .iter()
+        .map(|entry| usize::from(entry & 0x3FF))
+        .max()
+        .unwrap_or(0)
+        + 1;
+    let tiles = tiles_8bpp(rom, LOGO_TILES_OFFSET, tile_count, "logo tiles")?;
+    let palette = palette_at(rom, LOGO_PALETTE_OFFSET, "logo palette")?;
+    Ok(Logo {
+        tiles,
+        palette,
+        map,
+    })
+}
+
+/// Reads the title screen graphics.
+///
+/// # Errors
+///
+/// Returns [`BootError`] when the ROM is too short or a block does not
+/// decompress.
+pub fn title(rom: &[u8]) -> Result<TitleGraphics, BootError> {
+    let tiles = Tileset::from_4bpp(&lz77_block(rom, TITLE_TILES_OFFSET, "title tiles")?);
+    let picture_bytes = lz77_block(rom, TITLE_PICTURE_OFFSET, "title picture")?;
+    let picture = Tileset::from_pixels(
+        picture_bytes
+            .chunks_exact(TILE_8BPP_LEN)
+            .map(|tile| tile.try_into().unwrap_or([0; TILE_8BPP_LEN]))
+            .collect(),
+    );
+    let text_tiles = Tileset::from_4bpp(&lz77_block(rom, TITLE_TEXT_TILES_OFFSET, "title text")?);
+    let mut palettes = (0..TITLE_PALETTE_COUNT)
+        .map(|index| {
+            palette_at(
+                rom,
+                TITLE_PALETTES_OFFSET + index * PALETTE_LEN,
+                "title palettes",
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    for offset in TITLE_EXTRA_PALETTES {
+        palettes.push(palette_at(rom, offset, "title palettes")?);
+    }
+    let sprite_palettes = [
+        palette_at(rom, TITLE_EXTRA_PALETTES[2], "title palettes")?,
+        palette_at(rom, TITLE_EXTRA_PALETTES[3], "title palettes")?,
+    ];
+    Ok(TitleGraphics {
+        tiles,
+        picture,
+        text_tiles,
+        palettes,
+        sprite_palettes,
+    })
+}
+
+/// Reads the name entry screen graphics.
+///
+/// # Errors
+///
+/// Returns [`BootError`] when the ROM is too short or a block does not
+/// decompress.
+pub fn name_entry_graphics(rom: &[u8]) -> Result<NameEntryGraphics, BootError> {
+    let picture_bytes = lz77_block(rom, NAME_ENTRY_PICTURE_OFFSET, "name entry picture")?;
+    let picture = Tileset::from_pixels(
+        picture_bytes
+            .chunks_exact(TILE_8BPP_LEN)
+            .map(|tile| tile.try_into().unwrap_or([0; TILE_8BPP_LEN]))
+            .collect(),
+    );
+    let picture_palette = lz77_block(rom, NAME_ENTRY_PICTURE_PALETTE_OFFSET, "name entry palette")?
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    let mut blocks = NAME_ENTRY_SPRITES.iter().map(|(tiles, palette)| {
+        let colors = lz77_block(rom, *palette, "name entry sprites")?;
+        Ok::<SpriteBlock, BootError>(SpriteBlock {
+            tiles: Tileset::from_4bpp(&lz77_block(rom, *tiles, "name entry sprites")?),
+            palette: parse_palette(&colors).ok_or(BootError::TooShort {
+                len: rom.len(),
+                what: "name entry sprites",
+            })?,
+        })
+    });
+    let arrows = blocks.next().transpose()?.unwrap_or_else(empty_block);
+    let slot_mark = blocks.next().transpose()?.unwrap_or_else(empty_block);
+    let cursor = blocks.next().transpose()?.unwrap_or_else(empty_block);
+    Ok(NameEntryGraphics {
+        picture,
+        picture_palette,
+        arrows,
+        slot_mark,
+        cursor,
+    })
+}
+
+fn empty_block() -> SpriteBlock {
+    SpriteBlock {
+        tiles: Tileset::from_4bpp(&[]),
+        palette: [0; 16],
+    }
+}
+
+/// Reads the character table of the name entry: 30 rows of 13 characters
+/// (katakana, hiragana, alphanumerics, special, symbols, and the kanji
+/// search's hiragana), full-width spaces where a cell is empty.
+///
+/// # Errors
+///
+/// Returns [`BootError`] when the ROM is too short.
+pub fn kana_table(rom: &[u8]) -> Result<Vec<Vec<char>>, BootError> {
+    let bytes = slice(
+        rom,
+        KANA_TABLE_OFFSET,
+        KANA_TABLE_ROWS * KANA_COLUMNS * 2,
+        "kana table",
+    )?;
+    Ok(bytes
+        .chunks_exact(KANA_COLUMNS * 2)
+        .map(|row| {
+            row.chunks_exact(2)
+                .map(|pair| {
+                    let stored = [pair[1], pair[0]];
+                    let (decoded, _) = encoding_rs::SHIFT_JIS.decode_without_bom_handling(&stored);
+                    decoded.chars().next().unwrap_or('\u{3000}')
+                })
+                .collect()
+        })
+        .collect())
+}
+
+fn slice<'a>(
+    rom: &'a [u8],
+    offset: usize,
+    len: usize,
+    what: &'static str,
+) -> Result<&'a [u8], BootError> {
+    rom.get(offset..offset + len).ok_or(BootError::TooShort {
+        len: rom.len(),
+        what,
+    })
+}
+
+fn lz77_block(rom: &[u8], offset: usize, what: &'static str) -> Result<Vec<u8>, BootError> {
+    let compressed = rom.get(offset..).ok_or(BootError::TooShort {
+        len: rom.len(),
+        what,
+    })?;
+    Ok(formats::lz77::decompress(compressed)?.0)
+}
+
+fn palette_at(rom: &[u8], offset: usize, what: &'static str) -> Result<[u16; 16], BootError> {
+    slice(rom, offset, PALETTE_LEN, what).and_then(|bytes| {
+        parse_palette(bytes).ok_or(BootError::TooShort {
+            len: rom.len(),
+            what,
+        })
+    })
+}
+
+fn tiles_8bpp(
+    rom: &[u8],
+    offset: usize,
+    count: usize,
+    what: &'static str,
+) -> Result<Tileset, BootError> {
+    let bytes = slice(rom, offset, count * TILE_8BPP_LEN, what)?;
+    Ok(Tileset::from_pixels(
+        bytes
+            .chunks_exact(TILE_8BPP_LEN)
+            .map(|tile| tile.try_into().unwrap_or([0; TILE_8BPP_LEN]))
+            .collect(),
+    ))
+}
+
 const SPRITE_TABLE_OFFSET: usize = 0x0031_8DFC;
 const SPRITE_RECORD_LEN: usize = 32;
 const SPRITE_COUNT: usize = 291;
@@ -494,6 +785,10 @@ const SPRITE_ANIMATIONS_MAX: usize = 32;
 const SPRITE_ANIMATION_STEPS_MAX: usize = 128;
 /// Sprite id of the player's map sprite (`ch00`).
 pub const PLAYER_SPRITE: usize = 0x98;
+/// Map record of the first room after the opening.
+pub const FIRST_ROOM_MAP: usize = 4;
+/// Metatile the player stands on when control begins.
+pub const PLAYER_START: (usize, usize) = (5, 2);
 /// Animation ids of a walking sprite: idle animations are the facing
 /// direction in sprite sheet order, walking ones follow them.
 pub const WALK_ANIMATION_BASE: usize = 4;
@@ -1106,6 +1401,88 @@ mod tests {
         );
         assert!(matches!(warp(&rom, 4, 2), Err(MapError::TooShort { .. })));
         assert!(matches!(warp(&rom, 3, 0), Err(MapError::TooShort { .. })));
+    }
+
+    /// Wraps `data` as an LZ77 block of literal runs.
+    fn stored_lz77(data: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x10];
+        out.extend(&u32::try_from(data.len()).unwrap().to_le_bytes()[..3]);
+        for chunk in data.chunks(8) {
+            out.push(0);
+            out.extend(chunk);
+        }
+        out
+    }
+
+    #[test]
+    fn reads_the_logo_the_kana_table_and_the_name_entry_scripts() {
+        let mut rom = vec![0; KANA_TABLE_OFFSET + KANA_TABLE_ROWS * KANA_COLUMNS * 2];
+        put(&mut rom, LOGO_MAP_OFFSET, &2u16.to_le_bytes());
+        put(&mut rom, LOGO_MAP_OFFSET + 2, &1u16.to_le_bytes());
+        rom[LOGO_TILES_OFFSET + 2 * TILE_8BPP_LEN] = 7;
+        put(&mut rom, LOGO_PALETTE_OFFSET + 14, &0x7FFFu16.to_le_bytes());
+        let read = logo(&rom).unwrap();
+        assert_eq!((read.map.width, read.map.height), (30, 20));
+        assert_eq!(read.tiles.len(), 3);
+        assert_eq!(read.tiles.tile(2).map(|tile| tile[0]), Some(7));
+        assert_eq!(read.palette[7], 0x7FFF);
+        put(&mut rom, KANA_TABLE_OFFSET, &[0x41, 0x83, 0x40, 0x81]);
+        let table = kana_table(&rom).unwrap();
+        assert_eq!(table.len(), KANA_TABLE_ROWS);
+        assert_eq!(&table[0][..2], &['ア', '\u{3000}']);
+        assert_eq!(NAME_ENTRY_SCRIPTS.count, 5);
+        assert!(matches!(
+            logo(&rom[..LOGO_MAP_OFFSET]),
+            Err(BootError::TooShort {
+                what: "logo map",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn reads_the_title_and_name_entry_graphics() {
+        let mut rom = vec![0; NAME_ENTRY_SPRITES[1].0 + 0x1000];
+        let mut tile = vec![0u8; 32];
+        tile[0] = 0x21;
+        put(&mut rom, TITLE_TILES_OFFSET, &stored_lz77(&tile));
+        let mut picture = vec![0u8; TILE_8BPP_LEN * 2];
+        picture[TILE_8BPP_LEN] = 9;
+        put(&mut rom, TITLE_PICTURE_OFFSET, &stored_lz77(&picture));
+        put(&mut rom, TITLE_TEXT_TILES_OFFSET, &stored_lz77(&tile));
+        put(
+            &mut rom,
+            TITLE_EXTRA_PALETTES[3] + 2,
+            &0x001Fu16.to_le_bytes(),
+        );
+        let read = title(&rom).unwrap();
+        assert_eq!(read.tiles.len(), 1);
+        assert_eq!(
+            read.tiles.tile(0).map(|tile| [tile[0], tile[1]]),
+            Some([1, 2])
+        );
+        assert_eq!(read.picture.tile(1).map(|tile| tile[0]), Some(9));
+        assert_eq!(read.palettes.len(), 15);
+        assert_eq!(read.palettes[14][1], 0x001F);
+        assert_eq!(read.sprite_palettes[1][1], 0x001F);
+        put(&mut rom, NAME_ENTRY_PICTURE_OFFSET, &stored_lz77(&picture));
+        put(
+            &mut rom,
+            NAME_ENTRY_PICTURE_PALETTE_OFFSET,
+            &stored_lz77(&[0x1F, 0x00, 0xE0, 0x03]),
+        );
+        for (tiles, palette) in NAME_ENTRY_SPRITES {
+            put(&mut rom, tiles, &stored_lz77(&tile));
+            let mut colors = [0u8; PALETTE_LEN];
+            colors[..2].copy_from_slice(&[0x1F, 0x7C]);
+            put(&mut rom, palette, &stored_lz77(&colors));
+        }
+        let graphics = name_entry_graphics(&rom).unwrap();
+        assert_eq!(graphics.picture.len(), 2);
+        assert_eq!(graphics.picture_palette, [0x001F, 0x03E0]);
+        assert_eq!(graphics.cursor.tiles.len(), 1);
+        assert_eq!(graphics.cursor.palette[0], 0x7C1F);
+        assert!(title(&rom[..TITLE_TILES_OFFSET]).is_err());
     }
 
     #[test]
