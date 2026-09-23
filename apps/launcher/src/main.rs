@@ -7,8 +7,9 @@ use extraction::{Identification, Title};
 use game_core::{
     DEFAULT_PLAYER_NAME, Field, Game, ScriptRunner, ScriptWindows, TextPainter, WindowPainter,
 };
+use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
-use platform::{Display, Event, Frame, Rgb};
+use platform::{AudioOut, Display, Event, Frame, Rgb};
 use platform_sdl3::Sdl3Display;
 
 const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, Esc quits); --room skips to the first room";
@@ -16,6 +17,7 @@ const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_MAP: usize = extraction::saga::FIRST_ROOM_MAP;
 const PLAYER_START: (usize, usize) = extraction::saga::PLAYER_START;
 const FRAME_DURATION: std::time::Duration = std::time::Duration::from_micros(16_743);
+const AUDIO_QUEUE_FRAMES: usize = 6;
 const RENDER_FRAME_LIMIT: usize = 600;
 
 fn main() -> Result<()> {
@@ -143,6 +145,13 @@ fn show(title: &str, frame: &Frame) -> Result<()> {
 
 fn play(title: &str, game: &mut Game<'_>) -> Result<()> {
     let mut display = Sdl3Display::open(title, SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_SCALE)?;
+    let mut audio = match display.open_audio(SAMPLE_RATE) {
+        Ok(audio) => Some(audio),
+        Err(error) => {
+            eprintln!("no audio: {error}");
+            None
+        }
+    };
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
     loop {
         let started = std::time::Instant::now();
@@ -150,6 +159,11 @@ fn play(title: &str, game: &mut Game<'_>) -> Result<()> {
             return Ok(());
         }
         game.update(display.input())?;
+        if let Some(audio) = &mut audio
+            && audio.queued_pairs() < SAMPLES_PER_FRAME * AUDIO_QUEUE_FRAMES
+        {
+            audio.queue(game.audio())?;
+        }
         game.draw(&mut frame);
         display.present(&frame)?;
         std::thread::sleep(FRAME_DURATION.saturating_sub(started.elapsed()));

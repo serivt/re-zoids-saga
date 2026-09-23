@@ -9,6 +9,8 @@
 //! the player stands up onto (5, 2) and control begins.
 
 use extraction::saga::{self, BootError, FIRST_ROOM_MAP, PLAYER_START, SpriteSheetError};
+use formats::m4a::M4aError;
+use gba_runtime::apu::SoundEngine;
 use gba_runtime::ppu::{FADE_STEPS, SCREEN_HEIGHT, SCREEN_WIDTH, darken};
 use platform::{Button, Frame, Input, Rgb};
 use thiserror::Error;
@@ -78,6 +80,9 @@ pub enum GameError {
     /// A sprite could not be read.
     #[error(transparent)]
     Sprite(#[from] SpriteSheetError),
+    /// A song could not be read.
+    #[error(transparent)]
+    Sound(#[from] M4aError),
     /// The font or window skin could not be read.
     #[error("cannot read the text assets: {0}")]
     Text(String),
@@ -107,6 +112,7 @@ pub struct Game<'rom> {
     painter: TextPainter<'rom>,
     skin: WindowPainter,
     windows: ScriptWindows<'rom>,
+    sound: SoundEngine<'rom>,
     dialogue: ScriptRunner,
     field: Option<Field>,
     screen: Screen,
@@ -137,6 +143,7 @@ impl<'rom> Game<'rom> {
         let mut game = Self::bare(rom)?;
         game.field = Some(Field::load(rom, FIRST_ROOM_MAP, PLAYER_START)?);
         game.screen = Screen::Field;
+        game.sound.play(saga::MUSIC_FIRST_ROOM)?;
         Ok(game)
     }
 
@@ -153,6 +160,7 @@ impl<'rom> Game<'rom> {
             painter: TextPainter::new(rom, glyphs, Some(fallback)),
             skin: WindowPainter::new(skin.tiles, &skin.palette),
             windows: ScriptWindows::new(rom, DEFAULT_PLAYER_NAME),
+            sound: SoundEngine::new(rom, saga::SONG_TABLE, saga::SONG_COUNT, saga::MASTER_VOLUME),
             dialogue: ScriptRunner::new(dialogue.iter().map(|string| string.offset).collect()),
             field: None,
             screen: Screen::Loading(0),
@@ -201,13 +209,18 @@ impl<'rom> Game<'rom> {
             Screen::Logo(logo) => {
                 if logo.update() {
                     self.screen = Screen::Title(TitleScreen::new(self.rom)?);
+                    self.sound.play(saga::MUSIC_TITLE)?;
                 }
             }
             Screen::Title(title) => {
+                if start && !self.windows.any_open() {
+                    self.sound.play(saga::SOUND_TITLE_START)?;
+                }
                 if title.update(self.rom, input, &mut self.windows)? == Some(TitleChoice::NewGame) {
                     let entry = NameEntry::new(self.rom, &self.player_name, input)?;
                     entry.open(&mut self.windows);
                     self.screen = Screen::NameEntry(entry);
+                    self.sound.play(saga::MUSIC_NAME_ENTRY)?;
                 }
             }
             Screen::NameEntry(entry) => {
@@ -216,6 +229,7 @@ impl<'rom> Game<'rom> {
                     self.windows.set_player_name(&self.player_name);
                     self.windows.close_window(None);
                     self.screen = Screen::Loading(0);
+                    self.sound.stop_music();
                 }
             }
             Screen::Loading(frames) => {
@@ -241,7 +255,18 @@ impl<'rom> Game<'rom> {
                 }
             }
         }
+        for sound in self.windows.take_sounds() {
+            self.sound.play(usize::from(sound))?;
+        }
+        self.sound.frame()?;
         Ok(())
+    }
+
+    /// The samples of the frame the last update produced, stereo
+    /// interleaved at [`gba_runtime::apu::SAMPLE_RATE`].
+    #[must_use]
+    pub fn audio(&self) -> &[i16] {
+        self.sound.output()
     }
 
     fn start_intro(&mut self) -> Result<(), GameError> {
@@ -256,6 +281,7 @@ impl<'rom> Game<'rom> {
             dialogue_started: false,
             stood_up: false,
         });
+        self.sound.play(saga::MUSIC_OPENING)?;
         Ok(())
     }
 
@@ -277,6 +303,7 @@ impl<'rom> Game<'rom> {
                 if !field.player.walking {
                     field.npcs.retain(|npc| npc.sheet.tag != "ch01");
                     self.screen = Screen::Field;
+                    self.sound.play(saga::MUSIC_FIRST_ROOM)?;
                 }
             }
             field.update(Input::default());
@@ -322,6 +349,10 @@ impl<'rom> Game<'rom> {
             match field.update(input) {
                 Some(FieldEvent::Exit(exit)) => {
                     field.warp(self.rom, exit)?;
+                    self.sound.play(saga::SOUND_DOOR)?;
+                    if let Some(music) = saga::map_music(self.rom, field.map()) {
+                        self.sound.play_if_changed(music)?;
+                    }
                 }
                 Some(FieldEvent::Talk { dialogue: id, .. }) => {
                     self.pending_talk = Some((id, TALK_START_DELAY));
