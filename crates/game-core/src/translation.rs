@@ -287,7 +287,12 @@ impl Translation {
                 continue;
             }
             let grown = grown_window(&window, pixels, rows_needed);
-            if let Some(other) = placement.others.iter().find(|other| grown.overlaps(other)) {
+            if let Some(other) = placement
+                .others
+                .iter()
+                .filter(|other| !window.overlaps(other))
+                .find(|other| grown.overlaps(other))
+            {
                 problems.push(format!(
                     "{context}: needs {pixels} pixels, but a larger window would cover the one at ({}, {})",
                     other.x, other.y
@@ -478,12 +483,13 @@ impl<'a> Walker<'a> {
         let Some(start) = self.offsets.get(index).copied().filter(|start| *start != 0) else {
             return;
         };
-        let end = self
+        let next_string = self
             .offsets
             .iter()
             .copied()
             .filter(|offset| *offset > start)
-            .min()
+            .min();
+        let end = next_string
             .unwrap_or(start + STRING_LIMIT)
             .min(self.rom.len());
         let mut at = start;
@@ -493,6 +499,7 @@ impl<'a> Walker<'a> {
             };
             at = next;
             match instruction {
+                Instruction::End if next_string.is_none() => break,
                 Instruction::OpenWindow {
                     id,
                     kind,
@@ -1028,6 +1035,19 @@ mod tests {
         assert_eq!(pages[0].label, "ABC");
         assert_eq!(pages[1].rows[1], ['n', EMPTY_CELL, 'o']);
         assert_eq!(pages[1].rows[0].len(), 13);
+    }
+
+    #[test]
+    fn the_last_string_of_a_table_ends_at_its_end_instruction() {
+        let mut rom = vec![
+            0x22, 0x01, 0, 0x10, 0, 0, 8, 8, 0, 0x20, 0xA0, 0x82, 0x1D, 0x22,
+        ];
+        rom.extend([0x01, 5, 0x10, 0, 0, 4, 4, 0, 0x20, 0xA2, 0x82, 0x1D]);
+        let offsets = [1];
+        let mut walker = Walker::new(&rom, "pause-menu", &offsets);
+        walker.walk(0, 0);
+        assert_eq!(walker.placements.len(), 1);
+        assert_eq!(walker.placements["pause-menu/0/0x8"].id, 0);
     }
 
     #[test]

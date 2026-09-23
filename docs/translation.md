@@ -92,9 +92,19 @@ When a translation is loaded the game walks each translated string (and the
 strings it calls) to find the window every message lands in, and enlarges the windows
 whose translated lines do not fit: a window grows to the widest line plus its margins
 (and, for a menu, to the number of choices), keeping its center where it was and
-staying on screen. The launcher prints one line per message that cannot fit even a
-screen-wide window; those still wrap mid-word. The story box beside a portrait is
-already the full screen width, so its lines must stay within 176 pixels.
+staying on screen. A window is not enlarged when the larger one would cover another
+window open at the same time that the original did not already cover. The launcher
+prints one line per message that cannot fit even a screen-wide window or would cover
+another; those still wrap mid-word. The story box beside a portrait is already the
+full screen width, so its lines must stay within 176 pixels.
+
+Messages the game's own code prints into fixed columns are not fitted: the status
+screens place signs and values by cell, so their labels must stay within the pixels
+the Japanese label takes (a stat label ends at cell 11; the level window leaves six
+cells for the experience value). Item, weapon and Zi-data descriptions are printed by
+code into windows the walker cannot see: keep weapon descriptions to one line of
+176 pixels, the two-line Zi-data texts to 216 pixels per line and the narrow
+variants to five lines of 104 pixels.
 
 ## Not modeled yet
 
