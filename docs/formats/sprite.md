@@ -1,36 +1,58 @@
-# Sprite sheets
+# Sprites
 
 Source of knowledge: own analysis of Zoids Saga (Japan, Rev 1) in a reference emulator
-(OAM dumps and the `CpuSet` call log of the first room) and of the table that references
-the copied frames. Implemented in `crates/extraction/src/saga.rs` (`sprite_sheet`,
-`sprite_sheet_by_tag`).
+(OAM and OBJ VRAM dumps of the first room while idle and walking, matched against the ROM
+image by image) and a read of the entity spawn code, which indexes the table below.
+Implemented in `crates/extraction/src/saga.rs` (`sprite_sheet`, `sprite_sheet_by_tag`).
 
 ## Record table
 
-248 records of 32 bytes at ROM `0x318E04`:
+290 records of 32 bytes; record `id` (1-based, as map objects name sprites) is at ROM
+`0x318DFC + id × 32`, so the first record starts at `0x318E1C` and a record of `0xFFFF`
+ends the table:
 
 | Offset | Field |
 |---|---|
-| 0 | Pointer to an animation table (not modeled yet) |
-| 4 | Pointer to a frame table (not modeled yet) |
-| 8 | Four ASCII characters: `mz`+number for map Zoids (152), `ch`+number for characters (87), `ma`+number (9) |
-| 12 | Frame count |
-| 16 | Two 16-bit values, `0x0010` high and `9` (Zoids) or `8` (characters) low; meaning not modeled |
-| 20 | Tiles per frame (16 in all but three records) |
-| 24 | Pointer to the palette: 32 raw bytes, 16 BGR555 colors |
-| 28 | Pointer to the frames: uncompressed 4bpp tiles, `frames × tiles per frame × 32` bytes |
+| 0 | Pointer to the palette: 32 raw bytes, 16 BGR555 colors |
+| 4 | Pointer to the images: uncompressed 4bpp tiles, `images × tiles per image × 32` bytes |
+| 8 | Pointer to the animation table: pointers to animations, ended by a null word |
+| 12 | Pointer to the frame table: pointers to frame records |
+| 16 | Four ASCII characters: `ch`+number for characters, `mz`+number for map Zoids, `ma`+number for furniture-like sprites |
+| 20 | Image count |
+| 22 | Unknown half-word (0) |
+| 24 | Two half-words, `9` (Zoids) or `8` (characters) and `16`; meaning not modeled |
+| 28 | Tiles per image (16 = 32×32 pixels) |
 
-Tags are not unique: `mz25` names records 150 and 151. The player's map sprite is
-record 151 (`mz25`, 49 frames of 32×32 at `0x08202C5C`, palette at `0x08202C3C`);
-`ch00` (record 152) is another character. Frames are single sprites in one-dimensional
-mapping: 16 tiles in four rows of four. Idle images `direction × 3 + {0, 1, 0, 2}`
-repeat the same picture; walking images `12 + direction × 3 + {1, 2}` are the two
-stepping poses.
+The player's map sprite is id `0x98`, `ch00`: 32 images at `0x8202C5C`, palette at
+`0x8202C3C`. The chair beside the player in the first room is id `0xF6`, `ma07`, a furniture sprite;
+the two characters there are `0xD0` `ch56` and `0xD1` `ch57`.
+
+## Animations and frames
+
+An animation is a list of 4-byte steps, frame record index then ticks, ended by a step
+whose frame is `0xFFFF` or higher. Walking sprites have eight animations, idle up, down,
+left, right then walking in the same order, of four 8-tick steps; the game halves the
+ticks of map sprites, so each step lasts four frames. `ch00` idle down is frames 3, 4, 3,
+5 and walking right frames 21, 22, 21, 23. `ma07` has one animation of one frame.
+
+A frame record is 24 bytes:
+
+| Offset | Field |
+|---|---|
+| 0 | First tile in the sheet (image index × tiles per image) |
+| 4 | Signed x offset of the top-left corner from the sprite's anchor (−16 for 32×32) |
+| 6 | Signed y offset (−16) |
+| 8 | Width in pixels |
+| 10 | Height in pixels |
+| 12 | Unknown: `00 01 00 01 ff 00 00 00 ff ff 00 00` in every record seen |
 
 ## How the game uses them
 
-At scene start the game copies the current image of each visible character into OBJ
-VRAM with `CpuSet` (the player to `0x06010000`, tiles 0–15) and the palette to an OBJ
-palette bank. Walking replaces the image in place from the sheet every four frames.
-The player is a single 32×32 OBJ, palette index 0 transparent, at screen (72, 32) when
-the first room starts; the OBJ at (88, 32) next to it is the sitting character.
+At scene start the game copies the current frame of each visible sprite into OBJ VRAM
+with `CpuSet` (the player to `0x06010000`, tiles 0–15) and the palette to an OBJ palette
+bank; walking replaces the frame in place every four frames. The sprite's anchor is the
+bottom center of the metatile below the one it stands on, so a 32×32 sprite standing on
+metatile `(c, r)` has its top-left at `(16c − 8, 16r)`; the player starts the first room
+at screen (72, 32) and the chair stands at (88, 32). The game orders OAM by y so nearer
+sprites cover farther ones, and on equal y the furniture sprite takes the lower entry:
+the chair covers the player's arm while both stand on row 2.

@@ -12,19 +12,28 @@ frames), plus the traces of walking through the room's exit. Implemented in
 |---|---|
 | Grid | The player stands on a 16×16 metatile; a direction press starts a step onto the next metatile, and a started step always completes even if the button is released (a 3-frame tap moves 16 pixels) |
 | Speed | 1 pixel per frame; a held direction chains steps without a pause |
-| Sprite | 32×32 from sheet `mz25` (the player on the map), top-left at `(16 × column − 8, 16 × row)` for the standing metatile |
+| Sprite | 32×32 from sprite `ch00` (id `0x98`, the player on the map), top-left at `(16 × column − 8, 16 × row)` for the standing metatile |
 | Footing | The metatile below the standing one holds the bottom-center 16×16 of the sprite; steps are blocked by the attribute of the footing's neighbour, so the sprite stopped at x = 24 against the two-metatile left wall and at y = 16 against the two-metatile top wall |
 | Camera | Follows so the sprite stays at screen (104, 64), clamped to the map (768×320 pixels for the first room) |
 | Start | Standing on metatile (5, 2) of map 4 after the intro: sprite at map (72, 32) |
 
 ## Animation
 
-Images in the sheet are grouped by direction in the order up, down, left, right:
+Animations come from the sprite's own tables (see [formats/sprite.md](formats/sprite.md)):
+the idle animation is the facing direction in the order up, down, left, right, the
+walking one is that plus four, and every step lasts half its listed ticks, four frames,
+so a 16-pixel step is one full walking cycle. VRAM dumps while walking right showed
+images 21, 22, 21, 23 of `ch00`, which is exactly its animation 7.
 
-| State | Image indices | Timing |
-|---|---|---|
-| Idle | `direction × 3 + {0, 1, 0, 2}` | 4 frames per image |
-| Walking | `12 + direction × 3 + {0, 1, 0, 2}` | 4 frames per image, so a 16-pixel step is one full cycle |
+## Characters
+
+The map's object list places the other characters; each stands still on its metatile
+playing its starting animation, blocks the metatile below it like the player's footing,
+and is drawn together with the player in order of anchor y so nearer sprites cover
+farther ones, in front of the player when level with it (the game re-sorts OAM the same
+way when the player walks past, and the chair `ma07` covers the player's arm at the
+start). That chair at (6, 2) is what stops a step right from the start; the desk above
+the player is a blocked attribute.
 
 ## Exits
 
@@ -36,6 +45,7 @@ in map 5 at metatile (8, 16): sprite (120, 256), camera (16, 160), as in the ori
 
 ## Not modeled yet
 
-Doors taken by pressing A (`0xC000` attributes), the fade and door sound of a warp, NPCs,
-the sitting character at the desk (sheet `ma06`), and the diagonal input priority of the
+Doors taken by pressing A (`0xC000` attributes), the fade and door sound of a warp,
+talking to characters and their scripts, characters that walk, the saved-state overlay of
+object lists, objects that show the party's Zoid, and the diagonal input priority of the
 original (this engine takes the first held direction in the order up, down, left, right).

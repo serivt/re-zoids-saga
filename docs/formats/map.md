@@ -1,10 +1,11 @@
 # Maps and warps
 
 Source of knowledge: own analysis of Zoids Saga (Japan, Rev 1) in a reference emulator
-(RAM dumps before and after walking through the first room's exit, and a write watchpoint
-on the decompressed map buffer that led to the scene loader) plus a read of the loader,
-the exit handler and the warp lookup in the game's code. Implemented in
-`crates/extraction/src/saga.rs` (`map_record`, `warp`, `Scene::exit`).
+(RAM dumps before and after walking through the first room's exit, write watchpoints on
+the decompressed map buffer and on the entity table that led to the scene loader) plus a
+read of the loader, the entity spawn, the exit handler and the warp lookup in the game's
+code. Implemented in `crates/extraction/src/saga.rs` (`map_record`, `warp`,
+`map_objects`, `Scene::exit`).
 
 ## Map records
 
@@ -41,6 +42,30 @@ list of 12-byte entries indexed by the exit number carried in the scene attribut
 The tables have no length field; the number of entries is whatever the attributes
 reference. Map 4 has two exits: exit 0 (metatiles (23–24, 14)) leads to map 5 `md0154` at
 (8, 16) and exit 1 (metatiles (23–24, 6)) to map 3 `md0152` at (23, 5).
+
+## Object lists
+
+At ROM `0x3282B4` one 8-byte entry per map record: an object count half-word, padding,
+and a pointer to the list. Each object is 20 bytes:
+
+| Offset | Field |
+|---|---|
+| 0 | Sprite id (see [sprite.md](sprite.md)); 0 for an invisible object, bit 15 set to show the party's Zoid |
+| 2 | OBJ palette slot the game reserves |
+| 4 | Metatile column the object stands on |
+| 6 | Metatile row |
+| 8 | Script reference, `0x80000000` for none; small values with bit 31 are event ids |
+| 12 | Kind: 0 the player, 1 or 2 characters, 4 invisible triggers |
+| 14 | Parameter of the kind, not understood |
+| 16 | Animation the sprite starts with |
+| 18 | Behavior: 0 characters, 1 map Zoids, 2 furniture-like sprites |
+
+Object 0 is the player's entry; the loader spawns it at the arrival metatile and the
+rest where the list says. The first room (map 4) lists the player (`0x98`), `ch56` at
+(35, 2), `ch57` at (39, 16) and the chair `ma07` at (6, 2), which blocks the metatile
+under it: a step right from the start position does nothing. Maps whose record id has
+bit 15 set overlay the list with saved state (moved or hidden characters); that overlay
+is not modeled.
 
 ## Exit attributes
 
