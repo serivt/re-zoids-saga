@@ -7,6 +7,7 @@ pub mod field;
 pub mod game;
 pub mod menu;
 pub mod rng;
+pub mod save;
 pub mod script;
 pub mod sprite;
 pub mod text;
@@ -21,8 +22,9 @@ pub use field::{
     Direction, Field, FieldError, FieldEvent, Npc, NpcCommand, Player, current_frame, draw_scene,
 };
 pub use game::{Game, GameError, Stage};
-pub use menu::{Character, Party, PauseMenu, Unit};
+pub use menu::{Character, MenuStep, Party, PauseMenu, Unit};
 pub use rng::Rng;
+pub use save::{Found, SaveError, SaveFile, SavedGame};
 pub use script::{ScriptError, ScriptHost, ScriptRunner};
 pub use sprite::draw_sprite;
 pub use text::{TextMetrics, TextPainter};

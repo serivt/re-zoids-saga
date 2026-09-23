@@ -7,19 +7,32 @@
 //! three steps left, turns right and walks five, turns left and walks
 //! two, faces the player, and the first dialogue string runs. Afterwards
 //! the player stands up onto (5, 2) and control begins.
+//!
+//! Continuing darkens the title 10 frames after A, fades it out over 16,
+//! keeps the screen black for 73 and fades the saved room in over 16, as
+//! the original does. When the loader has a notice (no save, a broken one,
+//! the backup used) it appears 23 frames into the black; once it is
+//! dismissed the title starts over, or, with the backup, the room fades
+//! in after 33 more black frames.
 
-use extraction::saga::{BootError, FIRST_ROOM_MAP, PLAYER_START, SpriteSheetError};
+use extraction::saga::{
+    BootError, FIRST_ROOM_MAP, OPENING_SEEN_FLAG, PLAYER_START, SpriteSheetError,
+};
+use extraction::saga_save::SaveDataError;
+use formats::Progress;
 use formats::m4a::M4aError;
+use formats::progress::{FLAG_WORDS, encode_name};
 use gba_runtime::apu::SoundEngine;
 use gba_runtime::ppu::{FADE_STEPS, SCREEN_HEIGHT, SCREEN_WIDTH, darken};
-use platform::{Button, Frame, Input, Rgb};
+use platform::{Button, Frame, Input, Rgb, SaveStorage};
 use thiserror::Error;
 
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::data::GameData;
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Direction, Field, FieldError, FieldEvent, NpcCommand};
-use crate::menu::{Party, PauseMenu};
+use crate::menu::{MenuStep, Party, PauseMenu};
+use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptError, ScriptRunner};
 use crate::text::TextMetrics;
 use crate::translation::{DIALOGUE_TABLE, Translation, TranslationExtension};
@@ -37,6 +50,17 @@ const INTRO_FADE_FRAMES: u32 = 32;
 const INTRO_DARK_FRAMES: u32 = 158;
 const INTRO_DIALOGUE_DELAY: u32 = 60;
 const INTRO_STAND_UP_DELAY: u32 = 2;
+const CONTINUE_HOLD_FRAMES: u32 = 8;
+const CONTINUE_FADE_FRAMES: u32 = 16;
+const CONTINUE_BLACK_FRAMES: u32 = 72;
+const CONTINUE_NOTICE_DELAY: u32 = 22;
+const CONTINUE_AFTER_NOTICE_FRAMES: u32 = 33;
+const MUSIC_PLAYER: usize = 0;
+/// The area a save names when its object table does not describe the
+/// current one; the original rebuilds the table on loading it. The port
+/// does not build the table, so it keeps a loaded area only while the
+/// player stays in it.
+const NO_AREA: u8 = 0;
 /// Regina's walk before the first line, as `(frames to wait, order)`.
 const INTRO_ARRIVAL: [(u32, IntroOrder); 13] = [
     (15, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
@@ -125,6 +149,8 @@ pub enum Stage {
     Field,
     /// The pause menu.
     Menu,
+    /// Between the title and a continued game.
+    Continuing,
 }
 
 /// Why the game could not go on.
@@ -151,6 +177,9 @@ pub enum GameError {
     /// The font or window skin could not be read.
     #[error("cannot read the text assets: {0}")]
     Text(String),
+    /// The save layout or the new-game state could not be read.
+    #[error(transparent)]
+    SaveData(#[from] SaveDataError),
 }
 
 enum Screen {
@@ -161,6 +190,42 @@ enum Screen {
     Intro(IntroState),
     Field,
     Menu(PauseMenu),
+    Continuing(Continuing),
+}
+
+/// Where continuing is: the title held then fading out, black (with the
+/// loader's notice once it is due), then the room fading in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ContinuePhase {
+    Holding(u32),
+    FadingOut(u32),
+    Black(u32),
+    Notice,
+    AfterNotice(u32),
+    FadingIn(u32),
+}
+
+struct Continuing {
+    title: TitleScreen,
+    phase: ContinuePhase,
+}
+
+impl Continuing {
+    fn darkness(&self) -> u8 {
+        let level = match self.phase {
+            ContinuePhase::Holding(_) => 0,
+            ContinuePhase::FadingOut(frames) => {
+                frames * u32::from(FADE_STEPS) / CONTINUE_FADE_FRAMES
+            }
+            ContinuePhase::Black(_) | ContinuePhase::Notice | ContinuePhase::AfterNotice(_) => {
+                u32::from(FADE_STEPS)
+            }
+            ContinuePhase::FadingIn(frames) => {
+                u32::from(FADE_STEPS) - frames * u32::from(FADE_STEPS) / CONTINUE_FADE_FRAMES
+            }
+        };
+        u8::try_from(level).unwrap_or(FADE_STEPS)
+    }
 }
 
 struct IntroState {
@@ -206,6 +271,10 @@ pub struct Game<'rom> {
     pending_talk: Option<(usize, u32)>,
     player_name: String,
     party: Party,
+    state: Vec<u8>,
+    save: SaveFile,
+    storage: Option<Box<dyn SaveStorage>>,
+    found: Option<Found>,
     previous: Input,
 }
 
@@ -228,6 +297,7 @@ impl<'rom> Game<'rom> {
     /// Returns [`GameError`] when the room or text assets cannot be read.
     pub fn in_first_room(rom: &'rom [u8]) -> Result<Self, GameError> {
         let mut game = Self::bare(rom)?;
+        game.windows.set_flag(OPENING_SEEN_FLAG, true);
         game.field = Some(Field::load(&game.data, FIRST_ROOM_MAP, PLAYER_START)?);
         Self::emit(
             &game.extensions,
@@ -244,6 +314,12 @@ impl<'rom> Game<'rom> {
             GameSound::FirstRoomMusic,
         )?;
         Ok(game)
+    }
+
+    /// Keeps the save in `storage`: continuing reads it and saving
+    /// replaces it.
+    pub fn set_save_storage(&mut self, storage: Box<dyn SaveStorage>) {
+        self.storage = Some(storage);
     }
 
     /// The extensions the game raises events to and asks questions of.
@@ -283,6 +359,8 @@ impl<'rom> Game<'rom> {
             .ok_or_else(|| GameError::Text("no dialogue table".to_owned()))?;
         let extensions = SharedExtensions::default();
         let (song_table, song_count, master_volume) = data.song_table();
+        let save = SaveFile::new(data.save_layout()?);
+        let state = data.new_game_state()?;
         Ok(Self {
             data,
             extensions: extensions.clone(),
@@ -302,6 +380,10 @@ impl<'rom> Game<'rom> {
             pending_talk: None,
             player_name: DEFAULT_PLAYER_NAME.to_owned(),
             party: Party::default(),
+            state,
+            save,
+            storage: None,
+            found: None,
             previous: Input::default(),
         })
     }
@@ -317,6 +399,7 @@ impl<'rom> Game<'rom> {
             Screen::Intro(_) => Stage::Intro,
             Screen::Field => Stage::Field,
             Screen::Menu(_) => Stage::Menu,
+            Screen::Continuing(_) => Stage::Continuing,
         }
     }
 
@@ -365,16 +448,10 @@ impl<'rom> Game<'rom> {
                         GameSound::TitleStart,
                     )?;
                 }
-                if title.update(rom, input, &mut self.windows)? == Some(TitleChoice::NewGame) {
-                    let mut entry = NameEntry::new(&self.data, &self.player_name, input)?;
-                    entry.open(&mut self.windows);
-                    self.screen = Screen::NameEntry(entry);
-                    Self::play(
-                        &mut self.sound,
-                        &self.data,
-                        &self.extensions,
-                        GameSound::NameEntryMusic,
-                    )?;
+                match title.update(rom, input, &mut self.windows)? {
+                    Some(TitleChoice::NewGame) => self.new_game(input)?,
+                    Some(TitleChoice::Continue) => self.begin_continue(),
+                    _ => {}
                 }
             }
             Screen::NameEntry(entry) => {
@@ -407,13 +484,22 @@ impl<'rom> Game<'rom> {
                     self.update_field(input)?;
                 }
             }
-            Screen::Menu(menu) => {
-                if menu.update(rom, input, &mut self.windows)? {
+            Screen::Menu(menu) => match menu.update(rom, input, &mut self.windows)? {
+                MenuStep::Open => {}
+                MenuStep::Save => {
+                    let party = menu.party();
+                    let written = self.write_save(&party);
+                    if let Screen::Menu(menu) = &mut self.screen {
+                        menu.finish_save(written)?;
+                    }
+                }
+                MenuStep::Closed => {
                     self.party = menu.party();
                     self.screen = Screen::Field;
                     Self::emit(&self.extensions, &Event::MenuClosed);
                 }
-            }
+            },
+            Screen::Continuing(_) => self.update_continue(input)?,
         }
         for sound in self.windows.take_sounds() {
             self.sound.play(usize::from(sound))?;
@@ -447,7 +533,227 @@ impl<'rom> Game<'rom> {
         self.sound.output()
     }
 
+    fn new_game(&mut self, input: Input) -> Result<(), GameError> {
+        self.state = self.data.new_game_state()?;
+        self.party = Party::default();
+        self.windows.set_flags([]);
+        let mut entry = NameEntry::new(&self.data, &self.player_name, input)?;
+        entry.open(&mut self.windows);
+        self.screen = Screen::NameEntry(entry);
+        Self::play(
+            &mut self.sound,
+            &self.data,
+            &self.extensions,
+            GameSound::NameEntryMusic,
+        )?;
+        Ok(())
+    }
+
+    /// Leaves the title for a saved game: reads the save now and starts
+    /// the fade.
+    fn begin_continue(&mut self) {
+        Self::emit(&self.extensions, &Event::LoadRequested);
+        let image = match self.storage.as_ref().map(|storage| storage.load()) {
+            Some(Ok(image)) => image,
+            Some(Err(error)) => {
+                Self::emit(&self.extensions, &Event::StorageFailed(error.to_string()));
+                None
+            }
+            None => None,
+        };
+        self.found = Some(self.save.read(image));
+        let screen = std::mem::replace(&mut self.screen, Screen::Loading(0));
+        let Screen::Title(title) = screen else {
+            self.screen = screen;
+            return;
+        };
+        self.windows.close_window(None);
+        self.sound.stop_music();
+        self.screen = Screen::Continuing(Continuing {
+            title,
+            phase: ContinuePhase::Holding(0),
+        });
+    }
+
+    fn update_continue(&mut self, input: Input) -> Result<(), GameError> {
+        let Screen::Continuing(continuing) = &mut self.screen else {
+            return Ok(());
+        };
+        let notice = self.found.as_ref().and_then(Found::notice);
+        match continuing.phase {
+            ContinuePhase::Holding(frames) => {
+                continuing.phase = if frames + 1 >= CONTINUE_HOLD_FRAMES {
+                    ContinuePhase::FadingOut(0)
+                } else {
+                    ContinuePhase::Holding(frames + 1)
+                };
+            }
+            ContinuePhase::FadingOut(frames) => {
+                continuing.phase = if frames + 1 >= CONTINUE_FADE_FRAMES {
+                    ContinuePhase::Black(0)
+                } else {
+                    ContinuePhase::FadingOut(frames + 1)
+                };
+            }
+            ContinuePhase::Black(frames) => match notice {
+                Some(notice) if frames + 1 >= CONTINUE_NOTICE_DELAY => {
+                    self.dialogue.start(notice)?;
+                    continuing.phase = ContinuePhase::Notice;
+                }
+                None if frames + 1 >= CONTINUE_BLACK_FRAMES => self.resume()?,
+                _ => continuing.phase = ContinuePhase::Black(frames + 1),
+            },
+            ContinuePhase::Notice => {
+                if !self
+                    .dialogue
+                    .update(self.data.bytes(), input, &mut self.windows)?
+                {
+                    return Ok(());
+                }
+                if self.found.as_ref().and_then(Found::game).is_some() {
+                    continuing.phase = ContinuePhase::AfterNotice(0);
+                } else {
+                    self.resume()?;
+                }
+            }
+            ContinuePhase::AfterNotice(frames) => {
+                if frames + 1 >= CONTINUE_AFTER_NOTICE_FRAMES {
+                    self.resume()?;
+                } else {
+                    continuing.phase = ContinuePhase::AfterNotice(frames + 1);
+                }
+            }
+            ContinuePhase::FadingIn(frames) => {
+                if frames + 1 >= CONTINUE_FADE_FRAMES {
+                    self.screen = Screen::Field;
+                } else {
+                    continuing.phase = ContinuePhase::FadingIn(frames + 1);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Puts the loaded game in place and fades its room in, or goes back
+    /// to the title when there is none.
+    fn resume(&mut self) -> Result<(), GameError> {
+        let saved = self.found.take().as_ref().and_then(Found::game).cloned();
+        let Some(progress) = saved.and_then(|saved| self.restore(&saved)) else {
+            self.screen = Screen::Title(TitleScreen::new(&self.data)?);
+            Self::emit(&self.extensions, &Event::TitleShown);
+            return Self::play(
+                &mut self.sound,
+                &self.data,
+                &self.extensions,
+                GameSound::TitleMusic,
+            );
+        };
+        if !self.windows.flag(OPENING_SEEN_FLAG) && usize::from(progress.map) == FIRST_ROOM_MAP {
+            return self.start_intro();
+        }
+        let map = usize::from(progress.map);
+        let cell = (usize::from(progress.column), usize::from(progress.row));
+        self.field = Some(Field::load(&self.data, map, cell)?);
+        Self::emit(&self.extensions, &Event::RoomEntered { map, cell });
+        let song = Some(usize::from(progress.song))
+            .filter(|song| *song != 0)
+            .or_else(|| self.extensions.borrow().music_for_map(map))
+            .or_else(|| self.data.map_music(map));
+        if let Some(song) = song {
+            Self::emit(&self.extensions, &Event::SoundRequested(song));
+            self.sound.play(song)?;
+        }
+        if let Screen::Continuing(continuing) = &mut self.screen {
+            continuing.phase = ContinuePhase::FadingIn(0);
+        }
+        Ok(())
+    }
+
+    /// Takes the saved block, name, party and flags; returns the block's
+    /// fields, or `None` when they cannot be read.
+    fn restore(&mut self, saved: &SavedGame) -> Option<Progress> {
+        let progress = saved.progress()?;
+        self.state.clone_from(&saved.state);
+        self.player_name.clone_from(&saved.player_name);
+        self.windows.set_player_name(&self.player_name);
+        self.windows.set_flags(progress.set_flags());
+        let mut party = Party::default();
+        if let Some(leader) = party.members.first_mut() {
+            leader.level = u32::from(progress.level);
+            leader.experience = progress.experience;
+        }
+        party.money = progress.money;
+        party.message_speed = u16::from(progress.message_speed);
+        self.party = party;
+        Some(progress)
+    }
+
+    /// Writes the game as it stands, with `party` from the menu, into the
+    /// save; returns whether it was stored.
+    fn write_save(&mut self, party: &Party) -> bool {
+        Self::emit(&self.extensions, &Event::SaveRequested);
+        if !self.update_state(party) {
+            return false;
+        }
+        let Some(storage) = self.storage.as_mut() else {
+            return false;
+        };
+        let failed = |extensions: &SharedExtensions, error: &dyn std::fmt::Display| {
+            Self::emit(extensions, &Event::StorageFailed(error.to_string()));
+            false
+        };
+        let previous = match storage.load() {
+            Ok(previous) => previous,
+            Err(error) => {
+                failed(&self.extensions, &error);
+                None
+            }
+        };
+        let image = match self.save.write(previous, &self.state, &self.player_name) {
+            Ok(image) => image,
+            Err(error) => return failed(&self.extensions, &error),
+        };
+        match storage.store(&image) {
+            Ok(()) => true,
+            Err(error) => failed(&self.extensions, &error),
+        }
+    }
+
+    /// Writes what the port models into the game-state block.
+    fn update_state(&mut self, party: &Party) -> bool {
+        let (Some(field), Ok(mut progress)) = (&self.field, Progress::read(&self.state)) else {
+            return false;
+        };
+        let half = |value: usize| u16::try_from(value).unwrap_or(u16::MAX);
+        let area = self
+            .data
+            .map_record(field.map())
+            .map_or(NO_AREA, |record| record.id.to_le_bytes()[0]);
+        if progress.area != area {
+            progress.area = NO_AREA;
+        }
+        progress.map = half(field.map());
+        progress.column = half(field.player.column);
+        progress.row = half(field.player.row);
+        progress.flags = [0; FLAG_WORDS];
+        for flag in self.windows.flags() {
+            progress.set_flag(flag, true);
+        }
+        if let Some(leader) = party.members.first() {
+            progress.level = u8::try_from(leader.level).unwrap_or(u8::MAX);
+            progress.experience = leader.experience;
+        }
+        progress.money = party.money;
+        progress.message_speed = u8::try_from(party.message_speed).unwrap_or(u8::MAX);
+        progress.name = encode_name(&self.player_name).0;
+        if let Some(song) = self.sound.playing(MUSIC_PLAYER) {
+            progress.song = half(song);
+        }
+        progress.write(&mut self.state).is_ok()
+    }
+
     fn start_intro(&mut self) -> Result<(), GameError> {
+        self.windows.set_flag(OPENING_SEEN_FLAG, true);
         let mut field = Field::load(&self.data, FIRST_ROOM_MAP, INTRO_PLAYER_CELL)?;
         field.player.facing = Direction::Up;
         let regina = field.spawn_npc(&self.data, REGINA_SPRITE, REGINA_START, Direction::Up)?;
@@ -676,6 +982,23 @@ impl<'rom> Game<'rom> {
                 self.windows.draw(frame, &self.skin, &self.painter);
             }
             Screen::Menu(menu) => menu.draw(frame, &self.windows, &self.skin, &self.painter),
+            Screen::Continuing(continuing) => {
+                match continuing.phase {
+                    ContinuePhase::Holding(_) | ContinuePhase::FadingOut(_) => {
+                        continuing.title.draw(frame);
+                    }
+                    ContinuePhase::FadingIn(_) => {
+                        if let Some(field) = &self.field {
+                            field.draw(frame);
+                        }
+                    }
+                    ContinuePhase::Black(_)
+                    | ContinuePhase::Notice
+                    | ContinuePhase::AfterNotice(_) => frame.fill(Rgb::default()),
+                }
+                darken(frame, continuing.darkness());
+                self.windows.draw(frame, &self.skin, &self.painter);
+            }
         }
     }
 }

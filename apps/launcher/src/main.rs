@@ -5,15 +5,15 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use extraction::{Identification, Title};
 use game_core::{
-    DEFAULT_PLAYER_NAME, Field, Game, GameData, Scope, ScriptRunner, ScriptWindows, TextPainter,
-    Translation, WindowPainter,
+    DEFAULT_PLAYER_NAME, Event as GameEvent, Extension, Field, Game, GameData, Scope, ScriptRunner,
+    ScriptWindows, TextPainter, Translation, WindowPainter,
 };
 use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{AudioOut, Display, Event, Frame, Rgb};
-use platform_sdl3::Sdl3Display;
+use platform_sdl3::{FileStorage, Sdl3Display};
 
-const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, Esc quits); --room skips to the first room; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, dialogue), by default the title, the name entry and dialogue 30-41";
+const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, Esc quits); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, dialogue), by default the title, the name entry and dialogue 30-41";
 const DEFAULT_TEMPLATE_SCOPES: [&str; 3] = ["title", "name-entry", "dialogue:30-41"];
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_MAP: usize = extraction::saga::FIRST_ROOM_MAP;
@@ -21,6 +21,22 @@ const PLAYER_START: (usize, usize) = extraction::saga::PLAYER_START;
 const FRAME_DURATION: std::time::Duration = std::time::Duration::from_micros(16_743);
 const AUDIO_QUEUE_FRAMES: usize = 6;
 const RENDER_FRAME_LIMIT: usize = 600;
+const SAVE_EXTENSION: &str = "sav";
+
+/// Reports on the console what the game could not read or write.
+struct StorageReport;
+
+impl Extension for StorageReport {
+    fn name(&self) -> &'static str {
+        "launcher-storage-report"
+    }
+
+    fn on_event(&mut self, event: &GameEvent) {
+        if let GameEvent::StorageFailed(reason) = event {
+            eprintln!("Save:       {reason}");
+        }
+    }
+}
 
 fn main() -> Result<()> {
     let options = Options::parse()?;
@@ -48,6 +64,15 @@ fn main() -> Result<()> {
     } else {
         Game::new(&rom)?
     };
+    let save_path = options
+        .save_path
+        .clone()
+        .unwrap_or_else(|| options.rom_path.with_extension(SAVE_EXTENSION));
+    println!("Save:       {}", save_path.display());
+    game.set_save_storage(Box::new(FileStorage::new(save_path)));
+    game.extensions()
+        .borrow_mut()
+        .insert(Box::new(StorageReport));
     if let Some(path) = &options.translation {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read translation {}", path.display()))?;
@@ -74,6 +99,7 @@ struct Options {
     rom_path: PathBuf,
     string_id: Option<String>,
     dump_path: Option<PathBuf>,
+    save_path: Option<PathBuf>,
     room: bool,
     translation: Option<PathBuf>,
     template: Option<(PathBuf, Vec<String>)>,
@@ -85,6 +111,7 @@ impl Options {
         let rom_path = args.next().map(PathBuf::from).context(USAGE)?;
         let mut string_id = None;
         let mut dump_path = None;
+        let mut save_path = None;
         let mut room = false;
         let mut translation = None;
         let mut template = None;
@@ -92,6 +119,7 @@ impl Options {
             match arg.to_str() {
                 Some("--dump") => dump_path = Some(args.next().map(PathBuf::from).context(USAGE)?),
                 Some("--room") => room = true,
+                Some("--save") => save_path = Some(args.next().map(PathBuf::from).context(USAGE)?),
                 Some("--translation") => {
                     translation = Some(args.next().map(PathBuf::from).context(USAGE)?);
                 }
@@ -111,6 +139,7 @@ impl Options {
             rom_path,
             string_id,
             dump_path,
+            save_path,
             room,
             translation,
             template,

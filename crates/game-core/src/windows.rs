@@ -315,6 +315,19 @@ impl<'rom> ScriptWindows<'rom> {
         name.clone_into(&mut self.player_name);
     }
 
+    /// The game flags that are set, in order.
+    #[must_use]
+    pub fn flags(&self) -> Vec<u16> {
+        let mut flags: Vec<u16> = self.flags.iter().copied().collect();
+        flags.sort_unstable();
+        flags
+    }
+
+    /// Replaces every game flag with `flags`, without raising events.
+    pub fn set_flags(&mut self, flags: impl IntoIterator<Item = u16>) {
+        self.flags = flags.into_iter().collect();
+    }
+
     /// Sounds requested so far, oldest first; clearing is the caller's job.
     pub fn take_sounds(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.sounds)
@@ -758,6 +771,8 @@ mod tests {
         assert!(host.flag(7) && !host.flag(8));
         host.set_flag(7, false);
         assert!(!host.flag(7));
+        host.set_flags([9, 3]);
+        assert_eq!(host.flags(), vec![3, 9]);
         host.play_sound(0x41);
         assert_eq!(host.take_sounds(), [0x41]);
         assert!(host.take_sounds().is_empty());

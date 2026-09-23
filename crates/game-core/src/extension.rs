@@ -109,6 +109,12 @@ pub enum Event {
     MenuOpened,
     /// The pause menu closed.
     MenuClosed,
+    /// The player chose to save.
+    SaveRequested,
+    /// The player chose to continue a saved game.
+    LoadRequested,
+    /// The save could not be read or written; the text says why.
+    StorageFailed(String),
 }
 
 /// A part that watches the game and may answer its questions. Every method

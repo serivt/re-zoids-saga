@@ -181,6 +181,18 @@ enum Return {
     Weapons,
 }
 
+/// What the menu needs after a frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuStep {
+    /// It is still open.
+    Open,
+    /// The player confirmed saving; the caller writes the save and reports
+    /// with [`PauseMenu::finish_save`].
+    Save,
+    /// It closed.
+    Closed,
+}
+
 /// Which list or notice the runner is on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MenuState {
@@ -190,6 +202,7 @@ enum MenuState {
     Weapons,
     Speed,
     Save,
+    Saving,
     Unit,
     Character,
     Notice(Return),
@@ -348,7 +361,7 @@ impl PauseMenu {
         self.runner.string_offset(script).unwrap_or(0)
     }
 
-    /// Advances one frame; returns `true` when the menu closed.
+    /// Advances one frame.
     ///
     /// # Errors
     ///
@@ -358,14 +371,16 @@ impl PauseMenu {
         rom: &[u8],
         input: Input,
         windows: &mut ScriptWindows<'_>,
-    ) -> Result<bool, ScriptError> {
+    ) -> Result<MenuStep, ScriptError> {
         self.scroll += 1;
         self.held = input;
-        if self.state == MenuState::Closed {
-            return Ok(true);
+        match self.state {
+            MenuState::Closed => return Ok(MenuStep::Closed),
+            MenuState::Saving => return Ok(MenuStep::Save),
+            _ => {}
         }
         if !self.runner.update(rom, input, windows)? {
-            return Ok(false);
+            return Ok(MenuStep::Open);
         }
         let [confirmed, choice, ..] = *self.runner.vars();
         let confirmed = confirmed != 0;
@@ -399,19 +414,35 @@ impl PauseMenu {
                     self.return_to(rom, Return::Main, windows)?;
                 }
             }
-            MenuState::Save => {
-                let script = if confirmed && choice == 0 {
-                    SCRIPT_SAVED
-                } else {
-                    SCRIPT_SAVE_CANCELED
-                };
-                self.notice(script, Return::Main)?;
+            MenuState::Save if confirmed && choice == 0 => {
+                self.state = MenuState::Saving;
+                return Ok(MenuStep::Save);
             }
+            MenuState::Save => self.notice(SCRIPT_SAVE_CANCELED, Return::Main)?,
             MenuState::Unit | MenuState::Character => self.rebuild_status(rom, windows)?,
             MenuState::Notice(back) => self.return_to(rom, back, windows)?,
-            MenuState::Closed => {}
+            MenuState::Saving | MenuState::Closed => {}
         }
-        Ok(self.state == MenuState::Closed)
+        Ok(if self.state == MenuState::Closed {
+            MenuStep::Closed
+        } else {
+            MenuStep::Open
+        })
+    }
+
+    /// Tells the player whether the save was written: セーブしました, or
+    /// セーブを中止しました when it could not be.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScriptError`] when the notice cannot run.
+    pub fn finish_save(&mut self, written: bool) -> Result<(), ScriptError> {
+        let script = if written {
+            SCRIPT_SAVED
+        } else {
+            SCRIPT_SAVE_CANCELED
+        };
+        self.notice(script, Return::Main)
     }
 
     /// Rebuilds the main menu and the status list under a screen that

@@ -8,7 +8,9 @@ use extraction::saga::{
     PauseWallpaper, Portrait, PortraitError, Scene, SceneError, SpriteSheet, SpriteSheetError,
     TitleGraphics, Warp, WindowSkin, WindowSkinError,
 };
+use extraction::saga_save::{self, SaveDataError};
 use extraction::string_table::StringTableError;
+use formats::SaveLayout;
 use formats::font::{Glyph, GlyphIndex};
 
 use crate::extension::GameSound;
@@ -156,6 +158,24 @@ impl<'rom> GameData<'rom> {
     #[must_use]
     pub fn experience_to_next(&self, level: usize) -> Option<u32> {
         saga::experience_to_next(self.rom, level)
+    }
+
+    /// Where the save routine puts its blocks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SaveDataError`] when the descriptor cannot be read.
+    pub fn save_layout(&self) -> Result<SaveLayout, SaveDataError> {
+        saga_save::save_layout(self.rom)
+    }
+
+    /// The game-state block as a new game starts it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SaveDataError`] when a table cannot be read.
+    pub fn new_game_state(&self) -> Result<Vec<u8>, SaveDataError> {
+        saga_save::new_game_state(self.rom)
     }
 
     /// The song a map's own code starts, if one is found.
