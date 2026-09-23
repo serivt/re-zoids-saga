@@ -12,11 +12,12 @@ use platform_sdl3::Sdl3Display;
 
 const USAGE: &str = "usage: launcher <rom-path> [string-id] [--dump <frame.ppm>]\n  without a string id the launcher lets you walk the first room (arrows move, Esc quits)";
 const WINDOW_SCALE: u32 = 3;
-const FIRST_ROOM_SCENE: usize = 2;
-const PLAYER_X: i32 = 88;
+const FIRST_ROOM_SCENE: usize = 3;
+const FIRST_ROOM_MAP: usize = 4;
+const PLAYER_X: i32 = 72;
 const PLAYER_Y: i32 = 64;
 const PLAYER_FRAME: usize = 3;
-const PLAYER_START: (usize, usize) = (88, 32);
+const PLAYER_START: (usize, usize) = (5, 2);
 const FRAME_DURATION: std::time::Duration = std::time::Duration::from_micros(16_743);
 const BOX_ROW: usize = 12;
 const BOX_ROWS: usize = 8;
@@ -46,16 +47,15 @@ fn main() -> Result<()> {
     if identification.title != Title::Saga {
         bail!("the field is only implemented for {}", Title::Saga);
     }
-    let scene = extraction::saga::scene(&rom, FIRST_ROOM_SCENE)?;
     let sheet = extraction::saga::sprite_sheet(&rom, extraction::saga::PLAYER_SPRITE_SHEET)?;
-    let mut field = Field::new(scene, sheet, PLAYER_START);
+    let mut field = Field::load(&rom, FIRST_ROOM_MAP, sheet, PLAYER_START)?;
     match &options.dump_path {
         Some(path) => {
             let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
             field.draw(&mut frame);
             write_ppm(path, &frame)
         }
-        None => walk(&title, &mut field),
+        None => walk(&title, &rom, &mut field),
     }
 }
 
@@ -163,7 +163,7 @@ fn show(title: &str, frame: &Frame) -> Result<()> {
     }
 }
 
-fn walk(title: &str, field: &mut Field) -> Result<()> {
+fn walk(title: &str, rom: &[u8], field: &mut Field) -> Result<()> {
     let mut display = Sdl3Display::open(title, SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_SCALE)?;
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
     loop {
@@ -171,7 +171,13 @@ fn walk(title: &str, field: &mut Field) -> Result<()> {
         if display.poll_events().contains(&Event::Quit) {
             return Ok(());
         }
-        field.update(display.input());
+        if let Some(exit) = field.update(display.input()) {
+            let warp = field.warp(rom, exit)?;
+            println!(
+                "Exit {exit} -> map {} at ({}, {})",
+                warp.map, warp.column, warp.row
+            );
+        }
         field.draw(&mut frame);
         display.present(&frame)?;
         std::thread::sleep(FRAME_DURATION.saturating_sub(started.elapsed()));
