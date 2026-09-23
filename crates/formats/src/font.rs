@@ -14,12 +14,14 @@
 
 use thiserror::Error;
 
+use crate::tile::{TILE_LEN as TILE_BYTES, decode_4bpp};
+
 /// Glyph width in pixels.
 pub const GLYPH_WIDTH: usize = 8;
 /// Glyph height in pixels.
 pub const GLYPH_HEIGHT: usize = 16;
 /// Bytes of one 8×8 4bpp tile.
-pub const TILE_LEN: usize = 32;
+pub const TILE_LEN: usize = TILE_BYTES;
 /// Bytes of one range table entry.
 pub const RANGE_ENTRY_LEN: usize = 8;
 
@@ -40,10 +42,9 @@ impl Glyph {
     #[must_use]
     pub fn from_tiles(top: &[u8; TILE_LEN], bottom: &[u8; TILE_LEN]) -> Self {
         let mut pixels = [0u8; GLYPH_WIDTH * GLYPH_HEIGHT];
-        for (index, byte) in top.iter().chain(bottom.iter()).enumerate() {
-            pixels[2 * index] = byte & 0x0F;
-            pixels[2 * index + 1] = byte >> 4;
-        }
+        let (upper, lower) = pixels.split_at_mut(GLYPH_WIDTH * GLYPH_HEIGHT / 2);
+        upper.copy_from_slice(&decode_4bpp(top));
+        lower.copy_from_slice(&decode_4bpp(bottom));
         Self { pixels }
     }
 
