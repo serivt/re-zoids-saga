@@ -21,6 +21,8 @@ after another, printing the numbers itself between them. The ones this port uses
 | 44, 45 | The money box, window 1 at (18, 10) 12×4, and the Ｇ after the amount |
 | 47 | 項目を選択してください in the help line, present all, menu |
 | 48, 49 | The status list, window 4 at (9, 0) 14×14: 部隊 / キャラクター / 武器 / Ｚｉデータ / Ｚｉデータ用アイテム / 図鑑, then the question and its menu |
+| 68, 69 | The unit list: the help line, window 1 at (0, 0) 30×16 with the ゾイドＨＰ／ゾイドＥＰ header, then 配置なし per empty slot (six slots) |
+| 70–78 | The character screen: window 1 at (0, 0) 18×14, the portrait window 2 at (1, 4) 8×8 and the member list window 3 at (17, 0) 13×14; the labels 耐久／攻撃／防御／反応／命中, the help for a boarded Zoid (76, 77) or for leaving (78) |
 | 56, 57, 58, 60 | The notices for no items, weapons, Zi data or Zi-data items: clear the help line, print, present it, wait for a key, clear |
 | 128, 129, 133, 134 | The weapons screen: window 1 at (0, 0) 18×14 with 搭乗ゾイドなし and window 3 at (17, 0) 13×14 with the party's names as a menu; 133 asks whose Zoid to change, 134 answers that the character is not aboard |
 | 151, 152, 153, 154–158 | The message-speed setting: window 4 at (9, 0) 15×4 with 戦闘メッセージ速度 and the value, the help text, window 5 at (23, 0) 7×14 with １–５ and ボタン, the menu, then the value strings |
@@ -30,8 +32,27 @@ after another, printing the numbers itself between them. The ones this port uses
 
 The panel prints the player's name before the level label and right-aligns the numbers
 with full-width digits so the value ends in the panel's last inner cell; the money box
-right-aligns the amount before Ｇ. A new game shows level 1, 0 experience, 14 to the
-next level and 0 G.
+right-aligns the amount before Ｇ. The experience to the next level comes from the
+99-entry table at ROM `0x66BB58` (entry `n` is what level `n + 1` needs: 14, then
+7·n³). A new game shows level 1, 0 experience, 14 to the next level and 0 G.
+
+## Party data
+
+The game keeps its state in a block at RAM `0x02000B5C`; the leader's level is the
+byte at `+0xCD2`, the player's name at `+0xD18`, and the menu reads fields between
+`+0xD28` and `+0xD61` for the panel and the character screen. The port keeps the same
+facts in `Party`: members (name, portrait, level, experience, five stat bonuses in
+percent, the Zoid piloted) and six unit slots. A new game has the player alone at
+level 1 with every bonus at 0 and no Zoid, and empty slots. What the original's block
+holds beyond that, and how characters and Zoids are defined in the ROM, is not read
+yet.
+
+The character screen writes the name on the first line, then each stat as its label
+(eight spaces and the name, from script 71–75), the sign at cell 11, the value
+right-aligned to cell 14 and ％ at cell 15, placing values by cell the way the game's
+code does rather than through the text wrapping. The unit screen's rows keep a line
+break pending until the next character, so the last row's break does not scroll the
+header away; the port's windows do the same for every trailing break.
 
 ## Windows and menus
 
@@ -71,14 +92,15 @@ The backdrop color is `0x7240`.
 
 START on the field opens the menu; B on the main list closes it. ステータス opens the
 status list; its 武器, Ｚｉデータ and Ｚｉデータ用アイテム items print their notices and
-図鑑 asks ゾイド or キャラ. 武装 shows the weapons screen; choosing the character prints
+図鑑 asks ゾイド or キャラ; 部隊 shows the unit list and キャラクター the character screen,
+which A or B leaves. 武装 shows the weapons screen; choosing the character prints
 that no Zoid is boarded. コンフィグ shows the message speed (3 on a new game) with the
 cursor on it; picking a number stores it in the party. セーブ asks, and answers
 セーブしました or セーブを中止しました (B cancels); nothing is written anywhere yet.
 
 ## Not modeled yet
 
-The 部隊 and キャラクター status screens, the encyclopedia itself, 部隊編成 (a separate
+The Zoid status screen behind a boarded Zoid, the encyclopedia itself, 部隊編成 (a separate
 screen with its own wallpaper), the ボタン page of the config, and where the original
 goes after a speed is chosen (this port returns to the main list) all end in the
 まだできてません notice or in an assumption. Saving writes no data. The button and
