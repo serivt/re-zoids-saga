@@ -55,12 +55,12 @@ current text window, and runs strings recursively through calls. Jump offsets ar
 | Opcode | Args | Meaning |
 |---|---|---|
 | `0x00` | 0 | Nothing |
-| `0x01` | 7 | Open window `a0` of kind `a1` at tiles (`a2`, `a3`), `a4`×`a5` tiles, style `a6` (bit 0: text appears one character per frame); it becomes the current text window |
+| `0x01` | 7 | Open window `a0` of kind `a1` at tiles (`a2`, `a3`), `a4`×`a5` tiles, style `a6` (bit 0: text appears one character per frame); it becomes the current window |
 | `0x02` | 1 | Reset the text system; mode 1 also clears the name buffer; modes below `0x10` zero the variables |
 | `0x03` | 1 | Close window `a0` (`0xFF` = all) and redraw the others |
-| `0x04` | 1 | Present window `a0` (`0xFF` = all) |
-| `0x05` | 1 | Wait for a key: low nibble 0 accepts A (sets var0 = 1, plays sound `0x41`), `0x10` in the high nibble lets B end it with var0 = 0; the prompt blinks 20 frames off, 20 on |
-| `0x06` | 1 | Menu on the current window: up/down move the cursor (sound `0x40`); A sets var0 = 1 and var1 = the line (sound `0x47`); with `0x10` in the high nibble B ends it with var0 = 0 |
+| `0x04` | 1 | Present window `a0`, which becomes the current window; `0xFF` presents every open window in id order and leaves the highest current |
+| `0x05` | 1 | Wait for a key, prompting in the current window: low nibble 0 accepts A (sets var0 = 1, plays sound `0x41`), `0x10` in the high nibble lets B end it with var0 = 0; the prompt blinks 20 frames off, 20 on |
+| `0x06` | 1 | Menu on the current window, starting on the line its last menu ended on: up/down move the cursor (sound `0x40`); A sets var0 = 1 and var1 = the line (sound `0x47`); with `0x10` in the high nibble B ends it with var0 = 0; the cursor stays drawn until the window is presented again |
 | `0x07` | table | Switch: `a0 & 7` selects entry `n` of a table of signed 16-bit offsets; the table has no length field and ends where its nearest target begins |
 | `0x08` | 2 | Jump |
 | `0x09` | 3 | var[`a0 & 7`] = `a1 | a2 << 8` |
@@ -89,8 +89,9 @@ current text window, and runs strings recursively through calls. Jump offsets ar
 | `0x3D` | 1 | Wait `a0` frames |
 
 Presenting, closing or clearing a window and showing a portrait flush the display, which
-costs one frame each. Inside a message, `0x1C a0` redirects the text to window `a0`, and
-`0x1F a0 a1` prints var[`a0`] right-aligned in `a1 & 7` cells.
+costs one frame each. A message starts in the current window; inside it, `0x1C a0`
+redirects the rest of that message to window `a0` without changing the current window,
+and `0x1F a0 a1` prints var[`a0`] right-aligned in `a1 & 7` cells.
 
 ## Shared strings
 

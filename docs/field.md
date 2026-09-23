@@ -89,6 +89,10 @@ exit `n`; the caller looks the warp up in the current map's table (see
 the arrival metatile, turning it when the warp says so. The first room's lower exit lands
 in map 5 at metatile (8, 16): sprite (120, 256), camera (16, 160), as in the original.
 
+## Pause menu
+
+START opens the menu described in [menu.md](menu.md); the field waits underneath it.
+
 ## Not modeled yet
 
 Doors taken by pressing A (`0xC000` attributes), the fade and door sound of a warp,
