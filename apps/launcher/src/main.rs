@@ -5,32 +5,19 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use extraction::{Identification, Title};
 use game_core::{
-    DEFAULT_PLAYER_NAME, DIALOGUE_TEXT_AREA, Field, FieldEvent, TalkBox, TextPainter,
-    WindowPainter, draw_scene, draw_sprite,
+    DEFAULT_PLAYER_NAME, Field, FieldEvent, ScriptRunner, ScriptWindows, TextPainter, WindowPainter,
 };
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
-use localization::monospace;
 use platform::{Display, Event, Frame, Rgb};
 use platform_sdl3::Sdl3Display;
 
 const USAGE: &str = "usage: launcher <rom-path> [string-id] [--dump <frame.ppm>]\n  without a string id the launcher lets you walk the first room (arrows move, X talks, Esc quits)";
 const WINDOW_SCALE: u32 = 3;
-const FIRST_ROOM_SCENE: usize = 3;
 const FIRST_ROOM_MAP: usize = 4;
-const PLAYER_X: i32 = 72;
-const PLAYER_Y: i32 = 64;
-const PLAYER_FRAME: usize = 3;
 const PLAYER_START: (usize, usize) = (5, 2);
 const FRAME_DURATION: std::time::Duration = std::time::Duration::from_micros(16_743);
-const BOX_ROW: usize = 12;
-const BOX_ROWS: usize = 8;
-const BOX_COLUMNS: usize = 30;
-const PORTRAIT_DIVIDER_COLUMN: usize = 7;
-const PORTRAIT_X: i32 = 8;
-const PORTRAIT_Y: i32 = 104;
-const SPEAKER_X: i32 = 64;
-const SPEAKER_Y: i32 = 104;
-const TEXT_Y: i32 = 120;
+const RENDER_FRAME_LIMIT: usize = 600;
+const TALK_START_DELAY: u32 = 3;
 
 fn main() -> Result<()> {
     let options = Options::parse()?;
@@ -116,41 +103,23 @@ fn render_string(rom: &[u8], title: Title, string_id: &str) -> Result<Frame> {
     let table = extraction::saga::string_table(table_name)
         .with_context(|| format!("unknown string table {table_name:?}"))?;
     let strings = table.read(rom)?;
-    let string = strings
-        .get(index)
-        .with_context(|| format!("{table_name} has {} strings", strings.len()))?;
+    let mut runner = ScriptRunner::new(strings.iter().map(|string| string.offset).collect());
+    let mut windows = ScriptWindows::new(rom, DEFAULT_PLAYER_NAME);
+    runner.start(index)?;
+    for _ in 0..RENDER_FRAME_LIMIT {
+        if runner.is_waiting_for_key()
+            || runner.update(rom, platform::Input::default(), &mut windows)?
+        {
+            break;
+        }
+    }
     let (glyphs, fallback) = extraction::saga::font(rom)?;
     let painter = TextPainter::new(rom, glyphs, Some(fallback));
     let skin = extraction::saga::window_skin(rom)?;
     let window = WindowPainter::new(skin.tiles, &skin.palette);
-
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::new(16, 24, 48));
-    let scene = extraction::saga::scene(rom, FIRST_ROOM_SCENE)?;
-    draw_scene(&mut frame, &scene, (0, 0));
-    let player = extraction::saga::sprite_sheet(rom, extraction::saga::PLAYER_SPRITE)?;
-    if let Some(image) = player.image(PLAYER_FRAME) {
-        draw_sprite(&mut frame, PLAYER_X, PLAYER_Y, &image, &player.palette);
-    }
-    window.draw_window(&mut frame, 0, BOX_ROW, BOX_COLUMNS, BOX_ROWS);
-    window.draw_divider(&mut frame, PORTRAIT_DIVIDER_COLUMN, BOX_ROW, BOX_ROWS);
-    if let Some((character, expression)) = string.script.first_speaker() {
-        let portrait =
-            extraction::saga::portrait(rom, usize::from(character), usize::from(expression))?;
-        draw_sprite(
-            &mut frame,
-            PORTRAIT_X,
-            PORTRAIT_Y,
-            &portrait.image,
-            &portrait.palette,
-        );
-    }
-    let messages = string.script.message_texts();
-    let text = messages.first().map(String::as_str).unwrap_or_default();
-    let (speaker, body) = text.split_once('\n').unwrap_or((text, ""));
-    painter.draw(&mut frame, SPEAKER_X, SPEAKER_Y, speaker, window.palette());
-    let layout = DIALOGUE_TEXT_AREA.layout(body, monospace);
-    let visible = layout.visible_lines().join("\n");
-    painter.draw(&mut frame, SPEAKER_X, TEXT_Y, &visible, window.palette());
+    Field::load(rom, FIRST_ROOM_MAP, PLAYER_START)?.draw(&mut frame);
+    windows.draw(&mut frame, &window, &painter);
     Ok(frame)
 }
 
@@ -173,7 +142,9 @@ fn walk(title: &str, rom: &[u8], field: &mut Field) -> Result<()> {
     let dialogue = extraction::saga::string_table("dialogue")
         .context("no dialogue table")?
         .read(rom)?;
-    let mut talk: Option<TalkBox> = None;
+    let mut runner = ScriptRunner::new(dialogue.iter().map(|string| string.offset).collect());
+    let mut windows = ScriptWindows::new(rom, DEFAULT_PLAYER_NAME);
+    let mut pending_talk: Option<(usize, u32)> = None;
     let mut display = Sdl3Display::open(title, SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_SCALE)?;
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
     loop {
@@ -182,11 +153,14 @@ fn walk(title: &str, rom: &[u8], field: &mut Field) -> Result<()> {
             return Ok(());
         }
         let input = display.input();
-        if let Some(open) = &mut talk {
-            if open.update(input) {
-                talk = None;
-            }
-        } else {
+        if let Some((id, delay)) = pending_talk {
+            pending_talk = if delay > 1 {
+                Some((id, delay - 1))
+            } else {
+                runner.start(id)?;
+                None
+            };
+        } else if runner.is_done() {
             match field.update(input) {
                 Some(FieldEvent::Exit(exit)) => {
                     let warp = field.warp(rom, exit)?;
@@ -196,20 +170,16 @@ fn walk(title: &str, rom: &[u8], field: &mut Field) -> Result<()> {
                     );
                 }
                 Some(FieldEvent::Talk { dialogue: id, .. }) => {
-                    let string = dialogue
-                        .get(id)
-                        .filter(|string| string.is_present())
-                        .with_context(|| format!("no dialogue string {id}"))?;
-                    println!("Talk -> {}", string.id);
-                    talk = Some(TalkBox::new(&string.script, DEFAULT_PLAYER_NAME));
+                    println!("Talk -> dialogue_{id:05}");
+                    pending_talk = Some((id, TALK_START_DELAY));
                 }
                 None => {}
             }
+        } else {
+            runner.update(rom, input, &mut windows)?;
         }
         field.draw(&mut frame);
-        if let Some(open) = &talk {
-            open.draw(&mut frame, &window, &painter);
-        }
+        windows.draw(&mut frame, &window, &painter);
         display.present(&frame)?;
         std::thread::sleep(FRAME_DURATION.saturating_sub(started.elapsed()));
     }
