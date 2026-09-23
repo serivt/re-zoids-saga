@@ -844,6 +844,25 @@ fn thumb_call_target(at: usize, bytes: [u8; 4]) -> Option<u32> {
     Some(pc.wrapping_add_signed(offset))
 }
 
+/// The experience table: 99 words at ROM `0x66BB58`, entry `n` being the
+/// experience a character needs to reach level `n + 1` (7·n³ from
+/// level 3 on, 14 for level 2).
+pub const EXPERIENCE_TABLE: usize = 0x0066_BB58;
+/// Entries in the experience table.
+pub const EXPERIENCE_LEVELS: usize = 99;
+
+/// Experience needed to reach the level after `level`, or `None` past the
+/// table.
+#[must_use]
+pub fn experience_to_next(rom: &[u8], level: usize) -> Option<u32> {
+    if level >= EXPERIENCE_LEVELS {
+        return None;
+    }
+    let at = EXPERIENCE_TABLE + level * 4;
+    let bytes = rom.get(at..at + 4)?;
+    Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
 /// The scripts the pause menu is assembled from: window openers, the item
 /// list (46), the help line and menu (47), the status submenu (48, 49),
 /// the party panel pieces (64–67), the money box (44, 45) and notices.
@@ -1654,6 +1673,17 @@ mod tests {
         assert_eq!(wallpaper.logo.wrapping(1, 0), 1);
         assert_eq!(wallpaper.texture.width, 32);
         assert_eq!(PAUSE_MENU_SCRIPTS.count, 698);
+    }
+
+    #[test]
+    fn reads_the_experience_table() {
+        let mut rom = vec![0; EXPERIENCE_TABLE + 12];
+        rom[EXPERIENCE_TABLE + 4..EXPERIENCE_TABLE + 8].copy_from_slice(&14u32.to_le_bytes());
+        rom[EXPERIENCE_TABLE + 8..EXPERIENCE_TABLE + 12].copy_from_slice(&56u32.to_le_bytes());
+        assert_eq!(experience_to_next(&rom, 1), Some(14));
+        assert_eq!(experience_to_next(&rom, 2), Some(56));
+        assert_eq!(experience_to_next(&rom, 3), None);
+        assert_eq!(experience_to_next(&rom, EXPERIENCE_LEVELS), None);
     }
 
     #[test]
