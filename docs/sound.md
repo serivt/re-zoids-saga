@@ -56,24 +56,32 @@ range, LFO speed and delay, modulation depth and type, and tune; `0xCD` is an ex
 command the songs here do not use.
 
 Tempo `t` adds `2t` to a counter each frame and every 150 is one tick, so 75 is one
-tick per frame. Sampled envelopes add the attack per frame to 255, multiply by
-decay/256 down to the sustain, and multiply by release/256 after the key goes up; PSG
-envelopes step one of 15 levels every attack, decay or release frames (0 is at once).
-Pitch is `rate × 2^((key − base key + bend × range / 64 + tune / 64 + vibrato) / 12)`.
+tick per frame. A note's volume is velocity × track volume / 128 (0–126). Sampled
+envelopes add the attack per frame to 255, multiply by decay/256 down to the sustain,
+and multiply by release/256 after the key goes up; PSG envelopes rise to volume / 8
+(at most 15) and step one level every attack, decay or release frames (0 is at once),
+holding at goal × sustain / 16. A sample's rate field is its rate at key 60 whatever
+the voice's base key says; a drum's own key replaces the note's, which is how kits
+pitch their samples. Pitch is `rate × 2^((key − 60 + bend × range / 64 + tune / 64 +
+vibrato) / 12)` with the vibrato a triangle of ±modulation / 256 semitones after the
+LFO delay. Reverb adds to every sample the one the buffer held three frames earlier
+times the song's reverb value over 256.
 
 ## Verified
 
-Playing song 7 from the frame the original started it and mixing the sampled
-channels gives a waveform whose correlation with the driver's buffer is 0.95–0.998
-over the first frames and 0.85–0.95 later, with the notes landing on the same frames.
-The overall gain matched after scaling by the master volume over 32. The
-`songcheck` comparison lives in the research notes, not in the tree.
+The driver's sound channel records, read every frame during the title, show the
+envelope rule above exactly (255, then 244, then 121, 60, 29, 14, 6, 2 for a voice
+with decay 245 and release 127), the volume rule (velocity 92 × volume 44 / 128 = 31)
+and the PSG goal (volume 20 gives 2). Playing songs 1 and 7 from the frames the
+original started them and mixing the sampled channels gives waveforms whose
+correlation with the driver's buffer averages 0.75 and 0.90 frame by frame, with the
+notes landing on the same frames and the gain matching after scaling by the master
+volume over 16. The comparison scripts live in the research notes, not in the tree.
 
 ## Not modeled yet
 
-Reverb (the songs ask for it; the game's driver setting is 64 without the enable
-bit, so it may be off), pan (moot in mono), the exact velocity curve, the LFO delay
-and the volume and pan modulation types, the priority rules for stealing channels,
-the PSG envelope timing and sweep (no capture of the hardware registers exists yet),
-and correlation dips on some notes that point to an envelope or voice difference.
+Pan (moot in mono), the volume and pan modulation types, the priority rules for
+stealing channels, the PSG sweep and the exact PSG frequency register, the PSG
+loudness relative to the sampled mix (no capture of the hardware registers exists
+yet), and the remaining correlation dips on some notes.
 The name-entry key sounds and the sounds of the field beyond doors are not known.
