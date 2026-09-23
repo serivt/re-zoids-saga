@@ -47,12 +47,14 @@ fn turned(glyph: &Glyph) -> Glyph {
 }
 
 /// The glyph with `mark` drawn in the two rows above its topmost pixel,
-/// or over its top rows when nothing is above them.
-fn accented(base: &Glyph, mark: Accent) -> Glyph {
+/// or over its top rows when nothing is above them; a dotted letter loses
+/// its dot to the mark.
+fn accented(base: &Glyph, mark: Accent, dotted: bool) -> Glyph {
     let mut glyph = base.clone();
     let is_ink = |index: u8| index != BACKGROUND_INDEX;
-    let top = (0..GLYPH_HEIGHT)
-        .find(|row| (0..GLYPH_WIDTH).any(|x| base.pixel(x, *row).is_some_and(is_ink)))
+    let ink_row = |row: usize| (0..GLYPH_WIDTH).any(|x| base.pixel(x, row).is_some_and(is_ink));
+    let mut top = (0..GLYPH_HEIGHT)
+        .find(|row| ink_row(*row))
         .unwrap_or(GLYPH_HEIGHT);
     let ink = base
         .pixels
@@ -60,6 +62,17 @@ fn accented(base: &Glyph, mark: Accent) -> Glyph {
         .copied()
         .find(|p| is_ink(*p))
         .unwrap_or(0);
+    if dotted {
+        let gap = (top..GLYPH_HEIGHT)
+            .find(|row| !ink_row(*row))
+            .unwrap_or(top);
+        for row in top..gap {
+            for x in 0..GLYPH_WIDTH {
+                glyph.pixels[row * GLYPH_WIDTH + x] = BACKGROUND_INDEX;
+            }
+        }
+        top = (gap..GLYPH_HEIGHT).find(|row| ink_row(*row)).unwrap_or(top);
+    }
     let row = top.saturating_sub(3);
     let dots: &[(usize, usize)] = match mark {
         Accent::Acute => &[(4, 0), (3, 1)],
@@ -143,8 +156,9 @@ impl<'rom> TextPainter<'rom> {
             '¡' => self.font_glyph('！').map(|glyph| turned(&glyph)),
             other => {
                 let mark = accent(other)?;
-                let base = self.font_glyph(full_width(plain_latin(other)))?;
-                Some(accented(&base, mark))
+                let plain = plain_latin(other);
+                let base = self.font_glyph(full_width(plain))?;
+                Some(accented(&base, mark, matches!(plain, 'i' | 'j')))
             }
         }
     }
