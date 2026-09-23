@@ -138,6 +138,7 @@ dependencies = [
 name = "gba-runtime"
 version = "0.1.0"
 dependencies = [
+ "formats",
  "platform",
 ]
 
