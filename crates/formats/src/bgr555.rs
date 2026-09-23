@@ -15,6 +15,14 @@ pub fn parse_palette(data: &[u8]) -> Option<[u16; 16]> {
     Some(colors)
 }
 
+/// Parses every whole 16-entry palette in `data`, in order.
+#[must_use]
+pub fn parse_palettes(data: &[u8]) -> Vec<[u16; 16]> {
+    data.chunks_exact(PALETTE_LEN)
+        .filter_map(parse_palette)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -31,5 +39,14 @@ mod tests {
         assert_eq!(palette[0], 0x7FFF);
         assert_eq!(palette[15], 0x001F);
         assert_eq!(parse_palette(&data[..31]), None);
+    }
+
+    #[test]
+    fn splits_a_bank_into_palettes() {
+        let mut data = vec![0u8; PALETTE_LEN * 2 + 3];
+        data[PALETTE_LEN] = 0x1F;
+        let palettes = parse_palettes(&data);
+        assert_eq!(palettes.len(), 2);
+        assert_eq!(palettes[1][0], 0x001F);
     }
 }

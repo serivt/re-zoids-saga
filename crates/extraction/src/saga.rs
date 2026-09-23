@@ -1,9 +1,10 @@
 //! ROM layout of Zoids Saga (Japan, Rev 1).
 
-use formats::bgr555::{PALETTE_LEN, parse_palette};
+use formats::bgr555::{PALETTE_LEN, parse_palette, parse_palettes};
 use formats::font::{FontError, Glyph, GlyphIndex, RANGE_ENTRY_LEN, TILE_LEN};
 use formats::lz77::Lz77Error;
 use formats::tile::{TileImage, TilePiece, Tileset};
+use formats::tilemap::TileMap;
 use thiserror::Error;
 
 use crate::string_table::StringTable;
@@ -233,4 +234,95 @@ fn rom_offset(pointer: &[u8]) -> Option<usize> {
     address
         .checked_sub(0x0800_0000)
         .map(|offset| offset as usize)
+}
+
+const SCENE_TABLE_OFFSET: usize = 0x001E_70BC;
+const SCENE_RECORD_LEN: usize = 24;
+const SCENE_COUNT: usize = 47;
+const BACKDROP_SIDE: usize = 32;
+
+/// A field scene: a scrolling map over a repeating backdrop.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scene {
+    /// The 4bpp tiles shared by the map and the backdrop.
+    pub tiles: Tileset,
+    /// Background palettes 0–14.
+    pub palettes: Vec<[u16; 16]>,
+    /// The scrolling map, drawn above the backdrop with index 0 transparent.
+    pub map: TileMap,
+    /// The 32×32 backdrop tiled behind the map.
+    pub backdrop: TileMap,
+    /// One nibble per map cell, row-major; meaning not modeled yet.
+    pub attributes: Vec<u8>,
+}
+
+/// Why a scene could not be read.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum SceneError {
+    /// No such scene.
+    #[error("no scene {index}; the table has {SCENE_COUNT}")]
+    NoSuchScene {
+        /// Requested index.
+        index: usize,
+    },
+    /// The ROM is too short or a block is smaller than the record says.
+    #[error("ROM of {len} bytes is too short for scene {index}")]
+    TooShort {
+        /// ROM length.
+        len: usize,
+        /// Scene index.
+        index: usize,
+    },
+    /// A compressed block is not valid LZ77.
+    #[error(transparent)]
+    Lz77(#[from] Lz77Error),
+}
+
+/// Reads a field scene by its index in the scene table.
+///
+/// # Errors
+///
+/// Returns [`SceneError`] when the index is out of range, the ROM is too
+/// short, or a block does not decompress.
+pub fn scene(rom: &[u8], index: usize) -> Result<Scene, SceneError> {
+    if index >= SCENE_COUNT {
+        return Err(SceneError::NoSuchScene { index });
+    }
+    let too_short = || SceneError::TooShort {
+        len: rom.len(),
+        index,
+    };
+    let offset = SCENE_TABLE_OFFSET + index * SCENE_RECORD_LEN;
+    let record = rom
+        .get(offset..offset + SCENE_RECORD_LEN)
+        .ok_or_else(too_short)?;
+    let field = |i: usize| rom_offset(&record[4 * i..4 * i + 4]).ok_or_else(too_short);
+    let size = u32::from_le_bytes([record[4], record[5], record[6], record[7]]);
+    let width = (size & 0xFFFF) as usize;
+    let height = (size >> 16) as usize;
+    let backdrop_len = BACKDROP_SIDE * BACKDROP_SIDE * 2;
+    let backdrop_bytes = rom
+        .get(field(0)?..field(0)? + backdrop_len)
+        .ok_or_else(too_short)?;
+    let block = |offset: usize| -> Result<Vec<u8>, SceneError> {
+        let (bytes, _) = formats::lz77::decompress(rom.get(offset..).ok_or_else(too_short)?)?;
+        Ok(bytes)
+    };
+    let palettes = parse_palettes(&block(field(2)?)?);
+    let tiles = Tileset::from_4bpp(&block(field(3)?)?);
+    let map = TileMap::from_le_bytes(width, height, &block(field(4)?)?).ok_or_else(too_short)?;
+    let backdrop = TileMap::from_le_bytes(BACKDROP_SIDE, BACKDROP_SIDE, backdrop_bytes)
+        .ok_or_else(too_short)?;
+    let attributes = block(field(5)?)?
+        .iter()
+        .flat_map(|byte| [byte & 0x0F, byte >> 4])
+        .take(width * height)
+        .collect();
+    Ok(Scene {
+        tiles,
+        palettes,
+        map,
+        backdrop,
+        attributes,
+    })
 }
