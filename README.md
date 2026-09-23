@@ -14,10 +14,10 @@ caches it in your user-data directory.
 
 ## Status
 
-Early. The workspace and layer boundaries are in place, the launcher identifies a ROM
-(cartridge header + SHA-1 against validated dumps) and the script text codec decodes
-every string table of Zoids Saga (names, items, dialogue, battle quotes, menus). No game
-runs yet.
+Early. The workspace and layer boundaries are in place: the launcher identifies a ROM
+(cartridge header + SHA-1 against validated dumps), the script text codec decodes every
+string table of Zoids Saga (names, items, dialogue, battle quotes, menus), and the
+original 8×16 font is extracted and drawn in an SDL3 window. No game runs yet.
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements
@@ -34,10 +34,11 @@ See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 cargo build
 ```
 
-Identify a ROM with the launcher:
+Identify a ROM and show a script string rendered with the game's font (any
+`<table>_<index>` id; `--dump frame.ppm` writes the frame instead of opening a window):
 
 ```bash
-cargo run -p launcher -- path/to/rom.gba
+cargo run -p launcher -- path/to/rom.gba dialogue_00003
 ```
 
 Dump the game text (all tables, or one of `name`, `item`, `dialogue`, `battle`, `menu`):
