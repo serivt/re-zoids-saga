@@ -15,6 +15,8 @@ const DEFAULT_VOLUME: u8 = 100;
 const DEFAULT_BEND_RANGE: u8 = 2;
 const MAX_PATTERN_DEPTH: usize = 3;
 const LFO_CYCLE: u32 = 256;
+const LFO_AMPLITUDE: u8 = 64;
+const PITCH_STEPS: f64 = 256.0;
 
 /// What a tick asks of the mixer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +95,10 @@ pub struct Track {
     pub modulation: u8,
     /// Modulation type: 0 pitch, 1 volume, 2 pan.
     pub modulation_type: u8,
+    /// Frames the modulation waits after a note before it starts.
+    pub lfo_delay: u8,
     lfo_phase: u32,
+    lfo_wait: u8,
 }
 
 impl Track {
@@ -118,7 +123,9 @@ impl Track {
             lfo_speed: 0,
             modulation: 0,
             modulation_type: 0,
+            lfo_delay: 0,
             lfo_phase: 0,
+            lfo_wait: 0,
         }
     }
 
@@ -134,8 +141,10 @@ impl Track {
         let bend = f64::from(i32::from(self.bend) - i32::from(CENTER)) * f64::from(self.bend_range)
             / f64::from(CENTER);
         let tune = f64::from(i32::from(self.tune) - i32::from(CENTER)) / f64::from(CENTER);
-        let vibrato = if self.modulation_type == 0 {
-            self.lfo() * f64::from(self.modulation) / f64::from(CENTER)
+        let vibrato = if self.modulation_type == 0 && self.lfo_wait == 0 {
+            self.lfo() * f64::from(LFO_AMPLITUDE) * f64::from(self.modulation)
+                / PITCH_STEPS
+                / f64::from(CENTER)
         } else {
             0.0
         };
@@ -158,7 +167,9 @@ impl Track {
     }
 
     fn advance_lfo(&mut self) {
-        if self.modulation > 0 {
+        if self.lfo_wait > 0 {
+            self.lfo_wait -= 1;
+        } else if self.modulation > 0 {
             self.lfo_phase = self.lfo_phase.wrapping_add(u32::from(self.lfo_speed));
         }
     }
@@ -311,6 +322,7 @@ impl Player {
             Command::Bend(value) => track.bend = value,
             Command::BendRange(value) => track.bend_range = value,
             Command::LfoSpeed(value) => track.lfo_speed = value,
+            Command::LfoDelay(value) => track.lfo_delay = value,
             Command::Modulation(value) => track.modulation = value,
             Command::ModulationType(value) => track.modulation_type = value,
             Command::Tune(value) => track.tune = value,
@@ -327,6 +339,8 @@ impl Player {
                 track.key = key.unwrap_or(track.key);
                 track.velocity = velocity.unwrap_or(track.velocity);
                 track.gate = gate.unwrap_or(0);
+                track.lfo_wait = track.lfo_delay;
+                track.lfo_phase = 0;
                 let shifted = i32::from(track.key) + i32::from(track.key_shift);
                 events.push(Event::NoteOn {
                     player,
@@ -336,10 +350,7 @@ impl Player {
                     gate: (length > 0).then(|| u32::from(length) + u32::from(track.gate)),
                 });
             }
-            Command::LfoDelay(_)
-            | Command::Repeat
-            | Command::MemoryAccess
-            | Command::Extended(..) => {}
+            Command::Repeat | Command::MemoryAccess | Command::Extended(..) => {}
         }
         None
     }
@@ -457,10 +468,12 @@ mod tests {
         track.tune = 0;
         assert!((track.pitch_offset() + 1.0).abs() < 1e-9);
         track.tune = CENTER;
-        track.modulation = 64;
+        track.modulation = 128;
         track.lfo_phase = 64;
-        assert!((track.pitch_offset() - 1.0).abs() < 1e-9);
+        assert!((track.pitch_offset() - 0.5).abs() < 1e-9);
         track.lfo_phase = 192;
-        assert!((track.pitch_offset() + 1.0).abs() < 1e-9);
+        assert!((track.pitch_offset() + 0.5).abs() < 1e-9);
+        track.lfo_wait = 3;
+        assert!(track.pitch_offset().abs() < 1e-9);
     }
 }

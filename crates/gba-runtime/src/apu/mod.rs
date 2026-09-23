@@ -26,10 +26,14 @@ pub const PLAYERS: usize = 4;
 const SAMPLED_CHANNELS: usize = 8;
 const SONG_ENTRY_SIZE: usize = 8;
 const MIDDLE_KEY: f64 = 60.0;
+const CONCERT_KEY: f64 = 69.0;
 const SAMPLED_GAIN: i32 = 24;
-const MASTER_VOLUME_STEPS: i32 = 32;
+const MASTER_VOLUME_STEPS: i32 = 16;
 const PSG_GAIN: i32 = 96;
 const WAVE_PATTERN_SIZE: usize = 16;
+const REVERB_APPLIES: u8 = 0x80;
+const REVERB_DELAY_FRAMES: usize = 3;
+const REVERB_STEPS: i32 = 256;
 
 /// The sound driver: song table, players and mixer.
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +46,8 @@ pub struct SoundEngine<'rom> {
     events: Vec<Event>,
     output: Vec<i16>,
     sampled: Vec<i8>,
+    history: Vec<i8>,
+    reverb: u8,
     master_volume: u8,
 }
 
@@ -60,6 +66,8 @@ impl<'rom> SoundEngine<'rom> {
             events: Vec::new(),
             output: vec![0; SAMPLES_PER_FRAME * 2],
             sampled: vec![0; SAMPLES_PER_FRAME],
+            history: vec![0; SAMPLES_PER_FRAME * REVERB_DELAY_FRAMES],
+            reverb: 0,
             master_volume: master_volume.min(15),
         }
     }
@@ -93,6 +101,9 @@ impl<'rom> SoundEngine<'rom> {
     pub fn play(&mut self, song: usize) -> Result<(), M4aError> {
         let (header, player) = self.song(song)?;
         self.silence(player, None);
+        if header.reverb & REVERB_APPLIES != 0 {
+            self.reverb = header.reverb & !REVERB_APPLIES;
+        }
         self.players[player].start(song, &header);
         Ok(())
     }
@@ -114,6 +125,22 @@ impl<'rom> SoundEngine<'rom> {
     pub fn stop_music(&mut self) {
         self.silence(0, None);
         self.players[0].stop();
+    }
+
+    /// Voices sounding now: sampled ones and programmable ones.
+    #[must_use]
+    pub fn voice_counts(&self) -> (usize, usize) {
+        let psg = self
+            .channels
+            .iter()
+            .filter(|channel| channel.psg_kind().is_some() && channel.level() > 0)
+            .count();
+        let sampled = self
+            .channels
+            .iter()
+            .filter(|channel| channel.psg_kind().is_none() && channel.level() > 0)
+            .count();
+        (sampled, psg)
     }
 
     /// The last frame's samples, stereo interleaved.
@@ -299,6 +326,7 @@ impl<'rom> SoundEngine<'rom> {
         channel.gate = gate.unwrap_or(0);
         channel.priority = self.players[player].tracks()[track].priority;
         channel.volume = scaled_volume(velocity, self.players[player].tracks()[track].volume);
+        channel.set_psg_goal(channel.volume);
         self.set_pitch(&mut channel, &voice);
         self.place(channel);
         Ok(())
@@ -308,25 +336,18 @@ impl<'rom> SoundEngine<'rom> {
         let track = &self.players[channel.player].tracks()[channel.track];
         let offset = track.pitch_offset();
         let hertz = match voice {
-            Voice::Sample {
-                base_key,
-                fixed,
-                sample,
-                ..
-            } => {
+            Voice::Sample { fixed, sample, .. } => {
                 let base =
                     f64::from(Sample::read(self.rom, *sample).map_or(0, |s| s.frequency)) / 1024.0;
                 if *fixed {
                     base
                 } else {
-                    base * semitones(f64::from(channel.key) - f64::from(*base_key) + offset)
+                    base * semitones(f64::from(channel.key) - MIDDLE_KEY + offset)
                 }
             }
-            Voice::Square { base_key, .. }
-            | Voice::Wave { base_key, .. }
-            | Voice::Noise { base_key, .. } => {
-                let key = f64::from(channel.key) - f64::from(*base_key) + MIDDLE_KEY + offset;
-                psg::tone_hertz(psg::tone_register(440.0 * semitones(key - 69.0)))
+            Voice::Square { .. } | Voice::Wave { .. } | Voice::Noise { .. } => {
+                let key = f64::from(channel.key) + offset;
+                psg::tone_hertz(psg::tone_register(440.0 * semitones(key - CONCERT_KEY)))
             }
             _ => 0.0,
         };
@@ -372,8 +393,12 @@ impl<'rom> SoundEngine<'rom> {
         self.channels.retain(|channel| !channel.is_off());
     }
 
+    /// Mixes one frame. The driver's reverb adds, to every sample, the
+    /// sample its buffer held three frames earlier scaled by the song's
+    /// reverb over 256; the history keeps those frames.
     fn mix(&mut self) {
         let rom = self.rom;
+        self.history.rotate_left(SAMPLES_PER_FRAME);
         for index in 0..SAMPLES_PER_FRAME {
             let mut sampled = 0i32;
             let mut psg = 0i32;
@@ -385,9 +410,14 @@ impl<'rom> SoundEngine<'rom> {
                     sampled += value;
                 }
             }
-            let sampled = (sampled / 256 * i32::from(self.master_volume) / MASTER_VOLUME_STEPS)
+            let oldest = self.history[(REVERB_DELAY_FRAMES - 1) * SAMPLES_PER_FRAME + index];
+            let echo = i32::from(oldest) * i32::from(self.reverb) / REVERB_STEPS;
+            let sampled = (sampled / 256 * i32::from(self.master_volume) / MASTER_VOLUME_STEPS
+                + echo)
                 .clamp(-128, 127);
             self.sampled[index] = i8::try_from(sampled).unwrap_or(0);
+            self.history[(REVERB_DELAY_FRAMES - 1) * SAMPLES_PER_FRAME + index] =
+                self.sampled[index];
             let value = (sampled * SAMPLED_GAIN + psg * PSG_GAIN).clamp(-32768, 32767);
             let value = i16::try_from(value).unwrap_or(0);
             self.output[index * 2] = value;
@@ -396,9 +426,10 @@ impl<'rom> SoundEngine<'rom> {
     }
 }
 
+/// A note's volume as the driver computes it: velocity times track volume
+/// over 128, so 0–126.
 fn scaled_volume(velocity: u8, volume: u8) -> u8 {
-    u8::try_from(u32::from(velocity.min(127)) * u32::from(volume.min(127)) * 255 / (127 * 127))
-        .unwrap_or(255)
+    u8::try_from((u32::from(velocity.min(127)) * u32::from(volume.min(127))) >> 7).unwrap_or(126)
 }
 
 fn semitones(offset: f64) -> f64 {
@@ -445,10 +476,16 @@ mod tests {
         assert_eq!(engine.playing(0), Some(0));
         let frame = engine.frame().unwrap();
         assert_eq!(frame.len(), SAMPLES_PER_FRAME * 2);
-        assert_eq!(i32::from(frame[0]), 100 * 15 / 32 * SAMPLED_GAIN);
+        assert_eq!(
+            i32::from(frame[0]),
+            100 * 126 / 255 * 15 / 16 * SAMPLED_GAIN
+        );
         assert_eq!(frame[0], frame[1]);
         assert!(frame[63 * 2] != 0 && frame[64 * 2] == 0);
-        assert_eq!(i32::from(engine.sampled_buffer()[0]), 100 * 15 / 32);
+        assert_eq!(
+            i32::from(engine.sampled_buffer()[0]),
+            100 * 126 / 255 * 15 / 16
+        );
         engine.frame().unwrap();
         assert_eq!(engine.playing(0), Some(0));
         engine.frame().unwrap();
@@ -472,8 +509,9 @@ mod tests {
 
     #[test]
     fn volumes_scale_by_velocity_and_track_volume() {
-        assert_eq!(scaled_volume(127, 127), 255);
+        assert_eq!(scaled_volume(127, 127), 126);
         assert_eq!(scaled_volume(127, 0), 0);
-        assert_eq!(scaled_volume(64, 127), 128);
+        assert_eq!(scaled_volume(92, 44), 31);
+        assert_eq!(scaled_volume(76, 47), 27);
     }
 }

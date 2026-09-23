@@ -62,8 +62,9 @@ pub struct Channel {
     pub priority: u8,
     /// Frames since the note started; older channels are stolen first.
     pub age: u32,
-    /// Velocity times track volume, 0–255.
+    /// Velocity times track volume over 128, 0–126.
     pub volume: u8,
+    goal: i32,
     envelope: Envelope,
     phase: Phase,
     level: i32,
@@ -84,6 +85,7 @@ impl Channel {
             priority: 0,
             age: 0,
             volume: 0,
+            goal: FULL_PSG,
             envelope,
             phase: Phase::Attack,
             level: 0,
@@ -107,9 +109,23 @@ impl Channel {
         }
     }
 
+    /// Sets the volume a programmable channel's envelope rises to, from
+    /// the note's volume (0–126): the driver's 0–15 goal, an eighth of the
+    /// volume, with the sustain scaled to it.
+    pub fn set_psg_goal(&mut self, volume: u8) {
+        self.goal = (i32::from(volume) >> 3).min(FULL_PSG);
+        if self.phase == Phase::Decay && self.level > self.goal {
+            self.level = self.goal;
+        }
+    }
+
+    fn psg_sustain(&self) -> i32 {
+        (self.goal * i32::from(self.envelope.sustain.min(15)) + FULL_PSG) >> 4
+    }
+
     fn begin_envelope(&mut self) {
         if self.is_psg() && self.envelope.attack == 0 {
-            self.level = FULL_PSG;
+            self.level = self.goal;
             self.phase = Phase::Decay;
             self.counter = self.envelope.decay;
         } else {
@@ -217,16 +233,16 @@ impl Channel {
         let Envelope {
             attack,
             decay,
-            sustain,
             release,
+            ..
         } = self.envelope;
-        let sustain = i32::from(sustain.min(15));
+        let sustain = self.psg_sustain();
         match self.phase {
             Phase::Attack => {
                 if self.tick(attack) {
                     self.level += 1;
-                    if self.level >= FULL_PSG {
-                        self.level = FULL_PSG;
+                    if self.level >= self.goal {
+                        self.level = self.goal;
                         self.phase = Phase::Decay;
                         self.counter = decay;
                     }
@@ -379,6 +395,11 @@ mod tests {
         assert_eq!(channel.level(), 15);
         channel.frame();
         assert_eq!(channel.level(), 7);
+        let source = Source::Psg(PsgChannel::new(PsgKind::Square2));
+        let mut half = Channel::start(0, 0, 60, envelope, source);
+        half.set_psg_goal(66);
+        half.frame();
+        assert_eq!(half.level(), 4);
         channel.release();
         channel.frame();
         assert_eq!(channel.level(), 7);
