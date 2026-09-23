@@ -1,6 +1,7 @@
 //! SDL3 implementation of the platform traits.
 
-use platform::{Button, Display, Event, Frame, Input, PlatformError};
+use platform::{AudioOut, Button, Display, Event, Frame, Input, PlatformError};
+use sdl3::audio::{AudioFormat, AudioSpec, AudioStreamOwner};
 use sdl3::event::Event as SdlEvent;
 use sdl3::keyboard::{Keycode, Scancode};
 use sdl3::pixels::PixelFormat;
@@ -9,6 +10,8 @@ use sdl3::video::WindowContext;
 use sdl3::{EventPump, Sdl};
 
 const BACKEND: &str = "sdl3";
+const AUDIO_CHANNELS: i32 = 2;
+const BYTES_PER_PAIR: usize = 4;
 const BYTES_PER_PIXEL: usize = 3;
 const KEY_MAP: [(Scancode, Button); 8] = [
     (Scancode::Up, Button::Up),
@@ -24,7 +27,7 @@ const KEY_MAP: [(Scancode, Button); 8] = [
 /// A window backed by SDL3 that shows frames of a fixed size, scaled up
 /// with nearest-neighbor sampling.
 pub struct Sdl3Display {
-    _sdl: Sdl,
+    sdl: Sdl,
     canvas: WindowCanvas,
     texture_creator: TextureCreator<WindowContext>,
     event_pump: EventPump,
@@ -60,13 +63,53 @@ impl Sdl3Display {
         let texture_creator = canvas.texture_creator();
         let event_pump = sdl.event_pump().map_err(backend_error)?;
         Ok(Self {
-            _sdl: sdl,
+            sdl,
             canvas,
             texture_creator,
             event_pump,
             frame_width,
             frame_height,
         })
+    }
+}
+
+impl Sdl3Display {
+    /// Opens the default playback device for interleaved stereo 16-bit
+    /// samples at `rate` hertz; the backend converts to what the device
+    /// wants.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlatformError`] when SDL cannot open the device.
+    pub fn open_audio(&self, rate: u32) -> Result<Sdl3Audio, PlatformError> {
+        let audio = self.sdl.audio().map_err(backend_error)?;
+        let rate = i32::try_from(rate).map_err(backend_error)?;
+        let spec = AudioSpec::new(Some(rate), Some(AUDIO_CHANNELS), Some(AudioFormat::S16LE));
+        let device = audio.open_playback_device(&spec).map_err(backend_error)?;
+        let stream = device
+            .open_device_stream(Some(&spec))
+            .map_err(backend_error)?;
+        stream.resume().map_err(backend_error)?;
+        Ok(Sdl3Audio { stream })
+    }
+}
+
+/// A playback stream on the default device.
+pub struct Sdl3Audio {
+    stream: AudioStreamOwner,
+}
+
+impl AudioOut for Sdl3Audio {
+    fn queue(&mut self, samples: &[i16]) -> Result<(), PlatformError> {
+        self.stream.put_data_i16(samples).map_err(backend_error)
+    }
+
+    fn queued_pairs(&self) -> usize {
+        self.stream
+            .queued_bytes()
+            .ok()
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .map_or(0, |bytes| bytes / BYTES_PER_PAIR)
     }
 }
 
