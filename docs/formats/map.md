@@ -63,8 +63,8 @@ and a pointer to the list. Each object is 20 bytes:
 Object 0 is the player's entry; the loader spawns it at the arrival metatile and the
 rest where the list says. `ch56` in the first room references dialogue `0x2E2` = 738,
 the queen's line "{name}・・・　どうしたのですか。", which is what the box showed in the
-emulator. Characters of kind 2 wander the room a step at a time; that walk is not
-modeled yet. The first room (map 4) lists the player (`0x98`), `ch56` at
+emulator. Characters of kind 2 wander the room a step at a time (see
+[../field.md](../field.md)). The first room (map 4) lists the player (`0x98`), `ch56` at
 (35, 2), `ch57` at (39, 16) and the chair `ma07` at (6, 2), which blocks the metatile
 under it: a step right from the start position does nothing. Maps whose record id has
 bit 15 set overlay the list with saved state (moved or hidden characters); that overlay
