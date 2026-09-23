@@ -58,41 +58,43 @@ as their source text:
 
 | Key | Text |
 |---|---|
-| `name-entry/help` | The help line, 20 cells |
-| `name-entry/alphabet/N` | Page N: a label line (up to 7 cells), then up to 5 lines of up to 13 characters each; a space is an empty cell |
+| `name-entry/help` | The help line, 160 pixels |
+| `name-entry/alphabet/N` | Page N: a label line (up to 72 pixels), then up to 5 lines of up to 13 characters each; a space is an empty cell |
 
 A translation may have any number of pages; SELECT cycles them. The label window
 grows to the left for longer labels. Characters the player picks are stored as
 written, so the name prints and draws through the same rules as any text.
 
-## Layout
+## Fonts and layout
 
-The engine wraps at the window's inner width, one character per 8-pixel cell, and a
-menu window keeps two cells free on each side for the cursor (see
-[formats/window.md](formats/window.md)):
+Japanese text draws with the ROM's 8×16 font, one cell per character. Latin text
+draws with this project's own pixel font (`assets/fonts/latin/re-zoids-latin.txt`,
+an original asset in the repository): proportional, 3–5 pixels wide plus a pixel of
+spacing, capitals 8 pixels tall, with accented letters built from the plain ones
+(acute, grave, circumflex, diaeresis, tilde, cedilla) and `¿` `¡` as `?` `!` turned
+around. Characters neither font has draw as the fallback glyph. In the name entry's
+grid and name field every character is centered in an 8-pixel cell so it lines up
+with the cursor and the slot marks.
 
-| Where | Cells per line | Lines |
-|---|---|---|
-| Story box (dialogue) | 28, or 22 beside a portrait | 2 per page, longer messages scroll |
-| Title menu | 5 | 3 |
-| Name-entry question | 28 | 2 |
-| Pause-menu list | 5 | 6 |
+Text wraps by pixels at the window's inner width; a menu window keeps two cells free
+on each side for the cursor (see [formats/window.md](formats/window.md)). What fits
+on a line, in Latin letters of average width:
 
-When a translation is loaded the launcher walks each translated string (and the
+| Where | Pixels per line | Roughly | Lines |
+|---|---|---|---|
+| Story box (dialogue) | 224, or 176 beside a portrait | 40 or 30 letters | 2 per page, longer messages scroll |
+| Title menu | 40 before enlarging | 7 letters | 3 |
+| Name-entry help | 160 | 28 letters | 1 |
+| Name-entry question | 224 | 40 letters | 2 |
+| Pause-menu list | 40 before enlarging | 7 letters | 6 |
+
+When a translation is loaded the game walks each translated string (and the
 strings it calls) to find the window every message lands in, and enlarges the windows
 whose translated lines do not fit: a window grows to the widest line plus its margins
 (and, for a menu, to the number of choices), keeping its center where it was and
-staying on screen.
-The title menu, for instance, grows from 5 to 13 cells for "Nueva partida". The
-launcher prints how many windows it enlarged and one line per message that cannot fit
-even a screen-wide window; those still wrap mid-word. The story box beside a
-portrait is already the full screen width, so its lines must stay within 22 cells.
-
-The ROM font has no half-width Latin letters, so ASCII draws with its full-width
-forms (`Ａ`). Accented letters are built from the plain letter with the mark drawn
-above it (acute, grave, circumflex, diaeresis, tilde), and `¿` and `¡` are `？` and
-`！` turned around; other characters the font lacks draw as the fallback glyph. A
-modern Latin font is future work.
+staying on screen. The launcher prints one line per message that cannot fit even a
+screen-wide window; those still wrap mid-word. The story box beside a portrait is
+already the full screen width, so its lines must stay within 176 pixels.
 
 ## Not modeled yet
 

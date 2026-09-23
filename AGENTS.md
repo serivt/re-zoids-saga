@@ -74,7 +74,7 @@ Localization is a first-class subsystem, not an afterthought:
   stays Japanese.
 - Internal text encoding is **UTF-8/Unicode** everywhere. Original ROM text encodings are converted at extraction time.
 - Text layout (line wrapping, box fitting) is computed dynamically by the engine per language and font — never pre-baked into the strings.
-- Fonts: the ROM's font for now (Latin letters through their full-width forms); modern TTF/OTF assets organized per script (latin, japanese, symbols) with fallback support are future work.
+- Fonts: the ROM's font for Japanese and this project's own Latin pixel font (`assets/fonts/latin/`, text-art source parsed at build time) for translations; TTF/OTF assets with fallback support are future work.
 - Every localizable category (dialogue, menus, items, Zoids, attacks, characters, locations, tutorials) uses the same pipeline.
 - Validation of a translation against the windows' layout constraints is future work.
 
