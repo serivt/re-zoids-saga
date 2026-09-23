@@ -240,6 +240,9 @@ const SCENE_TABLE_OFFSET: usize = 0x001E_70BC;
 const SCENE_RECORD_LEN: usize = 24;
 const SCENE_COUNT: usize = 47;
 const BACKDROP_SIDE: usize = 32;
+/// Side of a map attribute cell in map tiles.
+pub const METATILE_TILES: usize = 2;
+const BLOCKED: u16 = 0x8000;
 
 /// A field scene: a scrolling map over a repeating backdrop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,8 +255,35 @@ pub struct Scene {
     pub map: TileMap,
     /// The 32×32 backdrop tiled behind the map.
     pub backdrop: TileMap,
-    /// One nibble per map cell, row-major; meaning not modeled yet.
-    pub attributes: Vec<u8>,
+    /// One entry per 16×16 metatile, row-major, `width / 2` per row;
+    /// bit 15 marks a cell the player cannot enter.
+    pub attributes: Vec<u16>,
+}
+
+impl Scene {
+    /// Attribute columns.
+    #[must_use]
+    pub fn attribute_columns(&self) -> usize {
+        self.map.width / METATILE_TILES
+    }
+
+    /// Attribute rows.
+    #[must_use]
+    pub fn attribute_rows(&self) -> usize {
+        self.map.height / METATILE_TILES
+    }
+
+    /// Whether metatile `(column, row)` blocks walking; cells outside the
+    /// map block too.
+    #[must_use]
+    pub fn blocked(&self, column: usize, row: usize) -> bool {
+        if column >= self.attribute_columns() || row >= self.attribute_rows() {
+            return true;
+        }
+        self.attributes
+            .get(row * self.attribute_columns() + column)
+            .is_none_or(|attribute| attribute & BLOCKED != 0)
+    }
 }
 
 /// Why a scene could not be read.
@@ -314,9 +344,9 @@ pub fn scene(rom: &[u8], index: usize) -> Result<Scene, SceneError> {
     let backdrop = TileMap::from_le_bytes(BACKDROP_SIDE, BACKDROP_SIDE, backdrop_bytes)
         .ok_or_else(too_short)?;
     let attributes = block(field(5)?)?
-        .iter()
-        .flat_map(|byte| [byte & 0x0F, byte >> 4])
-        .take(width * height)
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .take(width / METATILE_TILES * (height / METATILE_TILES))
         .collect();
     Ok(Scene {
         tiles,
@@ -331,8 +361,8 @@ const SPRITE_TABLE_OFFSET: usize = 0x0031_8E04;
 const SPRITE_RECORD_LEN: usize = 32;
 const SPRITE_COUNT: usize = 248;
 const SPRITE_TILE_ROWS: usize = 4;
-/// Tag of the player's sprite sheet.
-pub const PLAYER_SPRITE_TAG: &str = "ch00";
+/// Record of the player's map sprite sheet (tagged `mz25`; tags are not unique).
+pub const PLAYER_SPRITE_SHEET: usize = 151;
 
 /// A sheet of same-sized sprite frames stored uncompressed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -448,7 +478,8 @@ pub fn sprite_sheet(rom: &[u8], index: usize) -> Result<SpriteSheet, SpriteSheet
     })
 }
 
-/// Reads the sprite sheet carrying `tag`.
+/// Reads the first sprite sheet carrying `tag`; tags repeat, so callers that
+/// need a specific record use [`sprite_sheet`].
 ///
 /// # Errors
 ///
