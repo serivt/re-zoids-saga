@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use extraction::saga::{self, Portrait};
 use platform::Frame;
 
+use crate::text::{CELL_WIDTH, TextMetrics};
 use crate::translation::Translation;
 use crate::{FrameStyle, ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
@@ -47,6 +48,11 @@ pub struct Window {
     pub style: u8,
     /// Text lines, the cursor being on the last.
     pub lines: Vec<String>,
+    /// Pixels each line takes, alongside `lines`.
+    pub widths: Vec<usize>,
+    /// Whether every character takes one cell, for grids that align with
+    /// sprites, instead of its own width.
+    pub fixed_cells: bool,
     /// Portrait shown, if any.
     pub portrait: Option<Portrait>,
     /// Whether the "more" prompt is lit.
@@ -101,29 +107,48 @@ impl Window {
         self.height.saturating_sub(2) / 2
     }
 
-    fn put_char(&mut self, ch: char) {
+    /// Pixels a text line can take.
+    #[must_use]
+    pub fn pixels(&self) -> usize {
+        self.columns() * CELL_WIDTH
+    }
+
+    fn put_char(&mut self, ch: char, advance: usize, inset: usize) {
+        let (advance, inset) = if self.fixed_cells {
+            (CELL_WIDTH, 0)
+        } else {
+            (advance, inset)
+        };
         if self
-            .lines
+            .widths
             .last()
-            .is_some_and(|line| line.chars().count() >= self.columns())
+            .is_some_and(|width| width + advance > self.pixels())
         {
             self.line_break();
         }
         if self.lines.is_empty() {
             self.lines.push(String::new());
+            self.widths.push(0);
         }
-        if let Some(line) = self.lines.last_mut() {
+        if let (Some(line), Some(width)) = (self.lines.last_mut(), self.widths.last_mut()) {
+            if line.is_empty() {
+                *width = inset;
+            }
             line.push(ch);
+            *width += advance;
         }
     }
 
     fn line_break(&mut self) {
         if self.lines.is_empty() {
             self.lines.push(String::new());
+            self.widths.push(0);
         }
         self.lines.push(String::new());
+        self.widths.push(0);
         while self.lines.len() > self.rows().max(1) {
             self.lines.remove(0);
+            self.widths.remove(0);
         }
     }
 }
@@ -137,6 +162,7 @@ pub struct ScriptWindows<'rom> {
     sounds: Vec<u8>,
     opened: u64,
     translation: Translation,
+    metrics: TextMetrics,
 }
 
 impl<'rom> ScriptWindows<'rom> {
@@ -151,6 +177,25 @@ impl<'rom> ScriptWindows<'rom> {
             sounds: Vec::new(),
             opened: 0,
             translation: Translation::default(),
+            metrics: TextMetrics::default(),
+        }
+    }
+
+    /// Lays text out with `metrics` from now on.
+    pub fn set_metrics(&mut self, metrics: TextMetrics) {
+        self.metrics = metrics;
+    }
+
+    /// The character widths text is laid out with.
+    #[must_use]
+    pub fn metrics(&self) -> &TextMetrics {
+        &self.metrics
+    }
+
+    /// Gives window `id` one cell per character, or its own widths.
+    pub fn set_fixed_cells(&mut self, id: u8, fixed: bool) {
+        if let Some(window) = self.window_mut(id) {
+            window.fixed_cells = fixed;
         }
     }
 
@@ -223,7 +268,11 @@ impl<'rom> ScriptWindows<'rom> {
             }
             for (row, line) in window.lines.iter().enumerate() {
                 let y = origin.1 + i32::try_from(row * LINE_HEIGHT).unwrap_or(i32::MAX);
-                painter.draw(frame, origin.0, y, line, skin.palette());
+                if window.fixed_cells {
+                    painter.draw_cells(frame, origin.0, y, line, skin.palette());
+                } else {
+                    painter.draw(frame, origin.0, y, line, skin.palette());
+                }
             }
             if window.prompt {
                 skin.draw_prompt(
@@ -279,6 +328,8 @@ impl ScriptHost for ScriptWindows<'_> {
                 kind,
                 style,
                 lines: Vec::new(),
+                widths: Vec::new(),
+                fixed_cells: false,
                 portrait: None,
                 prompt: false,
                 visible: false,
@@ -324,13 +375,16 @@ impl ScriptHost for ScriptWindows<'_> {
     fn clear_window(&mut self, id: u8) {
         if let Some(window) = self.window_mut(id) {
             window.lines.clear();
+            window.widths.clear();
             window.prompt = false;
         }
     }
 
     fn put_char(&mut self, id: u8, ch: char) {
+        let advance = self.metrics.advance(ch);
+        let inset = self.metrics.inset(ch);
         if let Some(window) = self.window_mut(id) {
-            window.put_char(ch);
+            window.put_char(ch, advance, inset);
         }
     }
 

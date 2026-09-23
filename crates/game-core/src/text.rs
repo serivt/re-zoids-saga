@@ -1,10 +1,21 @@
-//! Drawing game text with the original 8×16 font.
+//! Drawing game text: the ROM's 8×16 font for its own characters and
+//! this project's Latin pixel font, proportional and narrower, for the
+//! letters a translation needs.
 
 use formats::font::{GLYPH_HEIGHT, GLYPH_WIDTH, Glyph, GlyphIndex, shift_jis_code};
+use formats::pixel_font::{PIXEL_FONT_ROWS, PixelFont, PixelGlyph};
 use gba_runtime::ppu::{IndexedImage, Palette, draw_indexed};
 use platform::Frame;
 
+/// The project's Latin font, an original asset.
+pub const LATIN_FONT_SOURCE: &str = include_str!("../../../assets/fonts/latin/re-zoids-latin.txt");
 const BACKGROUND_INDEX: u8 = 1;
+const INK_INDEX: u8 = 15;
+const LATIN_TOP: usize = 4;
+const LATIN_SPACING: usize = 1;
+const LATIN_INSET: usize = 3;
+/// Pixels one cell of the ROM font takes.
+pub const CELL_WIDTH: usize = GLYPH_WIDTH;
 const FULL_WIDTH_OFFSET: u32 = 0xFEE0;
 const IDEOGRAPHIC_SPACE: char = '\u{3000}';
 
@@ -110,11 +121,78 @@ fn plain_latin(ch: char) -> char {
     }
 }
 
+/// How wide characters are, for laying text out without drawing it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TextMetrics {
+    latin: PixelFont,
+}
+
+impl TextMetrics {
+    /// Metrics over the project's Latin font.
+    #[must_use]
+    pub fn standard() -> Self {
+        Self {
+            latin: PixelFont::parse(LATIN_FONT_SOURCE).unwrap_or_default(),
+        }
+    }
+
+    /// The Latin glyph of `ch`, drawn or built from the font.
+    fn latin_glyph(&self, ch: char) -> Option<PixelGlyph> {
+        if let Some(glyph) = self.latin.glyph(ch) {
+            return Some(*glyph);
+        }
+        match ch {
+            '¿' => self.latin.glyph('?').map(PixelGlyph::turned),
+            '¡' => self.latin.glyph('!').map(PixelGlyph::turned),
+            'ç' | 'Ç' => self.latin.glyph(plain_latin(ch)).map(|base| cedilla(*base)),
+            other => {
+                let mark = accent(other)?;
+                let base = self.latin.glyph(plain_latin(other))?;
+                Some(latin_accented(
+                    *base,
+                    mark,
+                    matches!(plain_latin(other), 'i' | 'j'),
+                ))
+            }
+        }
+    }
+
+    /// Whether `ch` draws with the Latin font.
+    #[must_use]
+    pub fn is_latin(&self, ch: char) -> bool {
+        self.latin_glyph(ch).is_some()
+    }
+
+    /// Pixels the pen moves after `ch`: its Latin width plus a space, or a
+    /// full cell for the ROM font.
+    #[must_use]
+    pub fn advance(&self, ch: char) -> usize {
+        self.latin_glyph(ch)
+            .map_or(CELL_WIDTH, |glyph| usize::from(glyph.width) + LATIN_SPACING)
+    }
+
+    /// Pixels a line starting with `first` is set in from the window's
+    /// edge: Latin letters get a little room, the ROM's glyphs carry their
+    /// own.
+    #[must_use]
+    pub fn inset(&self, first: char) -> usize {
+        if self.is_latin(first) { LATIN_INSET } else { 0 }
+    }
+
+    /// Pixels `text` takes on one line, its inset included.
+    #[must_use]
+    pub fn width(&self, text: &str) -> usize {
+        let inset = text.chars().next().map_or(0, |first| self.inset(first));
+        inset + text.chars().map(|ch| self.advance(ch)).sum::<usize>()
+    }
+}
+
 /// Draws strings with a font read from a ROM image.
 pub struct TextPainter<'rom> {
     rom: &'rom [u8],
     index: GlyphIndex,
     fallback: Option<Glyph>,
+    metrics: TextMetrics,
 }
 
 impl<'rom> TextPainter<'rom> {
@@ -126,7 +204,14 @@ impl<'rom> TextPainter<'rom> {
             rom,
             index,
             fallback,
+            metrics: TextMetrics::standard(),
         }
+    }
+
+    /// The painter's character widths.
+    #[must_use]
+    pub fn metrics(&self) -> &TextMetrics {
+        &self.metrics
     }
 
     /// Glyph for a character, or the fallback glyph when the font lacks it.
@@ -163,29 +248,148 @@ impl<'rom> TextPainter<'rom> {
         }
     }
 
-    /// Draws `text` with its top-left corner at `(x, y)`, one glyph cell per
-    /// character and one glyph row per line; the background index is
+    /// Draws `text` with its top-left corner at `(x, y)`, one glyph row per
+    /// line, Latin letters at their own widths; the background index is
     /// transparent. Returns the height drawn in pixels.
     pub fn draw(&self, frame: &mut Frame, x: i32, y: i32, text: &str, palette: &Palette) -> i32 {
+        self.draw_lines(frame, x, y, text, palette, false)
+    }
+
+    /// Draws `text` like [`Self::draw`] but one cell per character, Latin
+    /// letters centered in theirs, for grids that align with sprites.
+    pub fn draw_cells(
+        &self,
+        frame: &mut Frame,
+        x: i32,
+        y: i32,
+        text: &str,
+        palette: &Palette,
+    ) -> i32 {
+        self.draw_lines(frame, x, y, text, palette, true)
+    }
+
+    fn draw_lines(
+        &self,
+        frame: &mut Frame,
+        x: i32,
+        y: i32,
+        text: &str,
+        palette: &Palette,
+        cells: bool,
+    ) -> i32 {
         let mut lines = 0;
         for (line, content) in text.lines().enumerate() {
             lines = line + 1;
             let line_y = y + cell_offset(line, GLYPH_HEIGHT);
-            for (column, ch) in content.chars().enumerate() {
-                let Some(glyph) = self.glyph(ch) else {
+            let mut pen = if cells {
+                0
+            } else {
+                content
+                    .chars()
+                    .next()
+                    .map_or(0, |first| self.metrics.inset(first))
+            };
+            for ch in content.chars() {
+                if let Some(glyph) = self.metrics.latin_glyph(ch) {
+                    let inset = if cells {
+                        (CELL_WIDTH - usize::from(glyph.width).min(CELL_WIDTH)) / 2
+                    } else {
+                        0
+                    };
+                    draw_latin(
+                        frame,
+                        x + cell_offset(pen + inset, 1),
+                        line_y,
+                        &glyph,
+                        palette,
+                    );
+                    pen += if cells {
+                        CELL_WIDTH
+                    } else {
+                        usize::from(glyph.width) + LATIN_SPACING
+                    };
                     continue;
-                };
-                let image = IndexedImage {
-                    width: GLYPH_WIDTH,
-                    height: GLYPH_HEIGHT,
-                    indices: &glyph.pixels,
-                };
-                let position = (x + cell_offset(column, GLYPH_WIDTH), line_y);
-                draw_indexed(frame, position, image, palette, Some(BACKGROUND_INDEX));
+                }
+                if let Some(glyph) = self.glyph(ch) {
+                    let image = IndexedImage {
+                        width: GLYPH_WIDTH,
+                        height: GLYPH_HEIGHT,
+                        indices: &glyph.pixels,
+                    };
+                    let position = (x + cell_offset(pen, 1), line_y);
+                    draw_indexed(frame, position, image, palette, Some(BACKGROUND_INDEX));
+                }
+                pen += CELL_WIDTH;
             }
         }
         cell_offset(lines, GLYPH_HEIGHT)
     }
+}
+
+/// Draws a Latin glyph with its box top at `LATIN_TOP` rows below `y`.
+fn draw_latin(frame: &mut Frame, x: i32, y: i32, glyph: &PixelGlyph, palette: &Palette) {
+    let color = palette.color(INK_INDEX);
+    for row in 0..PIXEL_FONT_ROWS {
+        for column in 0..usize::from(glyph.width) {
+            if glyph.pixel(column, row) {
+                let px = x + cell_offset(column, 1);
+                let py = y + cell_offset(LATIN_TOP + row, 1);
+                if let (Ok(px), Ok(py)) = (usize::try_from(px), usize::try_from(py)) {
+                    frame.set_pixel(px, py, color);
+                }
+            }
+        }
+    }
+}
+
+/// A Latin glyph with `mark` in the two rows above its topmost ink (the
+/// two rows at the top when nothing is above it); a dotted letter loses
+/// its dot to the mark.
+fn latin_accented(base: PixelGlyph, mark: Accent, dotted: bool) -> PixelGlyph {
+    let mut glyph = base;
+    let mut top = glyph
+        .rows
+        .iter()
+        .position(|row| *row != 0)
+        .unwrap_or(PIXEL_FONT_ROWS);
+    if dotted {
+        let gap = (top..PIXEL_FONT_ROWS)
+            .find(|row| glyph.rows[*row] == 0)
+            .unwrap_or(top);
+        for row in top..gap {
+            glyph.rows[row] = 0;
+        }
+        top = (gap..PIXEL_FONT_ROWS)
+            .find(|row| glyph.rows[*row] != 0)
+            .unwrap_or(top);
+    }
+    let row = top.saturating_sub(3);
+    let dots: &[(usize, usize)] = match mark {
+        Accent::Acute => &[(3, 0), (2, 1)],
+        Accent::Grave => &[(1, 0), (2, 1)],
+        Accent::Circumflex => &[(2, 0), (1, 1), (3, 1)],
+        Accent::Diaeresis => &[(1, 1), (3, 1)],
+        Accent::Tilde => &[(1, 0), (3, 0), (0, 1), (2, 1)],
+    };
+    let width = usize::from(glyph.width);
+    for (x, dy) in dots {
+        let x = (*x).min(width.saturating_sub(1));
+        glyph.rows[row + dy] |= 1 << x;
+    }
+    glyph
+}
+
+/// A Latin glyph with a cedilla hanging from its bottom.
+fn cedilla(base: PixelGlyph) -> PixelGlyph {
+    let mut glyph = base;
+    let bottom = glyph.rows.iter().rposition(|row| *row != 0).unwrap_or(0);
+    let width = usize::from(glyph.width);
+    let x = width / 2;
+    if bottom + 2 < PIXEL_FONT_ROWS {
+        glyph.rows[bottom + 1] |= 1 << x;
+        glyph.rows[bottom + 2] |= 1 << x.saturating_sub(1) | 1 << x;
+    }
+    glyph
 }
 
 fn cell_offset(cells: usize, cell_size: usize) -> i32 {
