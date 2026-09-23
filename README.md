@@ -38,7 +38,7 @@ cargo build
 ```
 
 Play from the publisher logo through the title, the name entry and the opening into the
-first room (arrows move, X = A, Z = B, Return = START and opens the pause menu, Backspace = SELECT, Esc quits); music and sound effects play through the default audio device; `--translation <file.po>` shows a downloaded translation and `--export-template <file.pot>` writes the template translators start from (see [docs/translation.md](docs/translation.md)); `--translation <file.po>` shows a downloaded translation and `--export-template <file.pot>` writes the template translators start from (see [docs/translation.md](docs/translation.md));
+first room (arrows move, X = A, Z = B, Return = START and opens the pause menu, Backspace = SELECT, Esc quits); music and sound effects play through the default audio device; the pause menu's セーブ and the title's つづきから use a `.sav` file next to the ROM, in the original's format, so saves move between this port, emulators and the cartridge (`--save <file.sav>` picks another file, see [docs/formats/save.md](docs/formats/save.md)); `--translation <file.po>` shows a downloaded translation and `--export-template <file.pot>` writes the template translators start from (see [docs/translation.md](docs/translation.md));
 `--room` skips straight to the first room; a `<table>_<index>` string id shows that
 script in its box instead; `--dump frame.ppm` writes a frame instead of opening a window:
 

@@ -5,7 +5,8 @@ of the LZ77 decompressions of Zoids Saga (Japan, Rev 1) from power-on to the fir
 in a reference emulator, plus a read of the title loader (`0x0800248C`), the menu opcode
 handler and the window records. Implemented in `crates/game-core/src/boot.rs` and
 `game.rs`, data in `crates/extraction/src/saga.rs` (`logo`, `title`,
-`name_entry_graphics`, `kana_table`).
+`name_entry_graphics`, `kana_table`). Continuing a saved game is described in
+[formats/save.md](formats/save.md).
 
 ## Publisher logo (frames 0–435)
 
@@ -36,7 +37,8 @@ subtitle and the copyright lines; OBJ tiles 0–111 are the 4bpp block from tile
 112 on the copyright block. The title fades in over about 165 frames; START skips the
 fade, and START again runs the menu script at ROM `0x6C04FE`: reset, open menu window 0
 at (10, 10) 9×8 tiles, the three choices, a menu, then a switch on var1 (0 new game,
-1 continue, 2 options) — the game reads var1 when the script ends.
+1 continue, 2 options). The script ends by storing the variables and resetting the text
+system, which clears them, so the game reads the choice from the stored copy.
 
 ## Name entry
 
@@ -76,5 +78,6 @@ left. Sixty frames after her last turn dialogue 41 runs. When it closes she leav
 frames later: three steps left, then down and left alternately to (2, 7), then down to
 (2, 12), where she is removed; the player turns to watch her 23 frames into her first
 step down. Two frames after she is gone the player steps left onto (5, 2), the field
-music starts and control begins. What the room's own event code does besides this
-(flags) is not modeled.
+music starts and control begins. Entering the room also sets flag `0x11F`, the mark that
+the opening was seen (see [formats/save.md](formats/save.md)); what else the room's own
+event code does is not modeled.

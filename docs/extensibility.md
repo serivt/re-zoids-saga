@@ -42,7 +42,9 @@ license (GPL-3.0-only) covers the engine; a mod is the mod author's work.
    would. If the contract is not enough for us, it is not enough for anyone.
 4. **State is typed data.** `Party`, flags, the field position and the settings are
    plain structures that can be serialized, inspected and patched. No game state hides
-   in a screen's private fields once it outlives the screen.
+   in a screen's private fields once it outlives the screen. The save is the original's
+   own format (see [formats/save.md](formats/save.md)); `formats::Progress` is its typed
+   view.
 5. **Identifiers are stable and documented.** Table names, script keys
    (`table/index/offset`), sprite tags, map and song numbers, event names and hook
    names are public contracts. Renaming one is a compatibility break and is called
@@ -75,7 +77,8 @@ Events (notifications; every extension sees them, in order):
 | `SoundRequested` | song number | script host, field, menus |
 | `FlagChanged` | flag, value | script host |
 | `MenuOpened`, `MenuChoice`, `MenuClosed` | table, string index, line | pause menu, title, name entry |
-| `SaveRequested`, `LoadRequested` | slot | pause menu, title (when saving exists) |
+| `SaveRequested`, `LoadRequested` | — | pause menu, title |
+| `StorageFailed` | why | saving and continuing, when the save cannot be read or written |
 
 Hooks (queries; the first extension that answers decides, the engine's default is
 last):
@@ -132,7 +135,8 @@ first.
 
 - `game_core::GameData` is the data provider: every asset and table the game reads
   comes through it by identifier (map, scene, sprite, portrait, font, skin, boot
-  graphics, wallpaper, experience table, map music, script tables, sound numbers).
+  graphics, wallpaper, experience table, map music, script tables, sound numbers, the
+  save layout and the new-game state).
   Its `bytes()` is the one deliberate escape, used by the script interpreter and the
   sound driver, which address the image directly.
 - `game_core::extension` holds `Event`, `GameSound`, the `Extension` trait (every
@@ -142,7 +146,8 @@ first.
 - Events raised today: `Frame`, `TitleShown`, `NameConfirmed`, `RoomEntered`,
   `ExitTaken`, `Talk`, `ScriptStarted`, `ScriptEnded`, `MessageShown`,
   `WindowOpened`, `WindowClosed`, `SoundRequested`, `FlagChanged`, `MenuOpened`,
-  `MenuClosed`. Not yet raised: `MenuChoice`, `SaveRequested`, `LoadRequested`.
+  `MenuClosed`, `SaveRequested`, `LoadRequested`, `StorageFailed`. Not yet raised:
+  `MenuChoice`.
 - Hooks asked today: `translate_message`, `fit_window`, `music_for_map`,
   `alphabet_pages`, `name_entry_help`, `sound_for`. `resource` waits for mod packs.
 - The loaded translation is `TranslationExtension`, an ordinary extension installed

@@ -4,7 +4,8 @@ Source of knowledge: screenshots and RAM dumps of Zoids Saga (Japan, Rev 1) in a
 reference emulator while every item of the START menu was visited from the first room
 (`research/build/mgba/menu/`), a watch on the interpreter's current-window pointer
 (RAM `0x02009118`) while the menu opened, and a read of the pause-menu script table
-and of the menu, present and message opcode handlers. Implemented in
+and of the menu, present and message opcode handlers. Saving is described in
+[formats/save.md](formats/save.md). Implemented in
 `crates/game-core/src/menu.rs`; data in `crates/extraction/src/saga.rs`
 (`PAUSE_MENU_SCRIPTS`, `pause_wallpaper`).
 
@@ -38,9 +39,10 @@ right-aligns the amount before Ｇ. The experience to the next level comes from 
 
 ## Party data
 
-The game keeps its state in a block at RAM `0x02000B5C`; the leader's level is the
-byte at `+0xCD2`, the player's name at `+0xD18`, and the menu reads fields between
-`+0xD28` and `+0xD61` for the panel and the character screen. The port keeps the same
+The game keeps its state in a block at RAM `0x02000B5C`, the one its save holds (see
+[formats/save.md](formats/save.md)); the panel prints the party's level (`+0xCD2`),
+experience (`+0xCD4`) and money (`+0xD28`), the player's name is at `+0xD18`, and the
+character screen reads fields up to `+0xD61`. The port keeps the same
 facts in `Party`: members (name, portrait, level, experience, five stat bonuses in
 percent, the Zoid piloted) and six unit slots. A new game has the player alone at
 level 1 with every bonus at 0 and no Zoid, and empty slots. What the original's block
@@ -95,13 +97,14 @@ status list; its 武器, Ｚｉデータ and Ｚｉデータ用アイテム item
 図鑑 asks ゾイド or キャラ; 部隊 shows the unit list and キャラクター the character screen,
 which A or B leaves. 武装 shows the weapons screen; choosing the character prints
 that no Zoid is boarded. コンフィグ shows the message speed (3 on a new game) with the
-cursor on it; picking a number stores it in the party. セーブ asks, and answers
-セーブしました or セーブを中止しました (B cancels); nothing is written anywhere yet.
+cursor on it; picking a number stores it in the party and returns to the main list
+with the cursor on コンフィグ, as the original does. セーブ asks; はい writes the save
+and answers セーブしました, or セーブを中止しました when it could not be written, and
+いいえ or B answer セーブを中止しました.
 
 ## Not modeled yet
 
 The Zoid status screen behind a boarded Zoid, the encyclopedia itself, 部隊編成 (a separate
-screen with its own wallpaper), the ボタン page of the config, and where the original
-goes after a speed is chosen (this port returns to the main list) all end in the
-まだできてません notice or in an assumption. Saving writes no data. The button and
-cursor sounds are requested but not played until the sound engine exists.
+screen with its own wallpaper) and the ボタン page of the config end in the
+まだできてません notice. The button and cursor sounds are requested but not played
+until the sound engine exists.
