@@ -50,6 +50,21 @@ Inside the text:
 
 A `{...}` that is not a marker prints as written.
 
+## Name entry
+
+The name entry's character pages and help line are not script messages, so the file
+replaces them through reserved keys, which the template lists with the ROM's pages
+as their source text:
+
+| Key | Text |
+|---|---|
+| `name-entry/help` | The help line, 20 cells |
+| `name-entry/alphabet/N` | Page N: a label line (up to 7 cells), then up to 5 lines of up to 13 characters each; a space is an empty cell |
+
+A translation may have any number of pages; SELECT cycles them. The label window
+grows to the left for longer labels. Characters the player picks are stored as
+written, so the name prints and draws through the same rules as any text.
+
 ## Layout
 
 The engine wraps at the window's inner width, one character per 8-pixel cell, and a
