@@ -42,7 +42,7 @@ const MENU_MARGIN: usize = 2;
 const TEXT_MARGIN: usize = 1;
 const NAME_CELLS: usize = 8;
 const MAX_CALL_DEPTH: usize = 4;
-const TEMPLATE_HEADER: &str = "msgid \"\"\nmsgstr \"\"\n\"Content-Type: text/plain; charset=UTF-8\\n\"\n\"Language: ja\\n\"\n\n";
+const TEMPLATE_HEADER: &str = "msgid \"\"\nmsgstr \"\"\n\"Project-Id-Version: re-zoids-saga\\n\"\n\"MIME-Version: 1.0\\n\"\n\"Content-Type: text/plain; charset=UTF-8\\n\"\n\"Content-Transfer-Encoding: 8bit\\n\"\n\"Language: \\n\"\n\"X-Source-Language: ja\\n\"\n\n";
 
 /// Why a translation file could not be used.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
