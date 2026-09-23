@@ -8,10 +8,7 @@
 //! script; the name entry lays out its windows as the original's window
 //! records show and moves its cursor 16 pixels per character.
 
-use extraction::saga::{
-    self, BootError, KANA_COLUMNS, Logo, NAME_ENTRY_SCRIPTS, NameEntryGraphics,
-    TITLE_MENU_SCRIPT_OFFSET, TitleGraphics,
-};
+use extraction::saga::{self, BootError, KANA_COLUMNS, Logo, NameEntryGraphics, TitleGraphics};
 use formats::tile::{TILE_PIXELS, TilePiece, Tileset};
 use formats::tilemap::TileMap;
 use gba_runtime::ppu::{
@@ -20,6 +17,7 @@ use gba_runtime::ppu::{
 };
 use platform::{Button, Frame, Input, Rgb};
 
+use crate::data::GameData;
 use crate::script::{ScriptError, ScriptRunner};
 use crate::text::CELL_WIDTH;
 use crate::translation::{AlphabetPage, NAME_ENTRY_TABLE, TITLE_TABLE};
@@ -176,8 +174,8 @@ impl LogoScreen {
     /// # Errors
     ///
     /// Returns [`BootError`] when the ROM is too short.
-    pub fn new(rom: &[u8]) -> Result<Self, BootError> {
-        let logo = saga::logo(rom)?;
+    pub fn new(data: &GameData<'_>) -> Result<Self, BootError> {
+        let logo = data.logo()?;
         let palette = FullPalette::from_bgr555(&logo.palette);
         Ok(Self {
             logo,
@@ -271,8 +269,8 @@ impl TitleScreen {
     /// # Errors
     ///
     /// Returns [`BootError`] when a block cannot be read.
-    pub fn new(rom: &[u8]) -> Result<Self, BootError> {
-        let graphics = saga::title(rom)?;
+    pub fn new(data: &GameData<'_>) -> Result<Self, BootError> {
+        let graphics = data.title()?;
         let palettes = PaletteBank::from_bgr555(&graphics.palettes);
         let flat: Vec<u16> = graphics.palettes.iter().flatten().copied().collect();
         Ok(Self {
@@ -284,7 +282,13 @@ impl TitleScreen {
             graphics,
             frame: 0,
             state: TitleState::FadingIn,
-            runner: ScriptRunner::named(TITLE_TABLE, vec![TITLE_MENU_SCRIPT_OFFSET]),
+            runner: ScriptRunner::named(
+                TITLE_TABLE,
+                data.script_offsets(TITLE_TABLE)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default(),
+            ),
             previous: Input::default(),
         })
     }
@@ -529,11 +533,15 @@ impl NameEntry {
     /// # Errors
     ///
     /// Returns [`BootError`] when a block cannot be read.
-    pub fn new(rom: &[u8], name: &str, input: Input) -> Result<Self, BootError> {
-        let graphics = saga::name_entry_graphics(rom)?;
+    pub fn new(data: &GameData<'_>, name: &str, input: Input) -> Result<Self, BootError> {
+        let graphics = data.name_entry_graphics()?;
         let mut picture_palette = FullPalette::from_bgr555(&[]);
         picture_palette.write(NAME_PICTURE_PALETTE_START, &graphics.picture_palette);
-        let scripts = NAME_ENTRY_SCRIPTS.offsets(rom).unwrap_or_default();
+        let scripts = data
+            .script_offsets(NAME_ENTRY_TABLE)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let mut picture = blank_map();
         picture.entries.fill(0);
         for row in 0..NAME_PICTURE_COLUMNS {
@@ -542,7 +550,7 @@ impl NameEntry {
                     u16::try_from(row * NAME_PICTURE_COLUMNS + column).unwrap_or(0);
             }
         }
-        let table = saga::kana_table(rom)?;
+        let table = data.kana_table()?;
         let pages = NAME_PAGE_LABELS
             .iter()
             .enumerate()
@@ -582,13 +590,13 @@ impl NameEntry {
     /// and help line of its translation when it has them; the label window
     /// grows to the left for longer labels, leaving the name its field.
     pub fn open(&mut self, windows: &mut ScriptWindows<'_>) {
-        let translation = windows.translation();
-        if !translation.alphabet().is_empty() {
-            self.pages = translation.alphabet().to_vec();
+        let extensions = windows.extensions().clone();
+        if let Some(pages) = extensions.borrow().alphabet_pages() {
+            self.pages = pages;
             self.page = 0;
         }
-        if let Some(help) = translation.name_entry_help() {
-            self.help = help.to_owned();
+        if let Some(help) = extensions.borrow().name_entry_help() {
+            self.help = help;
         }
         let label_cells = self
             .pages

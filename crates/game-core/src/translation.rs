@@ -12,7 +12,8 @@ use std::fmt::Write as _;
 
 use std::collections::HashSet;
 
-use extraction::saga::{self, NAME_ENTRY_SCRIPTS, PAUSE_MENU_SCRIPTS, TITLE_MENU_SCRIPT_OFFSET};
+use crate::data::GameData;
+use crate::extension::{Extension, Rect};
 use formats::script_ops::{Instruction, MessageStep, decode_instruction, decode_message_step};
 use thiserror::Error;
 
@@ -242,7 +243,7 @@ impl Translation {
     /// Returns [`TranslationError`] when a table cannot be read.
     pub fn fit(
         &mut self,
-        rom: &[u8],
+        data: &GameData<'_>,
         metrics: &TextMetrics,
     ) -> Result<Vec<String>, TranslationError> {
         self.fits.clear();
@@ -256,8 +257,8 @@ impl Translation {
             if !visited.insert((table.to_owned(), index)) {
                 continue;
             }
-            let offsets = table_offsets(rom, table)?;
-            let mut walker = Walker::new(rom, table, &offsets);
+            let offsets = table_offsets(data, table)?;
+            let mut walker = Walker::new(data.bytes(), table, &offsets);
             walker.walk(index, 0);
             placements.extend(walker.placements);
         }
@@ -683,10 +684,11 @@ impl Scope {
 ///
 /// Returns [`TranslationError`] when a scope names no table or the ROM's
 /// tables cannot be read.
-pub fn template(rom: &[u8], scopes: &[Scope]) -> Result<String, TranslationError> {
+pub fn template(data: &GameData<'_>, scopes: &[Scope]) -> Result<String, TranslationError> {
+    let rom = data.bytes();
     let mut out = String::from(TEMPLATE_HEADER);
     for scope in scopes {
-        let offsets = table_offsets(rom, &scope.table)?;
+        let offsets = table_offsets(data, &scope.table)?;
         let (first, last) = scope.range.unwrap_or((0, offsets.len().saturating_sub(1)));
         let mut sorted: Vec<usize> = offsets.iter().copied().filter(|o| *o != 0).collect();
         sorted.sort_unstable();
@@ -709,7 +711,7 @@ pub fn template(rom: &[u8], scopes: &[Scope]) -> Result<String, TranslationError
             }
         }
         if scope.table == NAME_ENTRY_TABLE {
-            name_entry_entries(rom, &mut out)?;
+            name_entry_entries(data, &mut out)?;
         }
     }
     Ok(out)
@@ -719,8 +721,10 @@ pub fn template(rom: &[u8], scopes: &[Scope]) -> Result<String, TranslationError
 /// `name-entry/alphabet/N`, their text a label line then one line per row
 /// of characters (a space is an empty cell); a translation may have any
 /// number of pages.
-fn name_entry_entries(rom: &[u8], out: &mut String) -> Result<(), TranslationError> {
-    let table = saga::kana_table(rom).map_err(|error| TranslationError::Rom(error.to_string()))?;
+fn name_entry_entries(data: &GameData<'_>, out: &mut String) -> Result<(), TranslationError> {
+    let table = data
+        .kana_table()
+        .map_err(|error| TranslationError::Rom(error.to_string()))?;
     let _ = writeln!(out, "#. The help line of the name entry, 20 cells");
     let _ = writeln!(out, "msgctxt {}", quote(NAME_HELP_KEY));
     let _ = writeln!(out, "msgid {}", quote(NAME_HELP));
@@ -753,21 +757,49 @@ fn name_entry_entries(rom: &[u8], out: &mut String) -> Result<(), TranslationErr
     Ok(())
 }
 
-fn table_offsets(rom: &[u8], table: &str) -> Result<Vec<usize>, TranslationError> {
-    let rom_error = |error: &dyn std::fmt::Display| TranslationError::Rom(error.to_string());
-    match table {
-        TITLE_TABLE => Ok(vec![TITLE_MENU_SCRIPT_OFFSET]),
-        NAME_ENTRY_TABLE => NAME_ENTRY_SCRIPTS
-            .offsets(rom)
-            .map_err(|error| rom_error(&error)),
-        PAUSE_MENU_TABLE => PAUSE_MENU_SCRIPTS
-            .offsets(rom)
-            .map_err(|error| rom_error(&error)),
-        DIALOGUE_TABLE => saga::string_table(DIALOGUE_TABLE)
-            .ok_or_else(|| TranslationError::NoSuchTable(table.to_owned()))?
-            .offsets(rom)
-            .map_err(|error| rom_error(&error)),
-        other => Err(TranslationError::NoSuchTable(other.to_owned())),
+fn table_offsets(data: &GameData<'_>, table: &str) -> Result<Vec<usize>, TranslationError> {
+    data.script_offsets(table)
+        .map_err(|error| TranslationError::Rom(error.to_string()))?
+        .ok_or_else(|| TranslationError::NoSuchTable(table.to_owned()))
+}
+
+/// A loaded translation as the engine's extension: it answers for the
+/// messages, windows and name-entry pages its file covers.
+pub struct TranslationExtension {
+    translation: Translation,
+}
+
+impl TranslationExtension {
+    /// Wraps a fitted translation.
+    #[must_use]
+    pub fn new(translation: Translation) -> Self {
+        Self { translation }
+    }
+}
+
+impl Extension for TranslationExtension {
+    fn name(&self) -> &'static str {
+        "translation"
+    }
+
+    fn translate_message(&self, table: &str, index: usize, offset: usize) -> Option<String> {
+        self.translation
+            .get(table, index, offset)
+            .map(str::to_owned)
+    }
+
+    fn fit_window(&self, table: &str, index: usize, id: u8, kind: u8, rect: Rect) -> Option<Rect> {
+        let fitted = self.translation.fit_window(table, index, id, kind, rect);
+        (fitted != rect).then_some(fitted)
+    }
+
+    fn alphabet_pages(&self) -> Option<Vec<AlphabetPage>> {
+        let pages = self.translation.alphabet();
+        (!pages.is_empty()).then(|| pages.to_vec())
+    }
+
+    fn name_entry_help(&self) -> Option<String> {
+        self.translation.name_entry_help().map(str::to_owned)
     }
 }
 
@@ -864,6 +896,8 @@ fn marker_step(marker: &str) -> Option<MessageStep> {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
+    use extraction::saga::TITLE_MENU_SCRIPT_OFFSET;
+
     use super::*;
 
     #[test]
@@ -933,7 +967,7 @@ mod tests {
         );
         assert!(Scope::parse("dialogue:x").is_err());
         assert!(matches!(
-            template(&rom, &[Scope::parse("nowhere").unwrap()]),
+            template(&GameData::new(&rom), &[Scope::parse("nowhere").unwrap()]),
             Err(TranslationError::NoSuchTable(_))
         ));
     }
@@ -948,7 +982,7 @@ mod tests {
         rom[TITLE_MENU_SCRIPT_OFFSET..TITLE_MENU_SCRIPT_OFFSET + script.len()]
             .copy_from_slice(&script);
         let metrics = TextMetrics::default();
-        let problems = translation.fit(&rom, &metrics).unwrap();
+        let problems = translation.fit(&GameData::new(&rom), &metrics).unwrap();
         assert!(problems.is_empty());
         assert_eq!(translation.enlarged_windows(), 1);
         assert_eq!(
@@ -965,7 +999,7 @@ mod tests {
         let wide = Translation::from_po(
             "msgctxt \"title/0/0x8\"\nmsgid \"\"\nmsgstr \"abcdefghijklmnopqrstuvwxyzabcdefg\"\n",
         );
-        let problems = wide.unwrap().fit(&rom, &metrics).unwrap();
+        let problems = wide.unwrap().fit(&GameData::new(&rom), &metrics).unwrap();
         assert_eq!(problems.len(), 1);
     }
 
@@ -979,11 +1013,16 @@ mod tests {
         let mut long = Translation::from_po(long).unwrap();
         assert!(
             translation
-                .fit(&[], &TextMetrics::default())
+                .fit(&GameData::new(&[]), &TextMetrics::default())
                 .unwrap()
                 .is_empty()
         );
-        assert_eq!(long.fit(&[], &TextMetrics::default()).unwrap().len(), 2);
+        assert_eq!(
+            long.fit(&GameData::new(&[]), &TextMetrics::default())
+                .unwrap()
+                .len(),
+            2
+        );
         let pages = translation.alphabet();
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].label, "ABC");

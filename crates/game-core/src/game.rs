@@ -8,7 +8,7 @@
 //! two, faces the player, and the first dialogue string runs. Afterwards
 //! the player stands up onto (5, 2) and control begins.
 
-use extraction::saga::{self, BootError, FIRST_ROOM_MAP, PLAYER_START, SpriteSheetError};
+use extraction::saga::{BootError, FIRST_ROOM_MAP, PLAYER_START, SpriteSheetError};
 use formats::m4a::M4aError;
 use gba_runtime::apu::SoundEngine;
 use gba_runtime::ppu::{FADE_STEPS, SCREEN_HEIGHT, SCREEN_WIDTH, darken};
@@ -16,11 +16,13 @@ use platform::{Button, Frame, Input, Rgb};
 use thiserror::Error;
 
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
+use crate::data::GameData;
+use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Direction, Field, FieldError, FieldEvent, NpcCommand};
 use crate::menu::{Party, PauseMenu};
 use crate::script::{ScriptError, ScriptRunner};
 use crate::text::TextMetrics;
-use crate::translation::{DIALOGUE_TABLE, Translation};
+use crate::translation::{DIALOGUE_TABLE, Translation, TranslationExtension};
 use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows};
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
@@ -191,7 +193,9 @@ impl IntroState {
 
 /// The running game.
 pub struct Game<'rom> {
-    rom: &'rom [u8],
+    data: GameData<'rom>,
+    extensions: SharedExtensions,
+    frame: u64,
     painter: TextPainter<'rom>,
     skin: WindowPainter,
     windows: ScriptWindows<'rom>,
@@ -213,7 +217,7 @@ impl<'rom> Game<'rom> {
     /// Returns [`GameError`] when the boot data or text assets cannot be read.
     pub fn new(rom: &'rom [u8]) -> Result<Self, GameError> {
         let mut game = Self::bare(rom)?;
-        game.screen = Screen::Logo(LogoScreen::new(rom)?);
+        game.screen = Screen::Logo(LogoScreen::new(&game.data)?);
         Ok(game)
     }
 
@@ -224,34 +228,75 @@ impl<'rom> Game<'rom> {
     /// Returns [`GameError`] when the room or text assets cannot be read.
     pub fn in_first_room(rom: &'rom [u8]) -> Result<Self, GameError> {
         let mut game = Self::bare(rom)?;
-        game.field = Some(Field::load(rom, FIRST_ROOM_MAP, PLAYER_START)?);
+        game.field = Some(Field::load(&game.data, FIRST_ROOM_MAP, PLAYER_START)?);
+        Self::emit(
+            &game.extensions,
+            &Event::RoomEntered {
+                map: FIRST_ROOM_MAP,
+                cell: PLAYER_START,
+            },
+        );
         game.screen = Screen::Field;
-        game.sound.play(saga::MUSIC_FIRST_ROOM)?;
+        Self::play(
+            &mut game.sound,
+            &game.data,
+            &game.extensions,
+            GameSound::FirstRoomMusic,
+        )?;
         Ok(game)
     }
 
+    /// The extensions the game raises events to and asks questions of.
+    #[must_use]
+    pub fn extensions(&self) -> &SharedExtensions {
+        &self.extensions
+    }
+
+    fn emit(extensions: &SharedExtensions, event: &Event) {
+        extensions.borrow_mut().emit(event);
+    }
+
+    /// Plays the song an extension, or else the data, assigns to `sound`.
+    fn play(
+        engine: &mut SoundEngine<'rom>,
+        data: &GameData<'rom>,
+        extensions: &SharedExtensions,
+        sound: GameSound,
+    ) -> Result<(), GameError> {
+        let song = extensions
+            .borrow()
+            .sound_for(sound)
+            .unwrap_or_else(|| data.sound(sound));
+        Self::emit(extensions, &Event::SoundRequested(song));
+        engine.play(song)?;
+        Ok(())
+    }
+
     fn bare(rom: &'rom [u8]) -> Result<Self, GameError> {
-        let (glyphs, fallback) =
-            saga::font(rom).map_err(|error| GameError::Text(error.to_string()))?;
-        let skin = saga::window_skin(rom).map_err(|error| GameError::Text(error.to_string()))?;
-        let dialogue = saga::string_table("dialogue")
-            .ok_or_else(|| GameError::Text("no dialogue table".to_owned()))?
-            .read(rom)
-            .map_err(|error| GameError::Text(error.to_string()))?;
+        let data = GameData::new(rom);
+        let text_error = |error: &dyn std::fmt::Display| GameError::Text(error.to_string());
+        let (glyphs, fallback) = data.font().map_err(|error| text_error(&error))?;
+        let skin = data.window_skin().map_err(|error| text_error(&error))?;
+        let dialogue = data
+            .script_offsets(DIALOGUE_TABLE)
+            .map_err(|error| text_error(&error))?
+            .ok_or_else(|| GameError::Text("no dialogue table".to_owned()))?;
+        let extensions = SharedExtensions::default();
+        let (song_table, song_count, master_volume) = data.song_table();
         Ok(Self {
-            rom,
+            data,
+            extensions: extensions.clone(),
+            frame: 0,
             painter: TextPainter::new(rom, glyphs, Some(fallback)),
             skin: WindowPainter::new(skin.tiles, &skin.palette),
             windows: {
                 let mut windows = ScriptWindows::new(rom, DEFAULT_PLAYER_NAME);
                 windows.set_metrics(TextMetrics::standard());
+                windows.set_extensions(extensions);
                 windows
             },
-            sound: SoundEngine::new(rom, saga::SONG_TABLE, saga::SONG_COUNT, saga::MASTER_VOLUME),
-            dialogue: ScriptRunner::named(
-                DIALOGUE_TABLE,
-                dialogue.iter().map(|string| string.offset).collect(),
-            ),
+            sound: SoundEngine::new(data.bytes(), song_table, song_count, master_volume),
+            dialogue: ScriptRunner::named(DIALOGUE_TABLE, dialogue),
             field: None,
             screen: Screen::Loading(0),
             pending_talk: None,
@@ -295,30 +340,53 @@ impl<'rom> Game<'rom> {
     pub fn update(&mut self, input: Input) -> Result<(), GameError> {
         let start = input.is_held(Button::Start) && !self.previous.is_held(Button::Start);
         self.previous = input;
+        self.frame += 1;
+        Self::emit(&self.extensions, &Event::Frame(self.frame));
+        let rom = self.data.bytes();
         match &mut self.screen {
             Screen::Logo(logo) => {
                 if logo.update() {
-                    self.screen = Screen::Title(TitleScreen::new(self.rom)?);
-                    self.sound.play(saga::MUSIC_TITLE)?;
+                    self.screen = Screen::Title(TitleScreen::new(&self.data)?);
+                    Self::emit(&self.extensions, &Event::TitleShown);
+                    Self::play(
+                        &mut self.sound,
+                        &self.data,
+                        &self.extensions,
+                        GameSound::TitleMusic,
+                    )?;
                 }
             }
             Screen::Title(title) => {
                 if start && !self.windows.any_open() {
-                    self.sound.play(saga::SOUND_TITLE_START)?;
+                    Self::play(
+                        &mut self.sound,
+                        &self.data,
+                        &self.extensions,
+                        GameSound::TitleStart,
+                    )?;
                 }
-                if title.update(self.rom, input, &mut self.windows)? == Some(TitleChoice::NewGame) {
-                    let mut entry = NameEntry::new(self.rom, &self.player_name, input)?;
+                if title.update(rom, input, &mut self.windows)? == Some(TitleChoice::NewGame) {
+                    let mut entry = NameEntry::new(&self.data, &self.player_name, input)?;
                     entry.open(&mut self.windows);
                     self.screen = Screen::NameEntry(entry);
-                    self.sound.play(saga::MUSIC_NAME_ENTRY)?;
+                    Self::play(
+                        &mut self.sound,
+                        &self.data,
+                        &self.extensions,
+                        GameSound::NameEntryMusic,
+                    )?;
                 }
             }
             Screen::NameEntry(entry) => {
-                if entry.update(self.rom, input, &mut self.windows)? {
+                if entry.update(rom, input, &mut self.windows)? {
                     self.player_name = entry.name();
                     self.windows.set_player_name(&self.player_name);
                     self.windows.close_window(None);
                     self.screen = Screen::Loading(0);
+                    Self::emit(
+                        &self.extensions,
+                        &Event::NameConfirmed(self.player_name.clone()),
+                    );
                     self.sound.stop_music();
                 }
             }
@@ -331,17 +399,19 @@ impl<'rom> Game<'rom> {
             Screen::Intro(_) => self.update_intro(input)?,
             Screen::Field => {
                 if start && self.dialogue.is_done() && self.pending_talk.is_none() {
-                    let mut menu = PauseMenu::new(self.rom, self.party.clone())?;
-                    menu.open(self.rom, &mut self.windows)?;
+                    let mut menu = PauseMenu::new(&self.data, self.party.clone())?;
+                    menu.open(rom, &mut self.windows)?;
                     self.screen = Screen::Menu(menu);
+                    Self::emit(&self.extensions, &Event::MenuOpened);
                 } else {
                     self.update_field(input)?;
                 }
             }
             Screen::Menu(menu) => {
-                if menu.update(self.rom, input, &mut self.windows)? {
+                if menu.update(rom, input, &mut self.windows)? {
                     self.party = menu.party();
                     self.screen = Screen::Field;
+                    Self::emit(&self.extensions, &Event::MenuClosed);
                 }
             }
         }
@@ -363,8 +433,10 @@ impl<'rom> Game<'rom> {
         &mut self,
         mut translation: Translation,
     ) -> Result<Vec<String>, GameError> {
-        let problems = translation.fit(self.rom, self.painter.metrics())?;
-        self.windows.set_translation(translation);
+        let problems = translation.fit(&self.data, self.painter.metrics())?;
+        self.extensions
+            .borrow_mut()
+            .insert(Box::new(TranslationExtension::new(translation)));
         Ok(problems)
     }
 
@@ -376,10 +448,17 @@ impl<'rom> Game<'rom> {
     }
 
     fn start_intro(&mut self) -> Result<(), GameError> {
-        let mut field = Field::load(self.rom, FIRST_ROOM_MAP, INTRO_PLAYER_CELL)?;
+        let mut field = Field::load(&self.data, FIRST_ROOM_MAP, INTRO_PLAYER_CELL)?;
         field.player.facing = Direction::Up;
-        let regina = field.spawn_npc(self.rom, REGINA_SPRITE, REGINA_START, Direction::Up)?;
+        let regina = field.spawn_npc(&self.data, REGINA_SPRITE, REGINA_START, Direction::Up)?;
         self.field = Some(field);
+        Self::emit(
+            &self.extensions,
+            &Event::RoomEntered {
+                map: FIRST_ROOM_MAP,
+                cell: INTRO_PLAYER_CELL,
+            },
+        );
         let mut intro = IntroState {
             regina,
             path: &INTRO_ARRIVAL,
@@ -389,7 +468,12 @@ impl<'rom> Game<'rom> {
         };
         intro.follow(&INTRO_ARRIVAL);
         self.screen = Screen::Intro(intro);
-        self.sound.play(saga::MUSIC_OPENING)?;
+        Self::play(
+            &mut self.sound,
+            &self.data,
+            &self.extensions,
+            GameSound::OpeningMusic,
+        )?;
         Ok(())
     }
 
@@ -408,7 +492,10 @@ impl<'rom> Game<'rom> {
                 intro.phase = IntroPhase::FirstTalk;
             }
             IntroPhase::FirstTalk => {
-                if self.dialogue.update(self.rom, input, &mut self.windows)? {
+                if self
+                    .dialogue
+                    .update(self.data.bytes(), input, &mut self.windows)?
+                {
                     intro.phase = IntroPhase::FadingOut(0);
                     intro.follow(&INTRO_PACING);
                 }
@@ -439,7 +526,10 @@ impl<'rom> Game<'rom> {
                 intro.phase = IntroPhase::SecondTalk;
             }
             IntroPhase::SecondTalk => {
-                if self.dialogue.update(self.rom, input, &mut self.windows)? {
+                if self
+                    .dialogue
+                    .update(self.data.bytes(), input, &mut self.windows)?
+                {
                     intro.phase = IntroPhase::Leaving;
                     intro.follow(&INTRO_LEAVING);
                 }
@@ -452,7 +542,12 @@ impl<'rom> Game<'rom> {
             }
             IntroPhase::StandingUp if !field.player.walking => {
                 self.screen = Screen::Field;
-                self.sound.play(saga::MUSIC_FIRST_ROOM)?;
+                Self::play(
+                    &mut self.sound,
+                    &self.data,
+                    &self.extensions,
+                    GameSound::FirstRoomMusic,
+                )?;
             }
             _ => {}
         }
@@ -507,19 +602,49 @@ impl<'rom> Game<'rom> {
         } else if self.dialogue.is_done() {
             match field.update(input) {
                 Some(FieldEvent::Exit(exit)) => {
-                    field.warp(self.rom, exit)?;
-                    self.sound.play(saga::SOUND_DOOR)?;
-                    if let Some(music) = saga::map_music(self.rom, field.map()) {
+                    let from = field.map();
+                    let warp = field.warp(&self.data, exit)?;
+                    let arrived = field.map();
+                    Self::emit(
+                        &self.extensions,
+                        &Event::ExitTaken {
+                            map: from,
+                            exit,
+                            destination: warp.map,
+                        },
+                    );
+                    Self::emit(
+                        &self.extensions,
+                        &Event::RoomEntered {
+                            map: arrived,
+                            cell: (warp.column, warp.row),
+                        },
+                    );
+                    Self::play(
+                        &mut self.sound,
+                        &self.data,
+                        &self.extensions,
+                        GameSound::Door,
+                    )?;
+                    let music = self
+                        .extensions
+                        .borrow()
+                        .music_for_map(arrived)
+                        .or_else(|| self.data.map_music(arrived));
+                    if let Some(music) = music {
+                        Self::emit(&self.extensions, &Event::SoundRequested(music));
                         self.sound.play_if_changed(music)?;
                     }
                 }
-                Some(FieldEvent::Talk { dialogue: id, .. }) => {
+                Some(FieldEvent::Talk { npc, dialogue: id }) => {
+                    Self::emit(&self.extensions, &Event::Talk { npc, dialogue: id });
                     self.pending_talk = Some((id, TALK_START_DELAY));
                 }
                 None => {}
             }
         } else {
-            self.dialogue.update(self.rom, input, &mut self.windows)?;
+            self.dialogue
+                .update(self.data.bytes(), input, &mut self.windows)?;
         }
         Ok(())
     }

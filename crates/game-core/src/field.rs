@@ -29,6 +29,7 @@ use gba_runtime::ppu::{PaletteBank, SCREEN_HEIGHT, SCREEN_WIDTH, draw_background
 use platform::{Button, Frame, Input};
 use thiserror::Error;
 
+use crate::data::GameData;
 use crate::draw_sprite;
 use crate::rng::Rng;
 
@@ -336,8 +337,12 @@ impl Field {
     ///
     /// Returns [`FieldError`] when the map record, its scene, its objects or
     /// a sprite cannot be read.
-    pub fn load(rom: &[u8], map: usize, (column, row): (usize, usize)) -> Result<Self, FieldError> {
-        let (scene, player_sheet, npcs) = load_map(rom, map)?;
+    pub fn load(
+        data: &GameData<'_>,
+        map: usize,
+        (column, row): (usize, usize),
+    ) -> Result<Self, FieldError> {
+        let (scene, player_sheet, npcs) = load_map(data, map)?;
         let mut field = Self::new(scene, player_sheet, (column, row));
         field.map = map;
         field.npcs = npcs;
@@ -467,12 +472,12 @@ impl Field {
     /// Returns [`FieldError`] when the sprite cannot be read.
     pub fn spawn_npc(
         &mut self,
-        rom: &[u8],
+        data: &GameData<'_>,
         sprite: usize,
         (column, row): (usize, usize),
         facing: Direction,
     ) -> Result<usize, FieldError> {
-        let sheet = saga::sprite_sheet(rom, sprite)?;
+        let sheet = data.sprite_sheet(sprite)?;
         self.npcs.push(Npc {
             column,
             row,
@@ -553,9 +558,9 @@ impl Field {
     /// # Errors
     ///
     /// Returns [`FieldError`] when the warp, the map or a sprite cannot be read.
-    pub fn warp(&mut self, rom: &[u8], exit: usize) -> Result<Warp, FieldError> {
-        let warp = saga::warp(rom, self.map, exit)?;
-        let (scene, player_sheet, npcs) = load_map(rom, warp.map)?;
+    pub fn warp(&mut self, data: &GameData<'_>, exit: usize) -> Result<Warp, FieldError> {
+        let warp = data.warp(self.map, exit)?;
+        let (scene, player_sheet, npcs) = load_map(data, warp.map)?;
         self.enter(scene, warp.map, &warp);
         self.sheet = player_sheet;
         self.npcs = npcs;
@@ -643,20 +648,20 @@ impl Field {
     }
 }
 
-fn load_map(rom: &[u8], map: usize) -> Result<(Scene, SpriteSheet, Vec<Npc>), FieldError> {
-    let scene = saga::scene(rom, saga::map_record(rom, map)?.scene)?;
-    let objects = saga::map_objects(rom, map)?;
+fn load_map(data: &GameData<'_>, map: usize) -> Result<(Scene, SpriteSheet, Vec<Npc>), FieldError> {
+    let scene = data.scene(data.map_record(map)?.scene)?;
+    let objects = data.map_objects(map)?;
     let player_sprite = objects
         .first()
         .and_then(saga::MapObject::sprite_sheet_id)
         .unwrap_or(PLAYER_SPRITE);
-    let player_sheet = saga::sprite_sheet(rom, player_sprite)?;
+    let player_sheet = data.sprite_sheet(player_sprite)?;
     let npcs = objects
         .iter()
         .skip(1)
         .filter_map(|object| {
             let sprite = object.sprite_sheet_id()?;
-            Some(saga::sprite_sheet(rom, sprite).map(|sheet| Npc {
+            Some(data.sprite_sheet(sprite).map(|sheet| Npc {
                 column: object.column,
                 row: object.row,
                 sheet,

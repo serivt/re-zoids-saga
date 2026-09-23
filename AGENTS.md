@@ -160,6 +160,7 @@ Placement rules:
 - **`crates/extraction` owns the ROM-to-database pipeline as a library.** The launcher calls it at load time; `extractor-cli` is only a development wrapper around it. Extraction must be fast enough for a first-launch experience and idempotent, so cached databases can be invalidated purely by ROM hash and extractor version.
 - **No translation data is committed.** Templates and PO files live on Weblate and on players' machines; the repository holds only the exporter and the loader. Original Japanese text is copyrighted ROM content: it is produced by extraction on the user's machine and is never committed.
 - **`data/` is always gitignored.** Nothing derived from a ROM enters version control — including test fixtures, which must be synthetic. End users never see this directory; their extracted data lives in the OS user-data directory managed by the launcher.
+- **New code follows [docs/extensibility.md](docs/extensibility.md):** game logic reads data through a provider by stable identifier, behavior flows through events and hooks, and the engine's own features use the same contracts a mod would.
 - Dependency direction is strictly downward: `apps → games → game-core → (gba-runtime, localization, extraction, formats) → platform`. A crate importing from a layer above it is an architecture violation.
 
 ## Code Style

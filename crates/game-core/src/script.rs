@@ -8,6 +8,7 @@
 //! showing a portrait, and each character of a typewriter window. The key
 //! wait polls once per frame and blinks the prompt 20 frames off, 20 on.
 
+use crate::extension::Event;
 use formats::script_ops::{
     Comparison, Instruction, MessageStep, Operand, Operation, ScriptOpError, decode_instruction,
     decode_message_step,
@@ -70,6 +71,11 @@ pub trait ScriptHost {
     fn translate(&self, table: &str, index: usize, offset: usize) -> Option<String> {
         let _ = (table, index, offset);
         None
+    }
+    /// Hears what the runner did (a script starting or ending, a message
+    /// showing).
+    fn notify(&mut self, event: Event) {
+        let _ = event;
     }
     /// The rectangle window `id` of kind `kind`, opened by string `index`
     /// of `table` as `rect`, should take: a translation may enlarge it.
@@ -137,6 +143,8 @@ pub struct ScriptRunner {
     text_window: u8,
     pending: Vec<MessageStep>,
     substituted: bool,
+    announce: Option<usize>,
+    started: Option<usize>,
     wait: Wait,
     previous: Input,
 }
@@ -163,6 +171,8 @@ impl ScriptRunner {
             text_window: 0,
             pending: Vec::new(),
             substituted: false,
+            announce: None,
+            started: None,
             wait: Wait::Done,
             previous: Input::default(),
         }
@@ -184,6 +194,7 @@ impl ScriptRunner {
         self.vars = [0; VARIABLES];
         self.pending.clear();
         self.substituted = false;
+        self.announce = Some(index);
         self.wait = Wait::None;
         Ok(())
     }
@@ -229,6 +240,13 @@ impl ScriptRunner {
             + u16::from(pressed(Button::Up)) * KEY_UP
             + u16::from(pressed(Button::Down)) * KEY_DOWN;
         self.previous = input;
+        if let Some(index) = self.announce.take() {
+            self.started = Some(index);
+            host.notify(Event::ScriptStarted {
+                table: self.table.to_owned(),
+                index,
+            });
+        }
         match self.wait {
             Wait::Done => return Ok(true),
             Wait::Frames(left) => {
@@ -257,7 +275,14 @@ impl ScriptRunner {
         while self.wait == Wait::None {
             self.step(rom, host)?;
         }
-        Ok(self.wait == Wait::Done)
+        let done = self.wait == Wait::Done;
+        if done && let Some(index) = self.started.take() {
+            host.notify(Event::ScriptEnded {
+                table: self.table.to_owned(),
+                index,
+            });
+        }
+        Ok(done)
     }
 
     fn begin_menu(&mut self, cancelable: bool, host: &mut impl ScriptHost) {
@@ -378,7 +403,14 @@ impl ScriptRunner {
             Instruction::Message => {
                 frame.in_message = true;
                 self.text_window = self.window;
-                let translated = host.translate(self.table, frame.index, opcode_at - frame.base);
+                let (index, offset) = (frame.index, opcode_at - frame.base);
+                host.notify(Event::MessageShown {
+                    table: self.table.to_owned(),
+                    index,
+                    offset,
+                    window: self.window,
+                });
+                let translated = host.translate(self.table, index, offset);
                 if let Some(text) = translated {
                     self.substitute(rom, &text)?;
                 }

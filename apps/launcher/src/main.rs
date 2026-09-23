@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use extraction::{Identification, Title};
 use game_core::{
-    DEFAULT_PLAYER_NAME, Field, Game, Scope, ScriptRunner, ScriptWindows, TextPainter, Translation,
-    WindowPainter,
+    DEFAULT_PLAYER_NAME, Field, Game, GameData, Scope, ScriptRunner, ScriptWindows, TextPainter,
+    Translation, WindowPainter,
 };
 use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
@@ -161,7 +161,7 @@ fn render_string(rom: &[u8], title: Title, string_id: &str) -> Result<Frame> {
     let skin = extraction::saga::window_skin(rom)?;
     let window = WindowPainter::new(skin.tiles, &skin.palette);
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::new(16, 24, 48));
-    Field::load(rom, FIRST_ROOM_MAP, PLAYER_START)?.draw(&mut frame);
+    Field::load(&GameData::new(rom), FIRST_ROOM_MAP, PLAYER_START)?.draw(&mut frame);
     windows.draw(&mut frame, &window, &painter);
     Ok(frame)
 }
@@ -214,7 +214,7 @@ fn export_template(rom: &[u8], path: &Path, scopes: &[String]) -> Result<()> {
         .iter()
         .map(|name| Scope::parse(name))
         .collect::<Result<Vec<_>, _>>()?;
-    let template = game_core::translation::template(rom, &scopes)?;
+    let template = game_core::translation::template(&GameData::new(rom), &scopes)?;
     std::fs::write(path, &template)
         .with_context(|| format!("cannot write template {}", path.display()))?;
     println!(

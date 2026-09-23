@@ -10,11 +10,12 @@
 
 use std::collections::HashSet;
 
-use extraction::saga::{self, Portrait};
+use extraction::saga::Portrait;
 use platform::Frame;
 
+use crate::data::GameData;
+use crate::extension::{Event, SharedExtensions};
 use crate::text::{CELL_WIDTH, TextMetrics};
-use crate::translation::Translation;
 use crate::{FrameStyle, ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
 /// Name the player carries when none was entered.
@@ -208,7 +209,7 @@ pub struct ScriptWindows<'rom> {
     player_name: String,
     sounds: Vec<u8>,
     opened: u64,
-    translation: Translation,
+    extensions: SharedExtensions,
     metrics: TextMetrics,
 }
 
@@ -223,7 +224,7 @@ impl<'rom> ScriptWindows<'rom> {
             player_name: player_name.to_owned(),
             sounds: Vec::new(),
             opened: 0,
-            translation: Translation::default(),
+            extensions: SharedExtensions::default(),
             metrics: TextMetrics::default(),
         }
     }
@@ -254,15 +255,19 @@ impl<'rom> ScriptWindows<'rom> {
         }
     }
 
-    /// Uses `translation` for the messages it covers from now on.
-    pub fn set_translation(&mut self, translation: Translation) {
-        self.translation = translation;
+    /// Raises events to, and asks questions of, `extensions` from now on.
+    pub fn set_extensions(&mut self, extensions: SharedExtensions) {
+        self.extensions = extensions;
     }
 
-    /// The translation in use.
+    /// The extensions in use.
     #[must_use]
-    pub fn translation(&self) -> &Translation {
-        &self.translation
+    pub fn extensions(&self) -> &SharedExtensions {
+        &self.extensions
+    }
+
+    fn emit(&self, event: &Event) {
+        self.extensions.borrow_mut().emit(event);
     }
 
     /// The open windows, by slot.
@@ -375,6 +380,7 @@ fn pixels(tiles: usize) -> i32 {
 
 impl ScriptHost for ScriptWindows<'_> {
     fn open_window(&mut self, id: u8, kind: u8, rect: (u8, u8, u8, u8), style: u8) {
+        self.emit(&Event::WindowOpened { id, rect, kind });
         self.opened += 1;
         let opened = self.opened;
         if let Some(slot) = self.windows.get_mut(usize::from(id)) {
@@ -400,6 +406,7 @@ impl ScriptHost for ScriptWindows<'_> {
     }
 
     fn close_window(&mut self, id: Option<u8>) {
+        self.emit(&Event::WindowClosed(id));
         match id {
             Some(id) => {
                 if let Some(slot) = self.windows.get_mut(usize::from(id)) {
@@ -462,8 +469,9 @@ impl ScriptHost for ScriptWindows<'_> {
     }
 
     fn portrait(&mut self, id: u8, character: u8, expression: u8) {
-        let portrait =
-            saga::portrait(self.rom, usize::from(character), usize::from(expression)).ok();
+        let portrait = GameData::new(self.rom)
+            .portrait(usize::from(character), usize::from(expression))
+            .ok();
         if let Some(window) = self.window_mut(id) {
             window.portrait = portrait;
         }
@@ -476,6 +484,7 @@ impl ScriptHost for ScriptWindows<'_> {
     }
 
     fn play_sound(&mut self, id: u8) {
+        self.emit(&Event::SoundRequested(usize::from(id)));
         self.sounds.push(id);
     }
 
@@ -484,6 +493,7 @@ impl ScriptHost for ScriptWindows<'_> {
     }
 
     fn set_flag(&mut self, flag: u16, set: bool) {
+        self.emit(&Event::FlagChanged { flag, set });
         if set {
             self.flags.insert(flag);
         } else {
@@ -525,9 +535,13 @@ impl ScriptHost for ScriptWindows<'_> {
     }
 
     fn translate(&self, table: &str, index: usize, offset: usize) -> Option<String> {
-        self.translation
-            .get(table, index, offset)
-            .map(str::to_owned)
+        self.extensions
+            .borrow()
+            .translate_message(table, index, offset)
+    }
+
+    fn notify(&mut self, event: Event) {
+        self.emit(&event);
     }
 
     fn fit_window(
@@ -538,7 +552,10 @@ impl ScriptHost for ScriptWindows<'_> {
         kind: u8,
         rect: (u8, u8, u8, u8),
     ) -> (u8, u8, u8, u8) {
-        self.translation.fit_window(table, index, id, kind, rect)
+        self.extensions
+            .borrow()
+            .fit_window(table, index, id, kind, rect)
+            .unwrap_or(rect)
     }
 
     fn menu_line(&self, id: u8) -> usize {
@@ -563,6 +580,54 @@ mod tests {
 
     fn windows() -> ScriptWindows<'static> {
         ScriptWindows::new(&[], "アトレー")
+    }
+
+    struct Watcher(std::rc::Rc<std::cell::RefCell<Vec<Event>>>);
+
+    impl crate::extension::Extension for Watcher {
+        fn name(&self) -> &'static str {
+            "watcher"
+        }
+        fn on_event(&mut self, event: &Event) {
+            self.0.borrow_mut().push(event.clone());
+        }
+        fn translate_message(&self, _: &str, index: usize, _: usize) -> Option<String> {
+            (index == 3).then(|| "hi".to_owned())
+        }
+    }
+
+    #[test]
+    fn the_host_raises_events_and_asks_its_extensions() {
+        let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let extensions = SharedExtensions::default();
+        extensions
+            .borrow_mut()
+            .insert(Box::new(Watcher(seen.clone())));
+        let mut host = windows();
+        host.set_extensions(extensions);
+        host.open_window(1, 0x20, (0, 0, 10, 4), 0);
+        host.play_sound(0x47);
+        host.set_flag(9, true);
+        host.close_window(None);
+        assert_eq!(
+            *seen.borrow(),
+            [
+                Event::WindowOpened {
+                    id: 1,
+                    rect: (0, 0, 10, 4),
+                    kind: 0x20
+                },
+                Event::SoundRequested(0x47),
+                Event::FlagChanged { flag: 9, set: true },
+                Event::WindowClosed(None),
+            ]
+        );
+        assert_eq!(host.translate("dialogue", 3, 0), Some("hi".to_owned()));
+        assert_eq!(host.translate("dialogue", 4, 0), None);
+        assert_eq!(
+            host.fit_window("dialogue", 3, 1, 0x20, (0, 0, 10, 4)),
+            (0, 0, 10, 4)
+        );
     }
 
     #[test]

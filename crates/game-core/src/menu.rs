@@ -11,7 +11,9 @@
 //! notice (63). Behind the windows a logo map drifts one pixel per frame
 //! diagonally over a static texture.
 
-use extraction::saga::{self, BootError, PAUSE_MENU_SCRIPTS, PauseWallpaper};
+use extraction::saga::{BootError, PauseWallpaper};
+
+use crate::data::GameData;
 use gba_runtime::ppu::{FullPalette, draw_background_256};
 use platform::{Frame, Input, Rgb};
 
@@ -205,6 +207,7 @@ pub struct PauseMenu {
     held: Input,
     main_line: usize,
     status_line: usize,
+    to_next: u32,
 }
 
 impl PauseMenu {
@@ -213,11 +216,19 @@ impl PauseMenu {
     /// # Errors
     ///
     /// Returns [`BootError`] when a block cannot be read.
-    pub fn new(rom: &[u8], party: Party) -> Result<Self, BootError> {
-        let wallpaper = saga::pause_wallpaper(rom)?;
+    pub fn new(data: &GameData<'_>, party: Party) -> Result<Self, BootError> {
+        let wallpaper = data.pause_wallpaper()?;
         let mut palette = FullPalette::from_bgr555(&[WALLPAPER_BACKDROP]);
         palette.write(WALLPAPER_PALETTE_START, &wallpaper.palette);
-        let scripts = PAUSE_MENU_SCRIPTS.offsets(rom).unwrap_or_default();
+        let scripts = data
+            .script_offsets(PAUSE_MENU_TABLE)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let to_next = party.leader().map_or(0, |leader| {
+            data.experience_to_next(usize::try_from(leader.level).unwrap_or(0))
+                .map_or(0, |needed| needed.saturating_sub(leader.experience))
+        });
         Ok(Self {
             wallpaper,
             palette,
@@ -228,6 +239,7 @@ impl PauseMenu {
             held: Input::default(),
             main_line: 0,
             status_line: 0,
+            to_next,
         })
     }
 
@@ -292,8 +304,7 @@ impl PauseMenu {
             .party
             .leader()
             .map_or((1, 0), |leader| (leader.level, leader.experience));
-        let to_next = saga::experience_to_next(rom, usize::try_from(level).unwrap_or(0))
-            .map_or(0, |needed| needed.saturating_sub(experience));
+        let to_next = self.to_next;
         for ch in name.chars() {
             windows.put_char(PANEL_WINDOW, ch);
         }
