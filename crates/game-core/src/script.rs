@@ -65,6 +65,12 @@ pub trait ScriptHost {
     fn is_open(&self, id: u8) -> bool;
     /// Line the next menu in window `id` starts on: where its last one ended.
     fn menu_line(&self, id: u8) -> usize;
+    /// The translation of the message at `offset` bytes into string `index`
+    /// of script table `table`, if one is loaded.
+    fn translate(&self, table: &str, index: usize, offset: usize) -> Option<String> {
+        let _ = (table, index, offset);
+        None
+    }
 }
 
 /// What the runner is waiting for.
@@ -86,6 +92,7 @@ enum Wait {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Frame {
+    index: usize,
     base: usize,
     pc: usize,
     in_message: bool,
@@ -108,13 +115,15 @@ pub enum ScriptError {
 /// Runs strings of one table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptRunner {
+    table: &'static str,
     strings: Vec<usize>,
     frames: Vec<Frame>,
     vars: [u16; VARIABLES],
     saved: [u16; VARIABLES],
     window: u8,
     text_window: u8,
-    pending: Vec<char>,
+    pending: Vec<MessageStep>,
+    substituted: bool,
     wait: Wait,
     previous: Input,
 }
@@ -124,7 +133,15 @@ impl ScriptRunner {
     /// offsets, 0 marking an absent string.
     #[must_use]
     pub fn new(strings: Vec<usize>) -> Self {
+        Self::named("", strings)
+    }
+
+    /// Creates a runner over the script table called `table`, the name
+    /// translations key their messages by.
+    #[must_use]
+    pub fn named(table: &'static str, strings: Vec<usize>) -> Self {
         Self {
+            table,
             strings,
             frames: Vec::new(),
             vars: [0; VARIABLES],
@@ -132,6 +149,7 @@ impl ScriptRunner {
             window: 0,
             text_window: 0,
             pending: Vec::new(),
+            substituted: false,
             wait: Wait::Done,
             previous: Input::default(),
         }
@@ -145,12 +163,14 @@ impl ScriptRunner {
     pub fn start(&mut self, index: usize) -> Result<(), ScriptError> {
         let base = self.string(index)?;
         self.frames = vec![Frame {
+            index,
             base,
             pc: base,
             in_message: false,
         }];
         self.vars = [0; VARIABLES];
         self.pending.clear();
+        self.substituted = false;
         self.wait = Wait::None;
         Ok(())
     }
@@ -345,10 +365,15 @@ impl ScriptRunner {
             Instruction::Message => {
                 frame.in_message = true;
                 self.text_window = self.window;
+                let translated = host.translate(self.table, frame.index, opcode_at - frame.base);
+                if let Some(text) = translated {
+                    self.substitute(rom, &text)?;
+                }
             }
             Instruction::Call(index) => {
                 let base = self.string(usize::from(index))?;
                 self.frames.push(Frame {
+                    index: usize::from(index),
                     base,
                     pc: base,
                     in_message: false,
@@ -491,17 +516,47 @@ impl ScriptRunner {
         }
     }
 
-    fn message_step(&mut self, rom: &[u8], host: &mut impl ScriptHost) -> Result<(), ScriptError> {
-        if let Some(ch) = self.pending.pop() {
-            self.print(ch, host);
-            return Ok(());
-        }
+    /// Replaces the message starting at the frame's cursor with translated
+    /// text: its leading window switches still apply, the rest is skipped
+    /// and the translation's steps are queued instead.
+    fn substitute(&mut self, rom: &[u8], text: &str) -> Result<(), ScriptError> {
         let Some(frame) = self.frames.last_mut() else {
-            self.wait = Wait::Done;
             return Ok(());
         };
-        let (step, next) = decode_message_step(rom, frame.pc)?;
-        frame.pc = next;
+        let mut leading = true;
+        loop {
+            let (step, next) = decode_message_step(rom, frame.pc)?;
+            frame.pc = next;
+            match step {
+                MessageStep::SwitchWindow(id) if leading => self.text_window = id,
+                MessageStep::End => break,
+                _ => leading = false,
+            }
+        }
+        let mut steps = crate::translation::steps(text);
+        steps.reverse();
+        self.pending = steps;
+        self.substituted = true;
+        Ok(())
+    }
+
+    fn message_step(&mut self, rom: &[u8], host: &mut impl ScriptHost) -> Result<(), ScriptError> {
+        let step = match self.pending.pop() {
+            Some(step) => step,
+            None if self.substituted => {
+                self.substituted = false;
+                MessageStep::End
+            }
+            None => {
+                let Some(frame) = self.frames.last_mut() else {
+                    self.wait = Wait::Done;
+                    return Ok(());
+                };
+                let (step, next) = decode_message_step(rom, frame.pc)?;
+                frame.pc = next;
+                step
+            }
+        };
         match step {
             MessageStep::Character(ch) => self.print(ch, host),
             MessageStep::LineBreak => host.line_break(self.text_window),
@@ -526,7 +581,8 @@ impl ScriptRunner {
     }
 
     fn queue_text(&mut self, text: &str) {
-        self.pending.extend(text.chars().rev());
+        self.pending
+            .extend(text.chars().rev().map(MessageStep::Character));
     }
 
     fn print(&mut self, ch: char, host: &mut impl ScriptHost) {
@@ -575,6 +631,7 @@ mod tests {
         typewriter: HashSet<u8>,
         flags: HashSet<u16>,
         open: HashSet<u8>,
+        translations: std::collections::HashMap<String, String>,
     }
 
     impl ScriptHost for Recorder {
@@ -653,6 +710,11 @@ mod tests {
         }
         fn menu_line(&self, _: u8) -> usize {
             0
+        }
+        fn translate(&self, table: &str, index: usize, offset: usize) -> Option<String> {
+            self.translations
+                .get(&crate::translation::key(table, index, offset))
+                .cloned()
         }
     }
 
@@ -852,6 +914,35 @@ mod tests {
         runner.start(0).unwrap();
         assert!(run(&bytes, &mut runner, &mut host, 3));
         assert_eq!(host.log[2..], ["char 0  ", "char 0 4", "char 0 2"]);
+    }
+
+    #[test]
+    fn a_translated_message_replaces_the_text_but_keeps_its_window() {
+        let mut script = vec![
+            0x01, 0, 0x20, 0, 14, 30, 6, 4, 0x01, 3, 0x21, 0, 0, 9, 14, 4, 0x20, 0x1C, 0,
+        ];
+        script.extend(text("あい"));
+        script.extend([0x1D, 0x04, 0xFF, 0x22]);
+        let (bytes, offsets) = rom(&[script]);
+        let mut runner = ScriptRunner::named("menu", offsets);
+        let mut host = Recorder::default();
+        host.translations.insert(
+            crate::translation::key("menu", 0, 16),
+            "Hi\n{name}".to_owned(),
+        );
+        runner.start(0).unwrap();
+        assert!(run(&bytes, &mut runner, &mut host, 8));
+        assert_eq!(
+            host.log[2..],
+            [
+                "char 0 H",
+                "char 0 i",
+                "break 0",
+                "char 0 A",
+                "char 0 B",
+                "present None"
+            ]
+        );
     }
 
     #[test]

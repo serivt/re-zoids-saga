@@ -16,6 +16,7 @@ use gba_runtime::ppu::{FullPalette, draw_background_256};
 use platform::{Frame, Input, Rgb};
 
 use crate::script::{ScriptError, ScriptRunner};
+use crate::translation::PAUSE_MENU_TABLE;
 use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
@@ -150,7 +151,7 @@ impl PauseMenu {
         Ok(Self {
             wallpaper,
             palette,
-            runner: ScriptRunner::new(scripts),
+            runner: ScriptRunner::named(PAUSE_MENU_TABLE, scripts),
             state: MenuState::Closed,
             scroll: 0,
             party,

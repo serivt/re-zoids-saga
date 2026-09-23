@@ -19,6 +19,7 @@ use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::field::{Direction, Field, FieldError, FieldEvent, NpcCommand};
 use crate::menu::{Party, PauseMenu};
 use crate::script::{ScriptError, ScriptRunner};
+use crate::translation::{DIALOGUE_TABLE, Translation};
 use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows};
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
@@ -239,7 +240,10 @@ impl<'rom> Game<'rom> {
             skin: WindowPainter::new(skin.tiles, &skin.palette),
             windows: ScriptWindows::new(rom, DEFAULT_PLAYER_NAME),
             sound: SoundEngine::new(rom, saga::SONG_TABLE, saga::SONG_COUNT, saga::MASTER_VOLUME),
-            dialogue: ScriptRunner::new(dialogue.iter().map(|string| string.offset).collect()),
+            dialogue: ScriptRunner::named(
+                DIALOGUE_TABLE,
+                dialogue.iter().map(|string| string.offset).collect(),
+            ),
             field: None,
             screen: Screen::Loading(0),
             pending_talk: None,
@@ -338,6 +342,11 @@ impl<'rom> Game<'rom> {
         }
         self.sound.frame()?;
         Ok(())
+    }
+
+    /// Shows the messages `translation` covers in place of the ROM's text.
+    pub fn set_translation(&mut self, translation: Translation) {
+        self.windows.set_translation(translation);
     }
 
     /// The samples of the frame the last update produced, stereo

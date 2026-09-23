@@ -21,6 +21,7 @@ use gba_runtime::ppu::{
 use platform::{Button, Frame, Input, Rgb};
 
 use crate::script::{ScriptError, ScriptRunner};
+use crate::translation::{NAME_ENTRY_TABLE, TITLE_TABLE};
 use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
@@ -269,7 +270,7 @@ impl TitleScreen {
             graphics,
             frame: 0,
             state: TitleState::FadingIn,
-            runner: ScriptRunner::new(vec![TITLE_MENU_SCRIPT_OFFSET]),
+            runner: ScriptRunner::named(TITLE_TABLE, vec![TITLE_MENU_SCRIPT_OFFSET]),
             previous: Input::default(),
         })
     }
@@ -534,7 +535,7 @@ impl NameEntry {
             cursor: (0, 0),
             name: name.chars().take(NAME_SLOTS).collect(),
             state: NameState::Editing,
-            runner: ScriptRunner::new(scripts),
+            runner: ScriptRunner::named(NAME_ENTRY_TABLE, scripts),
             previous: input,
         })
     }

@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use extraction::saga::{self, Portrait};
 use platform::Frame;
 
+use crate::translation::Translation;
 use crate::{FrameStyle, ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
 /// Name the player carries when none was entered.
@@ -135,6 +136,7 @@ pub struct ScriptWindows<'rom> {
     player_name: String,
     sounds: Vec<u8>,
     opened: u64,
+    translation: Translation,
 }
 
 impl<'rom> ScriptWindows<'rom> {
@@ -148,7 +150,13 @@ impl<'rom> ScriptWindows<'rom> {
             player_name: player_name.to_owned(),
             sounds: Vec::new(),
             opened: 0,
+            translation: Translation::default(),
         }
+    }
+
+    /// Uses `translation` for the messages it covers from now on.
+    pub fn set_translation(&mut self, translation: Translation) {
+        self.translation = translation;
     }
 
     /// The open windows, by slot.
@@ -394,6 +402,12 @@ impl ScriptHost for ScriptWindows<'_> {
                 window.line = line;
             }
         }
+    }
+
+    fn translate(&self, table: &str, index: usize, offset: usize) -> Option<String> {
+        self.translation
+            .get(table, index, offset)
+            .map(str::to_owned)
     }
 
     fn menu_line(&self, id: u8) -> usize {

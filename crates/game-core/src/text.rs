@@ -5,6 +5,41 @@ use gba_runtime::ppu::{IndexedImage, Palette, draw_indexed};
 use platform::Frame;
 
 const BACKGROUND_INDEX: u8 = 1;
+const FULL_WIDTH_OFFSET: u32 = 0xFEE0;
+const IDEOGRAPHIC_SPACE: char = '\u{3000}';
+
+/// The full-width form of a printable ASCII character, or the character
+/// itself.
+fn full_width(ch: char) -> char {
+    match ch {
+        ' ' => IDEOGRAPHIC_SPACE,
+        '!'..='~' => char::from_u32(u32::from(ch) + FULL_WIDTH_OFFSET).unwrap_or(ch),
+        other => other,
+    }
+}
+
+/// A Latin letter without its accent, or the character itself.
+fn plain_latin(ch: char) -> char {
+    match ch {
+        'á' | 'à' | 'â' | 'ä' => 'a',
+        'é' | 'è' | 'ê' | 'ë' => 'e',
+        'í' | 'ì' | 'î' | 'ï' => 'i',
+        'ó' | 'ò' | 'ô' | 'ö' => 'o',
+        'ú' | 'ù' | 'û' | 'ü' => 'u',
+        'ñ' => 'n',
+        'ç' => 'c',
+        'Á' | 'À' | 'Â' | 'Ä' => 'A',
+        'É' | 'È' | 'Ê' | 'Ë' => 'E',
+        'Í' | 'Ì' | 'Î' | 'Ï' => 'I',
+        'Ó' | 'Ò' | 'Ô' | 'Ö' => 'O',
+        'Ú' | 'Ù' | 'Û' | 'Ü' => 'U',
+        'Ñ' => 'N',
+        'Ç' => 'C',
+        '¿' => '?',
+        '¡' => '!',
+        other => other,
+    }
+}
 
 /// Draws strings with a font read from a ROM image.
 pub struct TextPainter<'rom> {
@@ -26,10 +61,14 @@ impl<'rom> TextPainter<'rom> {
     }
 
     /// Glyph for a character, or the fallback glyph when the font lacks it.
+    /// The font has no half-width Latin letters, so ASCII draws with the
+    /// full-width forms, and accented Latin letters with their plain ones.
     #[must_use]
     pub fn glyph(&self, ch: char) -> Option<Glyph> {
-        shift_jis_code(ch)
-            .and_then(|code| self.index.glyph(self.rom, code))
+        [ch, full_width(ch), full_width(plain_latin(ch))]
+            .into_iter()
+            .filter_map(shift_jis_code)
+            .find_map(|code| self.index.glyph(self.rom, code))
             .or_else(|| self.fallback.clone())
     }
 
