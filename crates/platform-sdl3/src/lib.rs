@@ -1,4 +1,9 @@
-//! SDL3 implementation of the platform traits.
+//! SDL3 implementation of the platform traits, with the save kept as a
+//! file.
+
+mod storage;
+
+pub use storage::FileStorage;
 
 use platform::{AudioOut, Button, Display, Event, Frame, Input, PlatformError};
 use sdl3::audio::{AudioFormat, AudioSpec, AudioStreamOwner};
