@@ -5,14 +5,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use extraction::{Identification, Title};
 use game_core::{
-    DEFAULT_PLAYER_NAME, Field, Game, ScriptRunner, ScriptWindows, TextPainter, WindowPainter,
+    DEFAULT_PLAYER_NAME, Field, Game, Scope, ScriptRunner, ScriptWindows, TextPainter, Translation,
+    WindowPainter,
 };
 use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{AudioOut, Display, Event, Frame, Rgb};
 use platform_sdl3::Sdl3Display;
 
-const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, Esc quits); --room skips to the first room";
+const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, Esc quits); --room skips to the first room; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, dialogue), by default the title, the name entry and dialogue 30-41";
+const DEFAULT_TEMPLATE_SCOPES: [&str; 3] = ["title", "name-entry", "dialogue:30-41"];
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_MAP: usize = extraction::saga::FIRST_ROOM_MAP;
 const PLAYER_START: (usize, usize) = extraction::saga::PLAYER_START;
@@ -38,11 +40,26 @@ fn main() -> Result<()> {
     if identification.title != Title::Saga {
         bail!("the field is only implemented for {}", Title::Saga);
     }
+    if let Some((path, scopes)) = &options.template {
+        return export_template(&rom, path, scopes);
+    }
     let mut game = if options.room || options.dump_path.is_some() {
         Game::in_first_room(&rom)?
     } else {
         Game::new(&rom)?
     };
+    if let Some(path) = &options.translation {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("cannot read translation {}", path.display()))?;
+        let translation = Translation::from_po(&text)
+            .with_context(|| format!("cannot parse translation {}", path.display()))?;
+        println!(
+            "Translation: {} messages from {}",
+            translation.len(),
+            path.display()
+        );
+        game.set_translation(translation);
+    }
     match &options.dump_path {
         Some(path) => {
             let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
@@ -58,6 +75,8 @@ struct Options {
     string_id: Option<String>,
     dump_path: Option<PathBuf>,
     room: bool,
+    translation: Option<PathBuf>,
+    template: Option<(PathBuf, Vec<String>)>,
 }
 
 impl Options {
@@ -67,10 +86,23 @@ impl Options {
         let mut string_id = None;
         let mut dump_path = None;
         let mut room = false;
+        let mut translation = None;
+        let mut template = None;
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--dump") => dump_path = Some(args.next().map(PathBuf::from).context(USAGE)?),
                 Some("--room") => room = true,
+                Some("--translation") => {
+                    translation = Some(args.next().map(PathBuf::from).context(USAGE)?);
+                }
+                Some("--export-template") => {
+                    let path = args.next().map(PathBuf::from).context(USAGE)?;
+                    let scopes: Vec<String> = args
+                        .by_ref()
+                        .map(|scope| scope.to_string_lossy().into_owned())
+                        .collect();
+                    template = Some((path, scopes));
+                }
                 Some(id) if !id.starts_with("--") => string_id = Some(id.to_owned()),
                 _ => bail!(USAGE),
             }
@@ -80,6 +112,8 @@ impl Options {
             string_id,
             dump_path,
             room,
+            translation,
+            template,
         })
     }
 }
@@ -168,6 +202,27 @@ fn play(title: &str, game: &mut Game<'_>) -> Result<()> {
         display.present(&frame)?;
         std::thread::sleep(FRAME_DURATION.saturating_sub(started.elapsed()));
     }
+}
+
+fn export_template(rom: &[u8], path: &Path, scopes: &[String]) -> Result<()> {
+    let names: Vec<&str> = if scopes.is_empty() {
+        DEFAULT_TEMPLATE_SCOPES.to_vec()
+    } else {
+        scopes.iter().map(String::as_str).collect()
+    };
+    let scopes = names
+        .iter()
+        .map(|name| Scope::parse(name))
+        .collect::<Result<Vec<_>, _>>()?;
+    let template = game_core::translation::template(rom, &scopes)?;
+    std::fs::write(path, &template)
+        .with_context(|| format!("cannot write template {}", path.display()))?;
+    println!(
+        "Template:   {} messages written to {}",
+        template.matches("\nmsgctxt ").count(),
+        path.display()
+    );
+    Ok(())
 }
 
 fn write_ppm(path: &Path, frame: &Frame) -> Result<()> {
