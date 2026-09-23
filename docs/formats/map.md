@@ -54,14 +54,17 @@ and a pointer to the list. Each object is 20 bytes:
 | 2 | OBJ palette slot the game reserves |
 | 4 | Metatile column the object stands on |
 | 6 | Metatile row |
-| 8 | Script reference, `0x80000000` for none; small values with bit 31 are event ids |
+| 8 | Script reference: `0x80000000` for none, bit 31 set with a low half-word = index into the `dialogue` string table (what the character says), otherwise a pointer to code |
 | 12 | Kind: 0 the player, 1 or 2 characters, 4 invisible triggers |
 | 14 | Parameter of the kind, not understood |
 | 16 | Animation the sprite starts with |
 | 18 | Behavior: 0 characters, 1 map Zoids, 2 furniture-like sprites |
 
 Object 0 is the player's entry; the loader spawns it at the arrival metatile and the
-rest where the list says. The first room (map 4) lists the player (`0x98`), `ch56` at
+rest where the list says. `ch56` in the first room references dialogue `0x2E2` = 738,
+the queen's line "{name}・・・　どうしたのですか。", which is what the box showed in the
+emulator. Characters of kind 2 wander the room a step at a time; that walk is not
+modeled yet. The first room (map 4) lists the player (`0x98`), `ch56` at
 (35, 2), `ch57` at (39, 16) and the chair `ma07` at (6, 2), which blocks the metatile
 under it: a step right from the start position does nothing. Maps whose record id has
 bit 15 set overlay the list with saved state (moved or hidden characters); that overlay

@@ -35,6 +35,16 @@ way when the player walks past, and the chair `ma07` covers the player's arm at 
 start). That chair at (6, 2) is what stops a step right from the start; the desk above
 the player is a blocked attribute.
 
+## Talking
+
+Pressing A while standing still with a character on the metatile ahead of the footing
+speaks to it: a character of behavior 0 or 1 turns to face the player (animation =
+opposite facing), and if its object names a dialogue string the field reports it and
+the caller opens a `TalkBox` on that script while the field stays frozen. Furniture
+(behavior 2) neither turns nor talks, and objects whose script is code are silent for
+now. Observed on `ch56`: entity state 3 for the player and 1 for the character during
+the box, both back to 0 when it closes.
+
 ## Exits
 
 When a step completes onto a footing whose attribute is `0x4000 | n`, the engine reports
@@ -46,6 +56,7 @@ in map 5 at metatile (8, 16): sprite (120, 256), camera (16, 160), as in the ori
 ## Not modeled yet
 
 Doors taken by pressing A (`0xC000` attributes), the fade and door sound of a warp,
-talking to characters and their scripts, characters that walk, the saved-state overlay of
-object lists, objects that show the party's Zoid, and the diagonal input priority of the
-original (this engine takes the first held direction in the order up, down, left, right).
+code-driven character scripts, characters that wander, the saved-state overlay of object
+lists, objects that show the party's Zoid, dialogue opcodes beyond plain messages, and
+the diagonal input priority of the original (this engine takes the first held direction
+in the order up, down, left, right).

@@ -44,6 +44,18 @@ The box spans the bottom 8 tile rows (rows 12–19) and the full 30 columns. A d
 at column 7 separates the portrait (columns 1–6) from the text. The speaker name is
 drawn at pixel (64, 104), the text lines from (64, 120) every 16 pixels.
 
+## Character talk layout
+
+Speaking to a character on the map opens the same skin without a portrait: rows 12–19,
+30 columns, text from cell (1, 13) with the speaker's name on the first line and up to
+two more lines of 28 cells (`game_core::TALK_TEXT_AREA`), so pixel (8, 104), (8, 120)
+and (8, 136). Characters appear one per frame starting four frames after A is pressed,
+line breaks costing no frames (39 characters were complete 43 frames after the press).
+22 frames after the last character the prompt tile `0x1C` blinks at cell (28, 19),
+21 frames on and 21 off. A then closes the box (or turns the page of a longer script).
+Measured on the first room's `ch56` with `tools/mgba_talk.lua`, which steers the player
+next to an entity and presses A.
+
 ## Text wrapping
 
 Source: the window callback's put-character case (ROM `0x0803E330`). Each window keeps a
