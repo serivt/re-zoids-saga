@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use extraction::saga::{self, Portrait};
 use platform::Frame;
 
-use crate::{ScriptHost, TextPainter, WindowPainter, draw_sprite};
+use crate::{FrameStyle, ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
 /// Name the player carries when none was entered.
 pub const DEFAULT_PLAYER_NAME: &str = "アトレー";
@@ -21,6 +21,11 @@ const WINDOWS: usize = 8;
 const TILE: usize = 8;
 const LINE_HEIGHT: usize = 16;
 const TYPEWRITER_STYLE: u8 = 1;
+const MENU_KIND: u8 = 1;
+const LIGHT_FRAME_KIND: u8 = 0x20;
+const NO_FRAME_KIND: u8 = 0x40;
+const MENU_MARGIN: usize = 2;
+const TEXT_MARGIN: usize = 1;
 const PROMPT_FROM_RIGHT: usize = 2;
 const NAME_RESET_MODE: u8 = 1;
 
@@ -47,13 +52,44 @@ pub struct Window {
     pub prompt: bool,
     /// Whether the window has been presented.
     pub visible: bool,
+    /// Line the menu cursor sits on, if the window is a menu being used.
+    pub cursor: Option<usize>,
+    /// Order in which the window was opened; later windows cover earlier ones.
+    pub opened: u64,
 }
 
 impl Window {
+    /// Whether the window is a menu: text starts a cell further in to
+    /// leave room for the cursor brackets.
+    #[must_use]
+    pub fn is_menu(&self) -> bool {
+        self.kind & 0x0F == MENU_KIND
+    }
+
+    /// Cells between the border and the text.
+    #[must_use]
+    pub fn margin(&self) -> usize {
+        if self.is_menu() {
+            MENU_MARGIN
+        } else {
+            TEXT_MARGIN
+        }
+    }
+
+    /// How the border is drawn.
+    #[must_use]
+    pub fn frame_style(&self) -> FrameStyle {
+        match self.kind & 0xF0 {
+            LIGHT_FRAME_KIND => FrameStyle::Light,
+            NO_FRAME_KIND => FrameStyle::None,
+            _ => FrameStyle::Standard,
+        }
+    }
+
     /// Text cells per line.
     #[must_use]
     pub fn columns(&self) -> usize {
-        self.width.saturating_sub(2)
+        self.width.saturating_sub(2 * self.margin())
     }
 
     /// Text lines that fit.
@@ -96,6 +132,7 @@ pub struct ScriptWindows<'rom> {
     flags: HashSet<u16>,
     player_name: String,
     sounds: Vec<u8>,
+    opened: u64,
 }
 
 impl<'rom> ScriptWindows<'rom> {
@@ -108,6 +145,7 @@ impl<'rom> ScriptWindows<'rom> {
             flags: HashSet::new(),
             player_name: player_name.to_owned(),
             sounds: Vec::new(),
+            opened: 0,
         }
     }
 
@@ -123,27 +161,40 @@ impl<'rom> ScriptWindows<'rom> {
         self.windows.iter().any(Option::is_some)
     }
 
+    /// Changes what `{name}` prints.
+    pub fn set_player_name(&mut self, name: &str) {
+        name.clone_into(&mut self.player_name);
+    }
+
     /// Sounds requested so far, oldest first; clearing is the caller's job.
     pub fn take_sounds(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.sounds)
     }
 
-    /// Draws every presented window over `frame`.
+    /// Draws every presented window over `frame`, in the order they were
+    /// opened so later windows cover earlier ones, as one tilemap would.
     pub fn draw(&self, frame: &mut Frame, skin: &WindowPainter, painter: &TextPainter) {
-        for window in self.windows.iter().flatten() {
-            if !window.visible {
-                continue;
-            }
-            skin.draw_window(frame, window.x, window.y, window.width, window.height);
-        }
-        for (index, window) in self.windows.iter().enumerate() {
-            let Some(window) = window.as_ref().filter(|window| window.visible) else {
-                continue;
-            };
+        let mut order: Vec<(usize, &Window)> = self
+            .windows
+            .iter()
+            .enumerate()
+            .filter_map(|(index, window)| Some((index, window.as_ref()?)))
+            .filter(|(_, window)| window.visible)
+            .collect();
+        order.sort_by_key(|(_, window)| window.opened);
+        for (index, window) in order {
+            skin.draw_framed(
+                frame,
+                window.x,
+                window.y,
+                window.width,
+                window.height,
+                window.frame_style(),
+            );
             if self.shares_left_border(index, window) {
                 skin.draw_divider(frame, window.x, window.y, window.height);
             }
-            let origin = (pixels(window.x + 1), pixels(window.y + 1));
+            let origin = (pixels(window.x + window.margin()), pixels(window.y + 1));
             if let Some(portrait) = &window.portrait {
                 draw_sprite(
                     frame,
@@ -162,6 +213,14 @@ impl<'rom> ScriptWindows<'rom> {
                     frame,
                     (window.x + window.width).saturating_sub(PROMPT_FROM_RIGHT),
                     window.y + window.height - 1,
+                );
+            }
+            if let Some(line) = window.cursor {
+                skin.draw_cursor(
+                    frame,
+                    window.x + 1,
+                    (window.x + window.width).saturating_sub(2),
+                    window.y + 1 + line * 2,
                 );
             }
         }
@@ -192,6 +251,8 @@ fn pixels(tiles: usize) -> i32 {
 
 impl ScriptHost for ScriptWindows<'_> {
     fn open_window(&mut self, id: u8, kind: u8, rect: (u8, u8, u8, u8), style: u8) {
+        self.opened += 1;
+        let opened = self.opened;
         if let Some(slot) = self.windows.get_mut(usize::from(id)) {
             *slot = Some(Window {
                 x: usize::from(rect.0),
@@ -204,6 +265,8 @@ impl ScriptHost for ScriptWindows<'_> {
                 portrait: None,
                 prompt: false,
                 visible: false,
+                cursor: None,
+                opened,
             });
         }
     }
@@ -300,6 +363,25 @@ impl ScriptHost for ScriptWindows<'_> {
             self.player_name.clear();
         }
     }
+
+    fn menu_lines(&self, id: u8) -> usize {
+        self.windows
+            .get(usize::from(id))
+            .and_then(Option::as_ref)
+            .map_or(0, |window| {
+                window
+                    .lines
+                    .iter()
+                    .filter(|line| !line.trim().is_empty())
+                    .count()
+            })
+    }
+
+    fn set_cursor(&mut self, id: u8, line: Option<usize>) {
+        if let Some(window) = self.window_mut(id) {
+            window.cursor = line;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -363,5 +445,30 @@ mod tests {
         assert_eq!(host.player_name(), "アトレー");
         host.reset(1);
         assert_eq!(host.player_name(), "");
+    }
+
+    #[test]
+    fn menus_reserve_the_cursor_columns_and_count_their_lines() {
+        let mut host = windows();
+        host.open_window(0, 0x21, (10, 10, 9, 8), 4);
+        for ch in "ab\ncd\nef".chars() {
+            if ch == '\n' {
+                host.line_break(0);
+            } else {
+                host.put_char(0, ch);
+            }
+        }
+        let window = host.windows()[0].as_ref().unwrap();
+        assert!(window.is_menu());
+        assert_eq!(window.frame_style(), FrameStyle::Light);
+        assert_eq!(window.columns(), 5);
+        assert_eq!(host.menu_lines(0), 3);
+        host.set_cursor(0, Some(2));
+        assert_eq!(host.windows()[0].as_ref().unwrap().cursor, Some(2));
+        host.open_window(1, 0x40, (8, 0, 22, 4), 0);
+        assert_eq!(
+            host.windows()[1].as_ref().unwrap().frame_style(),
+            FrameStyle::None
+        );
     }
 }

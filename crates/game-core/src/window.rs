@@ -17,6 +17,27 @@ const RIGHT: usize = 0x11;
 const DIVIDER_TOP: usize = 0x20;
 const DIVIDER_BOTTOM: usize = 0x21;
 const PROMPT: usize = 0x1C;
+const LIGHT_TOP_LEFT: usize = 0x12;
+const LIGHT_TOP_RIGHT: usize = 0x13;
+const LIGHT_BOTTOM_LEFT: usize = 0x14;
+const LIGHT_BOTTOM_RIGHT: usize = 0x15;
+const LIGHT_TOP: usize = 0x16;
+const LIGHT_BOTTOM: usize = 0x17;
+const LIGHT_LEFT: usize = 0x18;
+const LIGHT_RIGHT: usize = 0x19;
+const CURSOR_LEFT: [usize; 2] = [0x3B, 0x3C];
+const CURSOR_RIGHT: [usize; 2] = [0x3D, 0x3E];
+
+/// How a window's border is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameStyle {
+    /// The striped border of dialogue boxes.
+    Standard,
+    /// The thin border of menus and fields.
+    Light,
+    /// No border: only the fill.
+    None,
+}
 
 /// Text area of the story dialogue box: the cells right of the portrait
 /// divider, below the speaker's name.
@@ -57,21 +78,38 @@ impl WindowPainter {
         columns: usize,
         rows: usize,
     ) {
+        self.draw_framed(frame, column, row, columns, rows, FrameStyle::Standard);
+    }
+
+    /// Draws a window with the given border style.
+    pub fn draw_framed(
+        &self,
+        frame: &mut Frame,
+        column: usize,
+        row: usize,
+        columns: usize,
+        rows: usize,
+        style: FrameStyle,
+    ) {
         for r in 0..rows {
             for c in 0..columns {
-                let tile = match (edge(r, rows), edge(c, columns)) {
-                    (Edge::First, Edge::First) => TOP_LEFT,
-                    (Edge::First, Edge::Last) => TOP_RIGHT,
-                    (Edge::Last, Edge::First) => BOTTOM_LEFT,
-                    (Edge::Last, Edge::Last) => BOTTOM_RIGHT,
-                    (Edge::First, Edge::Inside) => TOP,
-                    (Edge::Last, Edge::Inside) => BOTTOM,
-                    (Edge::Inside, Edge::First) => LEFT,
-                    (Edge::Inside, Edge::Last) => RIGHT,
-                    (Edge::Inside, Edge::Inside) => FILL,
+                let place = (edge(r, rows), edge(c, columns));
+                let tile = match style {
+                    FrameStyle::Standard => standard_tile(place),
+                    FrameStyle::Light => light_tile(place),
+                    FrameStyle::None => FILL,
                 };
                 self.draw_tile(frame, column + c, row + r, tile);
             }
+        }
+    }
+
+    /// Draws the menu cursor brackets around the two tile rows at `row`,
+    /// on columns `left` and `right`.
+    pub fn draw_cursor(&self, frame: &mut Frame, left: usize, right: usize, row: usize) {
+        for (i, (l, r)) in CURSOR_LEFT.iter().zip(CURSOR_RIGHT).enumerate() {
+            self.draw_tile(frame, left, row + i, *l);
+            self.draw_tile(frame, right, row + i, r);
         }
     }
 
@@ -104,6 +142,34 @@ impl WindowPainter {
         };
         let position = (pixel_offset(column), pixel_offset(row));
         draw_indexed(frame, position, image, &self.palette, None);
+    }
+}
+
+fn standard_tile(place: (Edge, Edge)) -> usize {
+    match place {
+        (Edge::First, Edge::First) => TOP_LEFT,
+        (Edge::First, Edge::Last) => TOP_RIGHT,
+        (Edge::Last, Edge::First) => BOTTOM_LEFT,
+        (Edge::Last, Edge::Last) => BOTTOM_RIGHT,
+        (Edge::First, Edge::Inside) => TOP,
+        (Edge::Last, Edge::Inside) => BOTTOM,
+        (Edge::Inside, Edge::First) => LEFT,
+        (Edge::Inside, Edge::Last) => RIGHT,
+        (Edge::Inside, Edge::Inside) => FILL,
+    }
+}
+
+fn light_tile(place: (Edge, Edge)) -> usize {
+    match place {
+        (Edge::First, Edge::First) => LIGHT_TOP_LEFT,
+        (Edge::First, Edge::Last) => LIGHT_TOP_RIGHT,
+        (Edge::Last, Edge::First) => LIGHT_BOTTOM_LEFT,
+        (Edge::Last, Edge::Last) => LIGHT_BOTTOM_RIGHT,
+        (Edge::First, Edge::Inside) => LIGHT_TOP,
+        (Edge::Last, Edge::Inside) => LIGHT_BOTTOM,
+        (Edge::Inside, Edge::First) => LIGHT_LEFT,
+        (Edge::Inside, Edge::Last) => LIGHT_RIGHT,
+        (Edge::Inside, Edge::Inside) => FILL,
     }
 }
 
