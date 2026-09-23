@@ -4,13 +4,16 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use extraction::{Identification, Title};
-use game_core::{DIALOGUE_TEXT_AREA, Field, TextPainter, WindowPainter, draw_scene, draw_sprite};
+use game_core::{
+    DEFAULT_PLAYER_NAME, DIALOGUE_TEXT_AREA, Field, FieldEvent, TalkBox, TextPainter,
+    WindowPainter, draw_scene, draw_sprite,
+};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use localization::monospace;
 use platform::{Display, Event, Frame, Rgb};
 use platform_sdl3::Sdl3Display;
 
-const USAGE: &str = "usage: launcher <rom-path> [string-id] [--dump <frame.ppm>]\n  without a string id the launcher lets you walk the first room (arrows move, Esc quits)";
+const USAGE: &str = "usage: launcher <rom-path> [string-id] [--dump <frame.ppm>]\n  without a string id the launcher lets you walk the first room (arrows move, X talks, Esc quits)";
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_SCENE: usize = 3;
 const FIRST_ROOM_MAP: usize = 4;
@@ -163,6 +166,14 @@ fn show(title: &str, frame: &Frame) -> Result<()> {
 }
 
 fn walk(title: &str, rom: &[u8], field: &mut Field) -> Result<()> {
+    let (glyphs, fallback) = extraction::saga::font(rom)?;
+    let painter = TextPainter::new(rom, glyphs, Some(fallback));
+    let skin = extraction::saga::window_skin(rom)?;
+    let window = WindowPainter::new(skin.tiles, &skin.palette);
+    let dialogue = extraction::saga::string_table("dialogue")
+        .context("no dialogue table")?
+        .read(rom)?;
+    let mut talk: Option<TalkBox> = None;
     let mut display = Sdl3Display::open(title, SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_SCALE)?;
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
     loop {
@@ -170,14 +181,35 @@ fn walk(title: &str, rom: &[u8], field: &mut Field) -> Result<()> {
         if display.poll_events().contains(&Event::Quit) {
             return Ok(());
         }
-        if let Some(exit) = field.update(display.input()) {
-            let warp = field.warp(rom, exit)?;
-            println!(
-                "Exit {exit} -> map {} at ({}, {})",
-                warp.map, warp.column, warp.row
-            );
+        let input = display.input();
+        if let Some(open) = &mut talk {
+            if open.update(input) {
+                talk = None;
+            }
+        } else {
+            match field.update(input) {
+                Some(FieldEvent::Exit(exit)) => {
+                    let warp = field.warp(rom, exit)?;
+                    println!(
+                        "Exit {exit} -> map {} at ({}, {})",
+                        warp.map, warp.column, warp.row
+                    );
+                }
+                Some(FieldEvent::Talk { dialogue: id, .. }) => {
+                    let string = dialogue
+                        .get(id)
+                        .filter(|string| string.is_present())
+                        .with_context(|| format!("no dialogue string {id}"))?;
+                    println!("Talk -> {}", string.id);
+                    talk = Some(TalkBox::new(&string.script, DEFAULT_PLAYER_NAME));
+                }
+                None => {}
+            }
         }
         field.draw(&mut frame);
+        if let Some(open) = &talk {
+            open.draw(&mut frame, &window, &painter);
+        }
         display.present(&frame)?;
         std::thread::sleep(FRAME_DURATION.saturating_sub(started.elapsed()));
     }

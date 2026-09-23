@@ -16,6 +16,7 @@ const LEFT: usize = 0x10;
 const RIGHT: usize = 0x11;
 const DIVIDER_TOP: usize = 0x20;
 const DIVIDER_BOTTOM: usize = 0x21;
+const PROMPT: usize = 0x1C;
 
 /// Text area of the story dialogue box: the cells right of the portrait
 /// divider, below the speaker's name.
@@ -85,6 +86,11 @@ impl WindowPainter {
             };
             self.draw_tile(frame, column, row + r, tile);
         }
+    }
+
+    /// Draws the "more text" prompt on the border at tile `(column, row)`.
+    pub fn draw_prompt(&self, frame: &mut Frame, column: usize, row: usize) {
+        self.draw_tile(frame, column, row, PROMPT);
     }
 
     fn draw_tile(&self, frame: &mut Frame, column: usize, row: usize, tile: usize) {
