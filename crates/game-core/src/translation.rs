@@ -16,7 +16,10 @@ use extraction::saga::{self, NAME_ENTRY_SCRIPTS, PAUSE_MENU_SCRIPTS, TITLE_MENU_
 use formats::script_ops::{Instruction, MessageStep, decode_instruction, decode_message_step};
 use thiserror::Error;
 
-use crate::boot::{NAME_GRID_ROWS, NAME_HELP, NAME_PAGE_LABELS};
+use crate::boot::{
+    NAME_GRID_ROWS, NAME_HELP, NAME_HELP_PIXELS, NAME_LABEL_PIXELS, NAME_PAGE_LABELS,
+};
+use crate::text::{CELL_WIDTH, TextMetrics};
 
 /// Table name of the title menu script.
 pub const TITLE_TABLE: &str = "title";
@@ -98,10 +101,11 @@ pub struct Translation {
     name_entry_help: Option<String>,
 }
 
-/// The inner size a window must offer for its translated messages.
+/// The inner size a window must offer for its translated messages: the
+/// widest line in pixels and, for a menu, the lines.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Fit {
-    columns: usize,
+    pixels: usize,
     rows: usize,
 }
 
@@ -134,11 +138,22 @@ impl Opened {
     }
 }
 
-/// Where a message lands: its window and who opened it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Where a message lands: its window, and the other windows open with it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Placement {
     id: u8,
     window: Opened,
+    others: Vec<Opened>,
+}
+
+impl Opened {
+    /// Whether two windows share any cell.
+    fn overlaps(&self, other: &Self) -> bool {
+        self.x < other.x + other.width
+            && other.x < self.x + self.width
+            && self.y < other.y + other.height
+            && other.y < self.y + self.height
+    }
 }
 
 /// The key of a message: table, string index and the message's offset from
@@ -218,14 +233,18 @@ impl Translation {
         self.name_entry_help.as_deref()
     }
 
-    /// Works out which windows the translated messages overflow and remembers
-    /// how much to enlarge them; returns one line per message that cannot
-    /// fit even a screen-wide window.
+    /// Works out, with `metrics`, which windows the translated messages
+    /// overflow and remembers how much to enlarge them; returns one line
+    /// per message that cannot fit even a screen-wide window.
     ///
     /// # Errors
     ///
     /// Returns [`TranslationError`] when a table cannot be read.
-    pub fn fit(&mut self, rom: &[u8]) -> Result<Vec<String>, TranslationError> {
+    pub fn fit(
+        &mut self,
+        rom: &[u8],
+        metrics: &TextMetrics,
+    ) -> Result<Vec<String>, TranslationError> {
         self.fits.clear();
         let mut problems = Vec::new();
         let mut placements = HashMap::new();
@@ -246,7 +265,7 @@ impl Translation {
             let Some(placement) = placements.get(context) else {
                 continue;
             };
-            let (columns, rows) = needed(text);
+            let (pixels, rows) = needed(text, metrics);
             let window = placement.window;
             let fit_key = key(
                 placement_table(context),
@@ -255,19 +274,44 @@ impl Translation {
             );
             let is_menu = window.kind & MENU_KIND != 0;
             let rows_needed = if is_menu { rows } else { 0 };
-            if columns <= window.columns() && rows_needed <= window.rows() {
+            if pixels <= window.columns() * CELL_WIDTH && rows_needed <= window.rows() {
                 continue;
             }
+            let columns = pixels.div_ceil(CELL_WIDTH);
             if columns + 2 * window.margin() > SCREEN_COLUMNS || 2 + 2 * rows_needed > SCREEN_ROWS {
                 problems.push(format!(
-                    "{context}: needs {columns} cells, a window can hold {}",
-                    SCREEN_COLUMNS - 2 * window.margin()
+                    "{context}: needs {pixels} pixels, a window can hold {}",
+                    (SCREEN_COLUMNS - 2 * window.margin()) * CELL_WIDTH
+                ));
+                continue;
+            }
+            let grown = grown_window(&window, pixels, rows_needed);
+            if let Some(other) = placement.others.iter().find(|other| grown.overlaps(other)) {
+                problems.push(format!(
+                    "{context}: needs {pixels} pixels, but a larger window would cover the one at ({}, {})",
+                    other.x, other.y
                 ));
                 continue;
             }
             let entry = self.fits.entry(fit_key).or_default();
-            entry.columns = entry.columns.max(columns);
+            entry.pixels = entry.pixels.max(pixels);
             entry.rows = entry.rows.max(rows_needed);
+        }
+        if let Some(help) = &self.name_entry_help
+            && metrics.width(help) > NAME_HELP_PIXELS
+        {
+            problems.push(format!(
+                "{NAME_HELP_KEY}: needs {} pixels, the help line holds {NAME_HELP_PIXELS}",
+                metrics.width(help)
+            ));
+        }
+        for (number, page) in self.alphabet.iter().enumerate() {
+            let width = metrics.width(&page.label);
+            if width > NAME_LABEL_PIXELS {
+                problems.push(format!(
+                    "{ALPHABET_PREFIX}{number}: the label needs {width} pixels, the window holds {NAME_LABEL_PIXELS}"
+                ));
+            }
         }
         problems.sort();
         Ok(problems)
@@ -292,7 +336,7 @@ impl Translation {
         } else {
             TEXT_MARGIN
         };
-        let width = usize::from(rect.2).max(fit.columns + 2 * margin);
+        let width = usize::from(rect.2).max(fit.pixels.div_ceil(CELL_WIDTH) + 2 * margin);
         let height = usize::from(rect.3).max(if fit.rows > 0 { 2 + 2 * fit.rows } else { 0 });
         let x = centered(
             usize::from(rect.0),
@@ -346,6 +390,22 @@ fn centered(start: usize, size: usize, grown: usize, limit: usize) -> usize {
         .min(limit.saturating_sub(grown))
 }
 
+/// `window` enlarged to `pixels` wide and, if not zero, `rows` tall, as
+/// [`Translation::fit_window`] will place it.
+fn grown_window(window: &Opened, pixels: usize, rows: usize) -> Opened {
+    let width = window
+        .width
+        .max(pixels.div_ceil(CELL_WIDTH) + 2 * window.margin());
+    let height = window.height.max(if rows > 0 { 2 + 2 * rows } else { 0 });
+    Opened {
+        x: centered(window.x, window.width, width, SCREEN_COLUMNS),
+        y: centered(window.y, window.height, height, SCREEN_ROWS),
+        width,
+        height,
+        ..*window
+    }
+}
+
 fn split_key(context: &str) -> Option<(&str, usize, usize)> {
     let mut parts = context.splitn(3, '/');
     let table = parts.next()?;
@@ -359,15 +419,22 @@ fn placement_table(context: &str) -> &str {
 }
 
 /// Cells the widest line of translated text needs, and its line count.
-fn needed(text: &str) -> (usize, usize) {
+fn needed(text: &str, metrics: &TextMetrics) -> (usize, usize) {
     let mut widest = 0;
     let mut lines = 0;
     let mut current = 0;
     for step in steps(text) {
         match step {
-            MessageStep::Character(_) => current += 1,
-            MessageStep::PlayerName => current += NAME_CELLS,
-            MessageStep::Variable { digits, .. } => current += usize::from(digits.max(1)),
+            MessageStep::Character(ch) => {
+                if current == 0 {
+                    current += metrics.inset(ch);
+                }
+                current += metrics.advance(ch);
+            }
+            MessageStep::PlayerName => current += NAME_CELLS * CELL_WIDTH,
+            MessageStep::Variable { digits, .. } => {
+                current += usize::from(digits.max(1)) * CELL_WIDTH;
+            }
             MessageStep::LineBreak => {
                 widest = widest.max(current);
                 lines += 1;
@@ -484,11 +551,18 @@ impl<'a> Walker<'a> {
             }
         }
         if let Some(window) = self.windows.get(&id) {
+            let others = self
+                .windows
+                .iter()
+                .filter(|(other, _)| **other != id)
+                .map(|(_, other)| *other)
+                .collect();
             self.placements.insert(
                 key(self.table, index, offset),
                 Placement {
                     id,
                     window: *window,
+                    others,
                 },
             );
         }
@@ -873,7 +947,8 @@ mod tests {
         let mut rom = vec![0; 0x6C_0500 + 32];
         rom[TITLE_MENU_SCRIPT_OFFSET..TITLE_MENU_SCRIPT_OFFSET + script.len()]
             .copy_from_slice(&script);
-        let problems = translation.fit(&rom).unwrap();
+        let metrics = TextMetrics::default();
+        let problems = translation.fit(&rom, &metrics).unwrap();
         assert!(problems.is_empty());
         assert_eq!(translation.enlarged_windows(), 1);
         assert_eq!(
@@ -886,20 +961,29 @@ mod tests {
             translation.fit_window("title", 0, 1, 0x21, (10, 10, 9, 8)),
             (10, 10, 9, 8)
         );
-        assert_eq!(needed("ab{name}\ncd"), (10, 2));
+        assert_eq!(needed("ab{name}\ncd", &metrics), (80, 2));
         let wide = Translation::from_po(
             "msgctxt \"title/0/0x8\"\nmsgid \"\"\nmsgstr \"abcdefghijklmnopqrstuvwxyzabcdefg\"\n",
         );
-        let problems = wide.unwrap().fit(&rom).unwrap();
+        let problems = wide.unwrap().fit(&rom, &metrics).unwrap();
         assert_eq!(problems.len(), 1);
     }
 
     #[test]
     fn reads_the_name_entry_pages_and_help() {
         let po = "msgctxt \"name-entry/alphabet/1\"\nmsgid \"\"\nmsgstr \"abc\\nabcdefghijklm\\nn o\"\n\nmsgctxt \"name-entry/alphabet/0\"\nmsgid \"\"\nmsgstr \"ABC\\nABC\"\n\nmsgctxt \"name-entry/help\"\nmsgid \"\"\nmsgstr \"START: done\"\n";
-        let translation = Translation::from_po(po).unwrap();
+        let mut translation = Translation::from_po(po).unwrap();
         assert!(translation.is_empty());
         assert_eq!(translation.name_entry_help(), Some("START: done"));
+        let long = "msgctxt \"name-entry/alphabet/0\"\nmsgid \"\"\nmsgstr \"a label far too long\\nabc\"\n\nmsgctxt \"name-entry/help\"\nmsgid \"\"\nmsgstr \"a help line that is far too long for the window\"\n";
+        let mut long = Translation::from_po(long).unwrap();
+        assert!(
+            translation
+                .fit(&[], &TextMetrics::default())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(long.fit(&[], &TextMetrics::default()).unwrap().len(), 2);
         let pages = translation.alphabet();
         assert_eq!(pages.len(), 2);
         assert_eq!(pages[0].label, "ABC");

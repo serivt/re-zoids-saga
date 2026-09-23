@@ -21,6 +21,7 @@ use gba_runtime::ppu::{
 use platform::{Button, Frame, Input, Rgb};
 
 use crate::script::{ScriptError, ScriptRunner};
+use crate::text::CELL_WIDTH;
 use crate::translation::{AlphabetPage, NAME_ENTRY_TABLE, TITLE_TABLE};
 use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter};
@@ -57,6 +58,10 @@ const NAME_LABEL_WINDOW: (u8, u8, u8, u8) = (24, 4, 6, 4);
 const NAME_FIELD_WINDOW: (u8, u8, u8, u8) = (8, 4, 16, 4);
 const NAME_FIELD_MIN_WIDTH: u8 = 13;
 const SCREEN_TILE_COLUMNS: u8 = 30;
+/// Pixels the name entry's help line can take.
+pub(crate) const NAME_HELP_PIXELS: usize = 160;
+/// Pixels a name-entry page label can take once the name keeps its field.
+pub(crate) const NAME_LABEL_PIXELS: usize = 56;
 const NAME_GRID_ORIGIN: (i32, i32) = (8, 73);
 const NAME_CELL: i32 = 16;
 const NAME_SLOT_ORIGIN: (i32, i32) = (96, 50);
@@ -588,7 +593,7 @@ impl NameEntry {
         let label_cells = self
             .pages
             .iter()
-            .map(|page| page.label.chars().count())
+            .map(|page| windows.metrics().width(&page.label).div_ceil(CELL_WIDTH))
             .max()
             .unwrap_or(0);
         let label_width = u8::try_from(label_cells + 2)
@@ -627,6 +632,8 @@ impl NameEntry {
             0,
         );
         windows.open_window(6, 0x21, (0, 8, 30, 12), 0);
+        windows.set_fixed_cells(5, true);
+        windows.set_fixed_cells(6, true);
         self.refresh(windows);
         windows.present(None);
     }

@@ -51,19 +51,14 @@ fn main() -> Result<()> {
     if let Some(path) = &options.translation {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read translation {}", path.display()))?;
-        let mut translation = Translation::from_po(&text)
+        let translation = Translation::from_po(&text)
             .with_context(|| format!("cannot parse translation {}", path.display()))?;
-        let problems = translation.fit(&rom)?;
-        println!(
-            "Translation: {} messages from {}, {} windows enlarged",
-            translation.len(),
-            path.display(),
-            translation.enlarged_windows()
-        );
+        let messages = translation.len();
+        let problems = game.set_translation(translation)?;
+        println!("Translation: {messages} messages from {}", path.display());
         for problem in problems {
             eprintln!("Translation: {problem}");
         }
-        game.set_translation(translation);
     }
     match &options.dump_path {
         Some(path) => {

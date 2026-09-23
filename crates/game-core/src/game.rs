@@ -19,6 +19,7 @@ use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::field::{Direction, Field, FieldError, FieldEvent, NpcCommand};
 use crate::menu::{Party, PauseMenu};
 use crate::script::{ScriptError, ScriptRunner};
+use crate::text::TextMetrics;
 use crate::translation::{DIALOGUE_TABLE, Translation};
 use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows};
 use crate::{ScriptHost, TextPainter, WindowPainter};
@@ -142,6 +143,9 @@ pub enum GameError {
     /// A song could not be read.
     #[error(transparent)]
     Sound(#[from] M4aError),
+    /// A translation does not match the script tables.
+    #[error(transparent)]
+    Translation(#[from] crate::translation::TranslationError),
     /// The font or window skin could not be read.
     #[error("cannot read the text assets: {0}")]
     Text(String),
@@ -238,7 +242,11 @@ impl<'rom> Game<'rom> {
             rom,
             painter: TextPainter::new(rom, glyphs, Some(fallback)),
             skin: WindowPainter::new(skin.tiles, &skin.palette),
-            windows: ScriptWindows::new(rom, DEFAULT_PLAYER_NAME),
+            windows: {
+                let mut windows = ScriptWindows::new(rom, DEFAULT_PLAYER_NAME);
+                windows.set_metrics(TextMetrics::standard());
+                windows
+            },
             sound: SoundEngine::new(rom, saga::SONG_TABLE, saga::SONG_COUNT, saga::MASTER_VOLUME),
             dialogue: ScriptRunner::named(
                 DIALOGUE_TABLE,
@@ -345,8 +353,19 @@ impl<'rom> Game<'rom> {
     }
 
     /// Shows the messages `translation` covers in place of the ROM's text.
-    pub fn set_translation(&mut self, translation: Translation) {
+    /// Fits the windows to it first; returns the messages no window can
+    /// hold.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`GameError`] when the script tables cannot be read.
+    pub fn set_translation(
+        &mut self,
+        mut translation: Translation,
+    ) -> Result<Vec<String>, GameError> {
+        let problems = translation.fit(self.rom, self.painter.metrics())?;
         self.windows.set_translation(translation);
+        Ok(problems)
     }
 
     /// The samples of the frame the last update produced, stereo
