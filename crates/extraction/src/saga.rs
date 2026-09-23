@@ -780,6 +780,70 @@ const PAUSE_WALLPAPER_TEXTURE_OFFSET: usize = 0x0056_5F40;
 const PAUSE_WALLPAPER_LOGO_OFFSET: usize = 0x0056_60C4;
 const PAUSE_WALLPAPER_TILE_COUNT: usize = 256;
 const PAUSE_WALLPAPER_MAP_SIDE: usize = 32;
+/// The sound driver's song table: 134 entries of a header pointer and the
+/// player number, at ROM `0x567768` (the code indexes it from there).
+pub const SONG_TABLE: usize = 0x0056_7768;
+/// Entries in the song table.
+pub const SONG_COUNT: usize = 134;
+/// The driver's master volume, read from its RAM.
+pub const MASTER_VOLUME: u8 = 14;
+/// Music the title screen plays.
+pub const MUSIC_TITLE: usize = 1;
+/// Music behind the name entry.
+pub const MUSIC_NAME_ENTRY: usize = 3;
+/// Music of the opening cutscene.
+pub const MUSIC_OPENING: usize = 11;
+/// Music of the first room once control begins.
+pub const MUSIC_FIRST_ROOM: usize = 7;
+/// Sound of START on the title.
+pub const SOUND_TITLE_START: usize = 0x3D;
+/// Sound of confirming a menu choice.
+pub const SOUND_CONFIRM: usize = 0x47;
+/// Sound of a door.
+pub const SOUND_DOOR: usize = 0x82;
+const MUSIC_START_IF_CHANGED: u32 = 0x0800_19B4;
+const MUSIC_START: u32 = 0x0800_19A4;
+const MAP_CODE_WINDOW: usize = 0x400;
+const MAP_CODE_FIELD: usize = 12;
+const ROM_BASE: u32 = 0x0800_0000;
+const THUMB_MOVS_R0: u8 = 0x20;
+
+/// Song a map's own code starts when it loads, found by looking for the
+/// call to the game's music routine in that code (a heuristic: some maps
+/// leave the music to a cutscene instead).
+#[must_use]
+pub fn map_music(rom: &[u8], map: usize) -> Option<usize> {
+    if map >= MAP_COUNT {
+        return None;
+    }
+    let at = MAP_TABLE_OFFSET + map * MAP_RECORD_LEN + MAP_CODE_FIELD;
+    let pointer = rom.get(at..at + 4)?;
+    let pointer = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]) & !1;
+    let code = usize::try_from(pointer.checked_sub(ROM_BASE)?).ok()?;
+    let window = rom.get(code..(code + MAP_CODE_WINDOW).min(rom.len()))?;
+    window.windows(6).enumerate().find_map(|(offset, bytes)| {
+        let [THUMB_MOVS_R0, song, high1, high2, low1, low2] = *bytes else {
+            return None;
+        };
+        let at = code + offset + 2;
+        let target = thumb_call_target(at, [high1, high2, low1, low2])?;
+        (target == MUSIC_START_IF_CHANGED || target == MUSIC_START).then_some(usize::from(song))
+    })
+}
+
+/// Target of a Thumb `bl` pair at ROM offset `at`, if the bytes are one.
+fn thumb_call_target(at: usize, bytes: [u8; 4]) -> Option<u32> {
+    let high = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let low = u16::from_le_bytes([bytes[2], bytes[3]]);
+    if high & 0xF800 != 0xF000 || low & 0xF800 != 0xF800 {
+        return None;
+    }
+    let upper = (i32::from(high & 0x7FF) << 21) >> 9;
+    let offset = upper | (i32::from(low & 0x7FF) << 1);
+    let pc = u32::try_from(at).ok()?.checked_add(ROM_BASE + 4)?;
+    Some(pc.wrapping_add_signed(offset))
+}
+
 /// The scripts the pause menu is assembled from: window openers, the item
 /// list (46), the help line and menu (47), the status submenu (48, 49),
 /// the party panel pieces (64–67), the money box (44, 45) and notices.
@@ -1577,6 +1641,22 @@ mod tests {
         assert_eq!(wallpaper.logo.wrapping(1, 0), 1);
         assert_eq!(wallpaper.texture.width, 32);
         assert_eq!(PAUSE_MENU_SCRIPTS.count, 698);
+    }
+
+    #[test]
+    fn decodes_thumb_calls_and_finds_no_music_outside_the_map_table() {
+        assert_eq!(
+            thumb_call_target(0x1000, [0x00, 0xF0, 0xD8, 0xFC]),
+            Some(0x0800_19B4)
+        );
+        assert_eq!(
+            thumb_call_target(0x2000, [0xFE, 0xF7, 0xFE, 0xFF]),
+            Some(0x0800_1000)
+        );
+        assert_eq!(thumb_call_target(0, [0x00, 0x20, 0x00, 0x00]), None);
+        assert_eq!(map_music(&[0; 16], 0), None);
+        assert_eq!(map_music(&[0; 16], MAP_COUNT), None);
+        assert_eq!(SONG_TABLE + SONG_COUNT * 8, 0x0056_7B98);
     }
 
     #[test]
