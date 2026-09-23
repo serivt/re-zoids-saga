@@ -17,11 +17,11 @@ pub use field::{
     Direction, Field, FieldError, FieldEvent, Npc, NpcCommand, Player, current_frame, draw_scene,
 };
 pub use game::{Game, GameError, Stage};
-pub use menu::{Party, PauseMenu};
+pub use menu::{Character, Party, PauseMenu, Unit};
 pub use rng::Rng;
 pub use script::{ScriptError, ScriptHost, ScriptRunner};
 pub use sprite::draw_sprite;
 pub use text::{TextMetrics, TextPainter};
 pub use translation::{AlphabetPage, Scope, Translation, TranslationError};
 pub use window::{DIALOGUE_TEXT_AREA, FrameStyle, WindowPainter};
-pub use windows::{DEFAULT_PLAYER_NAME, ScriptWindows, Window};
+pub use windows::{DEFAULT_PLAYER_NAME, ScriptWindows, TextLayout, Window};

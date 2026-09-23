@@ -331,7 +331,7 @@ impl<'rom> Game<'rom> {
             Screen::Intro(_) => self.update_intro(input)?,
             Screen::Field => {
                 if start && self.dialogue.is_done() && self.pending_talk.is_none() {
-                    let mut menu = PauseMenu::new(self.rom, self.party)?;
+                    let mut menu = PauseMenu::new(self.rom, self.party.clone())?;
                     menu.open(self.rom, &mut self.windows)?;
                     self.screen = Screen::Menu(menu);
                 } else {
