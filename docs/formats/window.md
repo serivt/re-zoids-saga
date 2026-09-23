@@ -38,23 +38,35 @@ Indices into the decompressed tileset:
 | `0x10` `0x11` | Left and right edges; `0x10` also serves as the vertical divider |
 | `0x20` `0x21` | Divider junctions on the top and bottom edges |
 
+## Window records
+
+Source: the window creation routine (`0x080415D4`) and the message handler. The game
+keeps eight window records of 852 bytes at RAM `0x020075A0`; a script opens one with
+its tile rectangle (border included), a kind and a style. Text starts one tile in from
+the top-left corner, spans `width − 2` cells and `(height − 2) / 2` lines of 16 pixels;
+a line break past the last line scrolls the text up one line. A portrait is drawn one
+tile in from the corner. The "more" prompt is tile `0x1C` on the bottom border, two tiles
+in from the right corner. Implemented in `crates/game-core/src/windows.rs`.
+
 ## Story dialogue layout
 
-The box spans the bottom 8 tile rows (rows 12–19) and the full 30 columns. A divider
-at column 7 separates the portrait (columns 1–6) from the text. The speaker name is
-drawn at pixel (64, 104), the text lines from (64, 120) every 16 pixels.
+Shared string 30 opens window 0 at (0, 12) 8×8 tiles for the portrait and window 1 at
+(7, 12) 23×8 tiles for the text, so the text window's left border sits on the portrait
+window's right border; the game draws the junction tiles there, which is the divider at
+column 7. The speaker's name is drawn at pixel (64, 104), the text lines from (64, 120),
+21 cells per line and three lines before scrolling.
 
 ## Character talk layout
 
-Speaking to a character on the map opens the same skin without a portrait: rows 12–19,
-30 columns, text from cell (1, 13) with the speaker's name on the first line and up to
-two more lines of 28 cells (`game_core::TALK_TEXT_AREA`), so pixel (8, 104), (8, 120)
-and (8, 136). Characters appear one per frame starting four frames after A is pressed,
-line breaks costing no frames (39 characters were complete 43 frames after the press).
-22 frames after the last character the prompt tile `0x1C` blinks at cell (28, 19),
-21 frames on and 21 off. A then closes the box (or turns the page of a longer script).
-Measured on the first room's `ch56` with `tools/mgba_talk.lua`, which steers the player
-next to an entity and presses A.
+Speaking to a character on the map runs its dialogue string, which calls shared string
+31: the same skin without a portrait, window 1 at (0, 12) 30×8 tiles, text from cell
+(1, 13) with the speaker's name on the first line and up to two more lines of 28 cells,
+so pixel (8, 104), (8, 120) and (8, 136). Characters appear one per frame starting about
+four frames after A is pressed (39 characters were complete 43 frames after the press).
+About 22 frames after the last character the prompt starts blinking, 20 frames on and
+20 off. A then closes the box (or turns the page of a longer script). Measured on the
+first room's `ch56` with `tools/mgba_talk.lua`, which steers the player next to an entity
+and presses A.
 
 ## Text wrapping
 
@@ -65,7 +77,6 @@ text width the cursor moves to column 0 of the next row. Wrapping is therefore
 explicit line break (`0x0D`, handler at `0x08040256`) moves to the next row and, when
 that row is past the visible ones, asks the window to scroll one line first.
 
-The story dialogue box gives the text 22 cells per row and 2 visible rows under the
-speaker's name (`game_core::DIALOGUE_TEXT_AREA`). 180 of the 4,931 dialogue messages
-need a third row after wrapping (`extractor-cli check-layout`); how the original shows
-them (scroll, extra row or truncation) is not yet observed.
+The story dialogue box gives the text 21 cells per row and 3 rows including the
+speaker's name; `game_core::DIALOGUE_TEXT_AREA` keeps the 22×2 estimate used by
+`extractor-cli check-layout` before the window records were read.

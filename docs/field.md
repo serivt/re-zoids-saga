@@ -40,7 +40,8 @@ the player is a blocked attribute.
 Pressing A while standing still with a character on the metatile ahead of the footing
 speaks to it: a character of behavior 0 or 1 turns to face the player (animation =
 opposite facing), and if its object names a dialogue string the field reports it and
-the caller opens a `TalkBox` on that script while the field stays frozen. Furniture
+the caller runs that script with `ScriptRunner` (see [formats/script-text.md](formats/script-text.md))
+about three frames later while the field stays frozen. Furniture
 (behavior 2) neither turns nor talks, and objects whose script is code are silent for
 now. Observed on `ch56`: entity state 3 for the player and 1 for the character during
 the box, both back to 0 when it closes.
