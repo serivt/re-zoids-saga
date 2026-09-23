@@ -47,8 +47,7 @@ fn main() -> Result<()> {
     if identification.title != Title::Saga {
         bail!("the field is only implemented for {}", Title::Saga);
     }
-    let sheet = extraction::saga::sprite_sheet(&rom, extraction::saga::PLAYER_SPRITE_SHEET)?;
-    let mut field = Field::load(&rom, FIRST_ROOM_MAP, sheet, PLAYER_START)?;
+    let mut field = Field::load(&rom, FIRST_ROOM_MAP, PLAYER_START)?;
     match &options.dump_path {
         Some(path) => {
             let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
@@ -125,8 +124,8 @@ fn render_string(rom: &[u8], title: Title, string_id: &str) -> Result<Frame> {
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::new(16, 24, 48));
     let scene = extraction::saga::scene(rom, FIRST_ROOM_SCENE)?;
     draw_scene(&mut frame, &scene, (0, 0));
-    let player = extraction::saga::sprite_sheet(rom, extraction::saga::PLAYER_SPRITE_SHEET)?;
-    if let Some(image) = player.frame(PLAYER_FRAME) {
+    let player = extraction::saga::sprite_sheet(rom, extraction::saga::PLAYER_SPRITE)?;
+    if let Some(image) = player.image(PLAYER_FRAME) {
         draw_sprite(&mut frame, PLAYER_X, PLAYER_Y, &image, &player.palette);
     }
     window.draw_window(&mut frame, 0, BOX_ROW, BOX_COLUMNS, BOX_ROWS);
