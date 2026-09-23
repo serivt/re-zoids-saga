@@ -10,7 +10,7 @@ use sdl3::{EventPump, Sdl};
 
 const BACKEND: &str = "sdl3";
 const BYTES_PER_PIXEL: usize = 3;
-const KEY_MAP: [(Scancode, Button); 7] = [
+const KEY_MAP: [(Scancode, Button); 8] = [
     (Scancode::Up, Button::Up),
     (Scancode::Down, Button::Down),
     (Scancode::Left, Button::Left),
@@ -18,6 +18,7 @@ const KEY_MAP: [(Scancode, Button); 7] = [
     (Scancode::X, Button::A),
     (Scancode::Z, Button::B),
     (Scancode::Return, Button::Start),
+    (Scancode::Backspace, Button::Select),
 ];
 
 /// A window backed by SDL3 that shows frames of a fixed size, scaled up

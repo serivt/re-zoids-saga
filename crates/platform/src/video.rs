@@ -97,6 +97,8 @@ pub enum Button {
     B,
     /// Start.
     Start,
+    /// Select.
+    Select,
 }
 
 impl Button {
