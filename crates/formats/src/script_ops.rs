@@ -76,6 +76,9 @@ pub enum Instruction {
         mode: u8,
     },
     /// `0x07`: jump by the entry the variable selects, relative to the opcode.
+    /// The table has no length: it ends where its nearest target begins or
+    /// at the first value that does not point past it, which is code (the
+    /// system scripts follow a table with a jump for the other values).
     Switch {
         /// Variable slot.
         var: u8,
@@ -592,12 +595,18 @@ impl Cursor<'_> {
                 break;
             }
             let offset = self.i16()?;
-            let target = usize::try_from(offset)
+            let Some(target) = usize::try_from(offset)
                 .ok()
                 .filter(|target| *target > table_len)
-                .ok_or(ScriptOpError::MalformedSwitch {
-                    offset: opcode_offset,
-                })?;
+            else {
+                if offsets.is_empty() {
+                    return Err(ScriptOpError::MalformedSwitch {
+                        offset: opcode_offset,
+                    });
+                }
+                self.offset -= 2;
+                break;
+            };
             offsets.push(offset);
             table_end = Some(table_end.map_or(target, |end: usize| end.min(target)));
         }
@@ -753,6 +762,16 @@ mod tests {
                     offsets: vec![5, 7]
                 },
                 6
+            )
+        );
+        assert_eq!(
+            decode(&[0x07, 1, 0x09, 0x00, 0x08, 0xFD, 0xFF, 0x00, 0x22]),
+            (
+                Instruction::Switch {
+                    var: 1,
+                    offsets: vec![9]
+                },
+                4
             )
         );
         assert_eq!(
