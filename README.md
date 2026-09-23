@@ -37,13 +37,15 @@ See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 cargo build
 ```
 
-Walk the first room (arrows move, Esc quits), or show a script string in its dialogue
-box (any `<table>_<index>` id); `--dump frame.ppm` writes a frame instead of opening a
-window:
+Play from the publisher logo through the title, the name entry and the opening into the
+first room (arrows move, X = A, Z = B, Return = START, Backspace = SELECT, Esc quits);
+`--room` skips straight to the first room; a `<table>_<index>` string id shows that
+script in its box instead; `--dump frame.ppm` writes a frame instead of opening a window:
 
 ```bash
 cargo run -p launcher -- path/to/rom.gba
-cargo run -p launcher -- path/to/rom.gba dialogue_00003
+cargo run -p launcher -- path/to/rom.gba --room
+cargo run -p launcher -- path/to/rom.gba dialogue_00043
 ```
 
 Dump the game text (all tables, or one of `name`, `item`, `dialogue`, `battle`, `menu`),

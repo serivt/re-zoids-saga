@@ -38,6 +38,15 @@ Indices into the decompressed tileset:
 | `0x10` `0x11` | Left and right edges; `0x10` also serves as the vertical divider |
 | `0x20` `0x21` | Divider junctions on the top and bottom edges |
 
+## Window kinds
+
+The kind byte a script passes to opcode `0x01` selects the border and the text
+margin: high nibble `0x10` is the striped border of dialogue boxes, `0x20` the thin
+border of menus and fields (tiles `0x12`–`0x19`: corners, top, bottom, left, right),
+`0x40` no border at all; low nibble 1 makes a menu, whose text starts two cells in so
+the cursor brackets (tiles `0x3B`/`0x3C` left, `0x3D`/`0x3E` right, two rows tall) fit
+on either side of the selected line.
+
 ## Window records
 
 Source: the window creation routine (`0x080415D4`) and the message handler. The game
