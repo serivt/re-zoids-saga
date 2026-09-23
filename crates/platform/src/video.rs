@@ -99,18 +99,22 @@ pub enum Button {
     Start,
     /// Select.
     Select,
+    /// Left shoulder.
+    L,
+    /// Right shoulder.
+    R,
 }
 
 impl Button {
-    const fn bit(self) -> u8 {
-        1 << (self as u8)
+    const fn bit(self) -> u16 {
+        1 << (self as u16)
     }
 }
 
 /// The set of buttons held at this moment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Input {
-    held: u8,
+    held: u16,
 }
 
 impl Input {

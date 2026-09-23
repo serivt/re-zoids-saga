@@ -18,7 +18,7 @@ const BACKEND: &str = "sdl3";
 const AUDIO_CHANNELS: i32 = 2;
 const BYTES_PER_PAIR: usize = 4;
 const BYTES_PER_PIXEL: usize = 3;
-const KEY_MAP: [(Scancode, Button); 8] = [
+const KEY_MAP: [(Scancode, Button); 10] = [
     (Scancode::Up, Button::Up),
     (Scancode::Down, Button::Down),
     (Scancode::Left, Button::Left),
@@ -27,6 +27,8 @@ const KEY_MAP: [(Scancode, Button); 8] = [
     (Scancode::Z, Button::B),
     (Scancode::Return, Button::Start),
     (Scancode::Backspace, Button::Select),
+    (Scancode::A, Button::L),
+    (Scancode::S, Button::R),
 ];
 
 /// A window backed by SDL3 that shows frames of a fixed size, scaled up
