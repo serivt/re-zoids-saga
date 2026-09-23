@@ -56,7 +56,8 @@ The fields this port reads and writes; everything else is kept as the save had i
 | `+0xCD8` | 4 × 16 | Member records, copied from ROM `0x67AC4C` by a new game |
 | `+0xD18` | 8 × 2 | The player's name: one Shift-JIS code per character, zero after the last |
 | `+0xD28` | 4 | Money, capped at 9,999,999 |
-| `+0x34A4` | 87 × 4 | Zoid table: a flag half-word, then a byte that is `0xFF` when free |
+| `+0x33E2` | 1 each | Zoids seen, by picture id: the Zoid guide shows an entry whose byte is not zero |
+| `+0x34A4` | 87 × 4 | Character table: a flag half-word (bit `0x20`: in the character guide), then a byte that is `0xFF` when empty |
 | `+0x3618` | 1 | Battle message speed − 1 |
 | `+0x3F0E` | 2 | Song playing when the pause menu opened |
 
@@ -76,10 +77,10 @@ The new-game routine clears the block and then:
 
 - sets the level to 1 and the message speed to 3;
 - copies the four member records;
-- marks every Zoid-table entry free, the six two-byte pairs at `+0x3600` and the six
+- marks every character's byte, the six two-byte pairs at `+0x3600` and the six
   bytes at `+0x349C` as `0xFF`;
-- sets bits `0x03` of Zoid entry 0 and bit `0x20` of the entries listed at the first
-  pointer of ROM `0x66C8D0` (entries 0–3).
+- sets bits `0x03` of character 0 and bit `0x20` of the characters listed at the first
+  pointer of ROM `0x66C8D0` (characters 0–3), which puts them in the character guide.
 
 The name entry then writes the name. Entering the first room sets the area, flag
 `0x11F` and the object states, and adds nothing else before the first save.
@@ -125,5 +126,6 @@ block's own name.
 
 ## Not modeled yet
 
-The object states, the counter block, the member records and the Zoid table beyond
-carrying them, and the title's opening animation when it starts over after a notice.
+The object states, the counter block, the member records and the character table
+beyond carrying them, and the title's opening animation when it starts over after a
+notice.

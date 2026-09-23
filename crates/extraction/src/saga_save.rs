@@ -23,17 +23,19 @@ const ROSTER: usize = 0x0067_AC4C;
 const ROSTER_RECORDS: usize = 4;
 const ROSTER_RECORD_LEN: usize = 16;
 const ROSTER_FIELD: usize = 0xCD8;
-/// Pointers to `0xFF`-terminated lists of Zoid-table entries; the
-/// new-game routine marks the entries of list 0.
-const ZOID_LISTS: usize = 0x0066_C8D0;
-const ZOID_TABLE: usize = 0x34A4;
-const ZOID_ENTRY_LEN: usize = 4;
-const ZOID_ENTRIES: usize = 0x57;
-const ZOID_LISTED: u16 = 0x20;
-const ZOID_FIRST_OWNED: u16 = 0x03;
+/// Pointers to `0xFF`-terminated lists of characters; the new-game
+/// routine puts the characters of list 0 in the character guide.
+const CHARACTER_LISTS: usize = 0x0066_C8D0;
+/// The character table: four bytes per character, a flag half-word (bit
+/// `0x20`: in the character guide) and a byte that is `0xFF` when empty.
+const CHARACTER_TABLE: usize = 0x34A4;
+const CHARACTER_LEN: usize = 4;
+const CHARACTERS: usize = 0x57;
+const IN_GUIDE: u16 = 0x20;
+const FIRST_CHARACTER_BITS: u16 = 0x03;
 const LIST_END: u8 = 0xFF;
 const EMPTY: u8 = 0xFF;
-const ZOID_OWNER_FIELD: usize = 2;
+const CHARACTER_EMPTY_FIELD: usize = 2;
 const EMPTY_RUN: std::ops::Range<usize> = 0x349C..0x34A2;
 const PAIR_TABLE: usize = 0x3600;
 const PAIR_ENTRIES: usize = 6;
@@ -111,8 +113,8 @@ pub fn save_layout(rom: &[u8]) -> Result<SaveLayout, SaveDataError> {
 }
 
 /// The game-state block as a new game starts it: the member records and
-/// the Zoid table seeded from the ROM, the empty markers set, level 1 and
-/// message speed 3. The name is left to the name entry.
+/// the character table seeded from the ROM, the empty markers set, level 1
+/// and message speed 3. The name is left to the name entry.
 ///
 /// # Errors
 ///
@@ -127,17 +129,17 @@ pub fn new_game_state(rom: &[u8]) -> Result<Vec<u8>, SaveDataError> {
         .get(ROSTER..ROSTER + ROSTER_RECORDS * ROSTER_RECORD_LEN)
         .ok_or_else(|| too_short("member records"))?;
     state[ROSTER_FIELD..ROSTER_FIELD + roster.len()].copy_from_slice(roster);
-    for entry in 0..ZOID_ENTRIES {
-        state[ZOID_TABLE + entry * ZOID_ENTRY_LEN + ZOID_OWNER_FIELD] = EMPTY;
+    for entry in 0..CHARACTERS {
+        state[CHARACTER_TABLE + entry * CHARACTER_LEN + CHARACTER_EMPTY_FIELD] = EMPTY;
     }
     for entry in 0..PAIR_ENTRIES {
         state[PAIR_TABLE + entry * 4] = EMPTY;
         state[PAIR_TABLE + entry * 4 + 1] = EMPTY;
     }
     state[EMPTY_RUN].fill(EMPTY);
-    mark_zoid(&mut state, 0, ZOID_FIRST_OWNED);
-    for entry in starting_list(rom).ok_or_else(|| too_short("starting Zoid list"))? {
-        mark_zoid(&mut state, usize::from(entry), ZOID_LISTED);
+    mark_character(&mut state, 0, FIRST_CHARACTER_BITS);
+    for entry in starting_list(rom).ok_or_else(|| too_short("starting characters"))? {
+        mark_character(&mut state, usize::from(entry), IN_GUIDE);
     }
     let mut progress = Progress::read(&state).map_err(|_| too_short("game state"))?;
     progress.level = NEW_GAME_LEVEL;
@@ -149,7 +151,7 @@ pub fn new_game_state(rom: &[u8]) -> Result<Vec<u8>, SaveDataError> {
 }
 
 fn starting_list(rom: &[u8]) -> Option<Vec<u8>> {
-    let pointer = rom.get(ZOID_LISTS..ZOID_LISTS + 4)?;
+    let pointer = rom.get(CHARACTER_LISTS..CHARACTER_LISTS + 4)?;
     let address = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]);
     let start = to_usize(address.checked_sub(ROM_BASE)?);
     let list = rom.get(start..)?;
@@ -157,8 +159,8 @@ fn starting_list(rom: &[u8]) -> Option<Vec<u8>> {
     Some(list[..end].to_vec())
 }
 
-fn mark_zoid(state: &mut [u8], entry: usize, bits: u16) {
-    let at = ZOID_TABLE + entry * ZOID_ENTRY_LEN;
+fn mark_character(state: &mut [u8], entry: usize, bits: u16) {
+    let at = CHARACTER_TABLE + entry * CHARACTER_LEN;
     if let Some(field) = state.get_mut(at..at + 2) {
         let value = u16::from_le_bytes([field[0], field[1]]) | bits;
         field.copy_from_slice(&value.to_le_bytes());
@@ -202,7 +204,7 @@ mod tests {
         );
         rom[ROSTER + 2] = 0x42;
         let list = 0x0066_C000;
-        put(&mut rom, ZOID_LISTS, &[ROM_BASE + 0x0066_C000]);
+        put(&mut rom, CHARACTER_LISTS, &[ROM_BASE + 0x0066_C000]);
         rom[list..list + 3].copy_from_slice(&[1, 2, LIST_END]);
         rom
     }
@@ -234,11 +236,11 @@ mod tests {
         assert_eq!(progress.message_speed, 3);
         assert_eq!(state[ROSTER_FIELD + 2], 0x42);
         assert_eq!(
-            &state[ZOID_TABLE..ZOID_TABLE + 12],
+            &state[CHARACTER_TABLE..CHARACTER_TABLE + 12],
             &[0x03, 0, EMPTY, 0, 0x20, 0, EMPTY, 0, 0x20, 0, EMPTY, 0]
         );
-        assert_eq!(state[ZOID_TABLE + 0x56 * 4 + 2], EMPTY);
-        assert_eq!(state[ZOID_TABLE + 0x57 * 4 + 2], 0);
+        assert_eq!(state[CHARACTER_TABLE + 0x56 * 4 + 2], EMPTY);
+        assert_eq!(state[CHARACTER_TABLE + 0x57 * 4 + 2], 0);
         assert_eq!(&state[0x3600..0x3602], &[EMPTY, EMPTY]);
         assert_eq!(&state[0x349C..0x34A2], &[EMPTY; 6]);
     }
