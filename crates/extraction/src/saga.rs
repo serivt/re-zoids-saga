@@ -326,3 +326,181 @@ pub fn scene(rom: &[u8], index: usize) -> Result<Scene, SceneError> {
         attributes,
     })
 }
+
+const SPRITE_TABLE_OFFSET: usize = 0x0031_8E04;
+const SPRITE_RECORD_LEN: usize = 32;
+const SPRITE_COUNT: usize = 248;
+const SPRITE_TILE_ROWS: usize = 4;
+/// Tag of the player's sprite sheet.
+pub const PLAYER_SPRITE_TAG: &str = "ch00";
+
+/// A sheet of same-sized sprite frames stored uncompressed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpriteSheet {
+    /// Four-character tag, e.g. `ch00` for the player or `mz25` for a map Zoid.
+    pub tag: String,
+    /// Number of frames.
+    pub frames: usize,
+    /// Tiles per frame, laid out in rows of four (16 tiles = 32×32 pixels).
+    pub tiles_per_frame: usize,
+    /// The 16-color BGR555 palette.
+    pub palette: [u16; 16],
+    /// Every frame's tiles, frame after frame.
+    pub tiles: Tileset,
+}
+
+impl SpriteSheet {
+    /// Composes frame `index`; `None` when it does not exist.
+    #[must_use]
+    pub fn frame(&self, index: usize) -> Option<TileImage> {
+        if index >= self.frames || self.tiles_per_frame % SPRITE_TILE_ROWS != 0 {
+            return None;
+        }
+        let first = index * self.tiles_per_frame;
+        let frame_tiles = Tileset::from_pixels(
+            (first..first + self.tiles_per_frame)
+                .map(|tile| {
+                    self.tiles
+                        .tile(tile)
+                        .copied()
+                        .unwrap_or([0; formats::tile::TILE_PIXELS])
+                })
+                .collect(),
+        );
+        let piece = TilePiece {
+            column: 0,
+            row: 0,
+            columns: self.tiles_per_frame / SPRITE_TILE_ROWS,
+            rows: SPRITE_TILE_ROWS,
+        };
+        Some(TileImage::compose(&frame_tiles, &[piece]))
+    }
+}
+
+/// Why a sprite sheet could not be read.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum SpriteSheetError {
+    /// No such record.
+    #[error("no sprite sheet {index}; the table has {SPRITE_COUNT}")]
+    NoSuchSheet {
+        /// Requested index.
+        index: usize,
+    },
+    /// No record carries the tag.
+    #[error("no sprite sheet tagged {tag:?}")]
+    NoSuchTag {
+        /// Requested tag.
+        tag: String,
+    },
+    /// The ROM is too short for the record or its data.
+    #[error("ROM of {len} bytes is too short for sprite sheet {index}")]
+    TooShort {
+        /// ROM length.
+        len: usize,
+        /// Sheet index.
+        index: usize,
+    },
+}
+
+/// Reads sprite sheet `index` of the table at ROM `0x318E04`.
+///
+/// # Errors
+///
+/// Returns [`SpriteSheetError`] when the index is out of range or the ROM is too short.
+pub fn sprite_sheet(rom: &[u8], index: usize) -> Result<SpriteSheet, SpriteSheetError> {
+    if index >= SPRITE_COUNT {
+        return Err(SpriteSheetError::NoSuchSheet { index });
+    }
+    let too_short = || SpriteSheetError::TooShort {
+        len: rom.len(),
+        index,
+    };
+    let offset = SPRITE_TABLE_OFFSET + index * SPRITE_RECORD_LEN;
+    let record = rom
+        .get(offset..offset + SPRITE_RECORD_LEN)
+        .ok_or_else(too_short)?;
+    let word = |i: usize| {
+        u32::from_le_bytes([
+            record[4 * i],
+            record[4 * i + 1],
+            record[4 * i + 2],
+            record[4 * i + 3],
+        ])
+    };
+    let tag = String::from_utf8_lossy(&record[8..12]).into_owned();
+    let frames = word(3) as usize;
+    let tiles_per_frame = word(5) as usize;
+    let palette_offset = rom_offset(&record[24..28]).ok_or_else(too_short)?;
+    let tiles_offset = rom_offset(&record[28..32]).ok_or_else(too_short)?;
+    let palette = rom
+        .get(palette_offset..palette_offset + PALETTE_LEN)
+        .and_then(parse_palette)
+        .ok_or_else(too_short)?;
+    let tile_bytes = rom
+        .get(tiles_offset..tiles_offset + frames * tiles_per_frame * TILE_LEN)
+        .ok_or_else(too_short)?;
+    Ok(SpriteSheet {
+        tag,
+        frames,
+        tiles_per_frame,
+        palette,
+        tiles: Tileset::from_4bpp(tile_bytes),
+    })
+}
+
+/// Reads the sprite sheet carrying `tag`.
+///
+/// # Errors
+///
+/// Returns [`SpriteSheetError`] when no record has the tag or the ROM is too short.
+pub fn sprite_sheet_by_tag(rom: &[u8], tag: &str) -> Result<SpriteSheet, SpriteSheetError> {
+    (0..SPRITE_COUNT)
+        .find(|index| {
+            let offset = SPRITE_TABLE_OFFSET + index * SPRITE_RECORD_LEN + 8;
+            rom.get(offset..offset + 4) == Some(tag.as_bytes())
+        })
+        .map_or_else(
+            || {
+                Err(SpriteSheetError::NoSuchTag {
+                    tag: tag.to_owned(),
+                })
+            },
+            |index| sprite_sheet(rom, index),
+        )
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    fn sheet(frames: usize, tiles_per_frame: usize) -> SpriteSheet {
+        let tiles = (0..frames * tiles_per_frame)
+            .map(|index| [u8::try_from(index % 16).unwrap_or(0); formats::tile::TILE_PIXELS])
+            .collect();
+        SpriteSheet {
+            tag: "ch00".to_owned(),
+            frames,
+            tiles_per_frame,
+            palette: [0; 16],
+            tiles: Tileset::from_pixels(tiles),
+        }
+    }
+
+    #[test]
+    fn composes_square_frames_in_tile_rows_of_four() {
+        let sheet = sheet(2, 16);
+        let frame = sheet.frame(1).unwrap();
+        assert_eq!((frame.width, frame.height), (32, 32));
+        assert_eq!(frame.indices[0], 0);
+        assert_eq!(frame.indices[8], 1);
+        assert_eq!(frame.indices[8 * 32], 4);
+        assert_eq!(sheet.frame(2), None);
+    }
+
+    #[test]
+    fn rejects_frames_that_do_not_form_whole_rows() {
+        assert_eq!(sheet(1, 6).frame(0), None);
+    }
+}

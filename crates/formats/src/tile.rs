@@ -37,6 +37,12 @@ impl Tileset {
         Self { tiles }
     }
 
+    /// Wraps already decoded tiles.
+    #[must_use]
+    pub fn from_pixels(tiles: Vec<[u8; TILE_PIXELS]>) -> Self {
+        Self { tiles }
+    }
+
     /// Number of tiles.
     #[must_use]
     pub fn len(&self) -> usize {

@@ -14,6 +14,9 @@ const USAGE: &str = "usage: launcher <rom-path> [string-id] [--dump <frame.ppm>]
 const DEFAULT_STRING_ID: &str = "dialogue_00003";
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_SCENE: usize = 2;
+const PLAYER_X: i32 = 88;
+const PLAYER_Y: i32 = 64;
+const PLAYER_FRAME: usize = 0;
 const BOX_ROW: usize = 12;
 const BOX_ROWS: usize = 8;
 const BOX_COLUMNS: usize = 30;
@@ -105,6 +108,10 @@ fn render_string(rom: &[u8], title: Title, string_id: &str) -> Result<Frame> {
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::new(16, 24, 48));
     let scene = extraction::saga::scene(rom, FIRST_ROOM_SCENE)?;
     draw_scene(&mut frame, &scene, (0, 0));
+    let player = extraction::saga::sprite_sheet_by_tag(rom, extraction::saga::PLAYER_SPRITE_TAG)?;
+    if let Some(image) = player.frame(PLAYER_FRAME) {
+        draw_sprite(&mut frame, PLAYER_X, PLAYER_Y, &image, &player.palette);
+    }
     window.draw_window(&mut frame, 0, BOX_ROW, BOX_COLUMNS, BOX_ROWS);
     window.draw_divider(&mut frame, PORTRAIT_DIVIDER_COLUMN, BOX_ROW, BOX_ROWS);
     if let Some((character, expression)) = string.script.first_speaker() {
