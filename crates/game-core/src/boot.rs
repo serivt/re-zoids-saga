@@ -236,7 +236,7 @@ fn fade_level(elapsed: u32, total: u32) -> u8 {
 pub enum TitleChoice {
     /// はじめから: a new game.
     NewGame,
-    /// つづきから: continue a saved game (not available yet).
+    /// つづきから: continue a saved game.
     Continue,
     /// オプション: options (not available yet).
     Options,
@@ -324,7 +324,7 @@ impl TitleScreen {
             TitleState::Menu => {
                 if self.runner.update(rom, input, windows)? {
                     self.state = TitleState::Waiting;
-                    return Ok(Some(match self.runner.vars()[1] {
+                    return Ok(Some(match self.runner.saved_vars()[1] {
                         0 => TitleChoice::NewGame,
                         1 => TitleChoice::Continue,
                         _ => TitleChoice::Options,

@@ -240,6 +240,13 @@ impl ScriptRunner {
         &self.vars
     }
 
+    /// The copy of the variables the last `StoreVars` made, which outlives
+    /// a reset of the text system.
+    #[must_use]
+    pub fn saved_vars(&self) -> &[u16; VARIABLES] {
+        &self.saved
+    }
+
     /// Where string `index` starts in the ROM, if the table has it.
     #[must_use]
     pub fn string_offset(&self, index: usize) -> Option<usize> {
@@ -1014,6 +1021,7 @@ mod tests {
         assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert_eq!(host.log[1..], ["reset 0", "sound 0x3c"]);
         assert_eq!(runner.vars()[0], 0);
+        assert_eq!(runner.saved_vars()[..2], [2, 6]);
         assert_eq!(runner.start(5), Err(ScriptError::NoSuchString { index: 5 }));
     }
 
