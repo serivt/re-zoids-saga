@@ -55,7 +55,12 @@ its tile rectangle (border included), a kind and a style. Text starts one tile i
 the top-left corner, spans `width − 2` cells and `(height − 2) / 2` lines of 16 pixels;
 a line break past the last line scrolls the text up one line. A portrait is drawn one
 tile in from the corner. The "more" prompt is tile `0x1C` on the bottom border, two tiles
-in from the right corner. Implemented in `crates/game-core/src/windows.rs`.
+in from the right corner. A menu keeps every line it was given and shows the ones that
+fit: the cursor moves to the last shown line, then the list scrolls one line at a time
+without wrapping, and tiles `0x32` and `0x34` in the middle of the top and bottom borders
+mark lines hidden above and below (observed on the Zoid guide's type lists). A menu
+also shows its window when the script did not present it. Implemented in
+`crates/game-core/src/windows.rs`.
 
 ## Story dialogue layout
 

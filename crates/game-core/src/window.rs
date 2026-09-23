@@ -17,6 +17,8 @@ const RIGHT: usize = 0x11;
 const DIVIDER_TOP: usize = 0x20;
 const DIVIDER_BOTTOM: usize = 0x21;
 const PROMPT: usize = 0x1C;
+const MORE_ABOVE: usize = 0x32;
+const MORE_BELOW: usize = 0x34;
 const LIGHT_TOP_LEFT: usize = 0x12;
 const LIGHT_TOP_RIGHT: usize = 0x13;
 const LIGHT_BOTTOM_LEFT: usize = 0x14;
@@ -129,6 +131,23 @@ impl WindowPainter {
     /// Draws the "more text" prompt on the border at tile `(column, row)`.
     pub fn draw_prompt(&self, frame: &mut Frame, column: usize, row: usize) {
         self.draw_tile(frame, column, row, PROMPT);
+    }
+
+    /// Draws the marks a scrolled menu shows at the middle of its top and
+    /// bottom borders when lines are hidden above or below.
+    pub fn draw_scroll_marks(
+        &self,
+        frame: &mut Frame,
+        column: usize,
+        rows: (usize, usize),
+        (above, below): (bool, bool),
+    ) {
+        if above {
+            self.draw_tile(frame, column, rows.0, MORE_ABOVE);
+        }
+        if below {
+            self.draw_tile(frame, column, rows.1, MORE_BELOW);
+        }
     }
 
     fn draw_tile(&self, frame: &mut Frame, column: usize, row: usize, tile: usize) {

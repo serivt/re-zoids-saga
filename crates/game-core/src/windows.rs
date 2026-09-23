@@ -64,6 +64,9 @@ pub struct Window {
     pub cursor: Option<usize>,
     /// Line the last menu ended on; the next one starts there.
     pub line: usize,
+    /// First line shown: a menu keeps every line and scrolls to keep its
+    /// cursor in view.
+    pub top: usize,
     /// A line break waiting for the next character, so a trailing break
     /// does not scroll the text away.
     pub pending_break: bool,
@@ -122,7 +125,7 @@ impl Window {
     /// no room left.
     #[must_use]
     pub fn would_scroll(&self, advance: usize) -> bool {
-        if self.lines.len() < self.rows().max(1) {
+        if self.is_menu() || self.lines.len() < self.rows().max(1) {
             return false;
         }
         if self.pending_break {
@@ -204,9 +207,38 @@ impl Window {
         self.ensure_line();
         self.lines.push(String::new());
         self.widths.push(0);
-        while self.lines.len() > self.rows().max(1) {
+        while !self.is_menu() && self.lines.len() > self.rows().max(1) {
             self.lines.remove(0);
             self.widths.remove(0);
+        }
+    }
+
+    /// The lines drawn: all of a short window, a menu's from its first
+    /// shown line.
+    #[must_use]
+    pub fn shown_lines(&self) -> &[String] {
+        let start = self.top.min(self.lines.len());
+        let end = (start + self.rows().max(1)).min(self.lines.len());
+        &self.lines[start..end]
+    }
+
+    /// Whether lines are hidden above and below the shown ones.
+    #[must_use]
+    pub fn hidden_lines(&self) -> (bool, bool) {
+        let filled = self
+            .lines
+            .iter()
+            .rposition(|line| !line.trim().is_empty())
+            .map_or(0, |last| last + 1);
+        (self.top > 0, self.top + self.rows() < filled)
+    }
+
+    fn scroll_to(&mut self, line: usize) {
+        let rows = self.rows().max(1);
+        if line < self.top {
+            self.top = line;
+        } else if line >= self.top + rows {
+            self.top = line + 1 - rows;
         }
     }
 
@@ -367,7 +399,7 @@ impl<'rom> ScriptWindows<'rom> {
                     false,
                 );
             }
-            for (row, line) in window.lines.iter().enumerate() {
+            for (row, line) in window.shown_lines().iter().enumerate() {
                 let y = origin.1 + i32::try_from(row * LINE_HEIGHT).unwrap_or(i32::MAX);
                 match window.layout {
                     TextLayout::Cells => {
@@ -390,7 +422,15 @@ impl<'rom> ScriptWindows<'rom> {
                     frame,
                     window.x + 1,
                     (window.x + window.width).saturating_sub(2),
-                    window.y + 1 + line * 2,
+                    window.y + 1 + line.saturating_sub(window.top) * 2,
+                );
+            }
+            if window.is_menu() {
+                skin.draw_scroll_marks(
+                    frame,
+                    window.x + window.width / 2,
+                    (window.y, window.y + window.height - 1),
+                    window.hidden_lines(),
                 );
             }
         }
@@ -440,6 +480,7 @@ impl ScriptHost for ScriptWindows<'_> {
                 visible: false,
                 cursor: None,
                 line: 0,
+                top: 0,
                 pending_break: false,
                 opened,
             });
@@ -485,6 +526,7 @@ impl ScriptHost for ScriptWindows<'_> {
             window.widths.clear();
             window.pending_break = false;
             window.prompt = false;
+            window.top = 0;
         }
     }
 
@@ -584,6 +626,7 @@ impl ScriptHost for ScriptWindows<'_> {
             window.cursor = line;
             if let Some(line) = line {
                 window.line = line;
+                window.scroll_to(line);
             }
         }
     }
@@ -779,6 +822,30 @@ mod tests {
         assert_eq!(host.player_name(), "アトレー");
         host.reset(1);
         assert_eq!(host.player_name(), "");
+    }
+
+    #[test]
+    fn a_long_menu_keeps_its_lines_and_scrolls_to_the_cursor() {
+        let mut host = ScriptWindows::new(&[], "");
+        host.open_window(2, 0x21, (11, 0, 13, 8), 4);
+        for line in 0..6 {
+            host.put_char(2, char::from(b'a' + line));
+            host.line_break(2);
+        }
+        let window = |host: &ScriptWindows<'_>| host.windows()[2].clone().unwrap();
+        assert_eq!(host.menu_lines(2), 6);
+        assert_eq!(window(&host).shown_lines(), ["a", "b", "c"]);
+        assert_eq!(window(&host).hidden_lines(), (false, true));
+        assert!(!window(&host).would_scroll(8));
+        host.set_cursor(2, Some(4));
+        assert_eq!(window(&host).shown_lines(), ["c", "d", "e"]);
+        assert_eq!(window(&host).hidden_lines(), (true, true));
+        host.set_cursor(2, Some(5));
+        assert_eq!(window(&host).hidden_lines(), (true, false));
+        host.set_cursor(2, Some(1));
+        assert_eq!(window(&host).shown_lines(), ["b", "c", "d"]);
+        host.clear_window(2);
+        assert_eq!(window(&host).top, 0);
     }
 
     #[test]

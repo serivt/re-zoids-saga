@@ -320,7 +320,10 @@ impl ScriptRunner {
         Ok(done)
     }
 
+    /// Starts a menu on the current window, which the original shows even
+    /// when the script did not present it (the guides' popups).
     fn begin_menu(&mut self, cancelable: bool, host: &mut impl ScriptHost) {
+        host.reveal(self.window);
         let cursor = host
             .menu_line(self.window)
             .min(host.menu_lines(self.window).saturating_sub(1));
@@ -1142,7 +1145,7 @@ mod tests {
         run(&bytes, &mut runner, &mut host, 3);
         assert_eq!(
             host.log[2..],
-            ["char 0 あ", "present None", "cursor 3 Some(0)"]
+            ["char 0 あ", "present None", "reveal 3", "cursor 3 Some(0)"]
         );
         let a = Input::default().with(Button::A);
         runner.update(&bytes, a, &mut host).unwrap();
