@@ -14,8 +14,10 @@ caches it in your user-data directory.
 
 ## Status
 
-Early. The workspace and layer boundaries are in place and the launcher identifies a ROM
-(cartridge header + SHA-1 against validated dumps). No game runs yet.
+Early. The workspace and layer boundaries are in place, the launcher identifies a ROM
+(cartridge header + SHA-1 against validated dumps) and the script text codec decodes
+every string table of Zoids Saga (names, items, dialogue, battle quotes, menus). No game
+runs yet.
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements
@@ -36,6 +38,12 @@ Identify a ROM with the launcher:
 
 ```bash
 cargo run -p launcher -- path/to/rom.gba
+```
+
+Dump the game text (all tables, or one of `name`, `item`, `dialogue`, `battle`, `menu`):
+
+```bash
+cargo run -p extractor-cli -- dump-text path/to/rom.gba dialogue
 ```
 
 Before submitting a change:
