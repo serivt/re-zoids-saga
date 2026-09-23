@@ -3,6 +3,7 @@
 pub mod boot;
 pub mod field;
 pub mod game;
+pub mod menu;
 pub mod rng;
 pub mod script;
 pub mod sprite;
@@ -15,6 +16,7 @@ pub use field::{
     Direction, Field, FieldError, FieldEvent, Npc, NpcCommand, Player, current_frame, draw_scene,
 };
 pub use game::{Game, GameError, Stage};
+pub use menu::{Party, PauseMenu};
 pub use rng::Rng;
 pub use script::{ScriptError, ScriptHost, ScriptRunner};
 pub use sprite::draw_sprite;

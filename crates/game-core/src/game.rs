@@ -10,11 +10,12 @@
 
 use extraction::saga::{self, BootError, FIRST_ROOM_MAP, PLAYER_START, SpriteSheetError};
 use gba_runtime::ppu::{FADE_STEPS, SCREEN_HEIGHT, SCREEN_WIDTH, darken};
-use platform::{Frame, Input, Rgb};
+use platform::{Button, Frame, Input, Rgb};
 use thiserror::Error;
 
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::field::{Direction, Field, FieldError, FieldEvent, NpcCommand};
+use crate::menu::{Party, PauseMenu};
 use crate::script::{ScriptError, ScriptRunner};
 use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows};
 use crate::{ScriptHost, TextPainter, WindowPainter};
@@ -58,6 +59,8 @@ pub enum Stage {
     Intro,
     /// Free play.
     Field,
+    /// The pause menu.
+    Menu,
 }
 
 /// Why the game could not go on.
@@ -87,6 +90,7 @@ enum Screen {
     Loading(u32),
     Intro(IntroState),
     Field,
+    Menu(PauseMenu),
 }
 
 struct IntroState {
@@ -108,6 +112,8 @@ pub struct Game<'rom> {
     screen: Screen,
     pending_talk: Option<(usize, u32)>,
     player_name: String,
+    party: Party,
+    previous: Input,
 }
 
 impl<'rom> Game<'rom> {
@@ -152,6 +158,8 @@ impl<'rom> Game<'rom> {
             screen: Screen::Loading(0),
             pending_talk: None,
             player_name: DEFAULT_PLAYER_NAME.to_owned(),
+            party: Party::default(),
+            previous: Input::default(),
         })
     }
 
@@ -165,6 +173,7 @@ impl<'rom> Game<'rom> {
             Screen::Loading(_) => Stage::Loading,
             Screen::Intro(_) => Stage::Intro,
             Screen::Field => Stage::Field,
+            Screen::Menu(_) => Stage::Menu,
         }
     }
 
@@ -186,6 +195,8 @@ impl<'rom> Game<'rom> {
     ///
     /// Returns [`GameError`] when a screen or script fails.
     pub fn update(&mut self, input: Input) -> Result<(), GameError> {
+        let start = input.is_held(Button::Start) && !self.previous.is_held(Button::Start);
+        self.previous = input;
         match &mut self.screen {
             Screen::Logo(logo) => {
                 if logo.update() {
@@ -214,7 +225,21 @@ impl<'rom> Game<'rom> {
                 }
             }
             Screen::Intro(_) => self.update_intro(input)?,
-            Screen::Field => self.update_field(input)?,
+            Screen::Field => {
+                if start && self.dialogue.is_done() && self.pending_talk.is_none() {
+                    let mut menu = PauseMenu::new(self.rom, self.party)?;
+                    menu.open(self.rom, &mut self.windows)?;
+                    self.screen = Screen::Menu(menu);
+                } else {
+                    self.update_field(input)?;
+                }
+            }
+            Screen::Menu(menu) => {
+                if menu.update(self.rom, input, &mut self.windows)? {
+                    self.party = menu.party();
+                    self.screen = Screen::Field;
+                }
+            }
         }
         Ok(())
     }
@@ -328,6 +353,7 @@ impl<'rom> Game<'rom> {
                 }
                 self.windows.draw(frame, &self.skin, &self.painter);
             }
+            Screen::Menu(menu) => menu.draw(frame, &self.windows, &self.skin, &self.painter),
         }
     }
 }
