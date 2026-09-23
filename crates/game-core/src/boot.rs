@@ -678,8 +678,10 @@ impl NameEntry {
             false,
         );
         windows.draw(frame, skin, painter);
-        for (i, (x, y)) in NAME_ARROWS.iter().enumerate() {
-            draw_block(frame, &self.graphics.arrows, (1 - i) * 4, 2, 2, *x, *y);
+        if self.state == NameState::Editing {
+            for (i, (x, y)) in NAME_ARROWS.iter().enumerate() {
+                draw_block(frame, &self.graphics.arrows, (1 - i) * 4, 2, 2, *x, *y);
+            }
         }
         for slot in 0..NAME_SLOTS {
             let x = NAME_SLOT_ORIGIN.0 + i32::try_from(slot).unwrap_or(0) * TILE_PIXELS_I32;

@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
+use std::collections::HashSet;
+
 use extraction::saga::{self, NAME_ENTRY_SCRIPTS, PAUSE_MENU_SCRIPTS, TITLE_MENU_SCRIPT_OFFSET};
 use formats::script_ops::{Instruction, MessageStep, decode_instruction, decode_message_step};
 use thiserror::Error;
@@ -23,6 +25,13 @@ pub const PAUSE_MENU_TABLE: &str = "pause-menu";
 /// Table name of the dialogue strings.
 pub const DIALOGUE_TABLE: &str = "dialogue";
 const STRING_LIMIT: usize = 0x1000;
+const SCREEN_COLUMNS: usize = 30;
+const SCREEN_ROWS: usize = 20;
+const MENU_KIND: u8 = 1;
+const MENU_MARGIN: usize = 2;
+const TEXT_MARGIN: usize = 1;
+const NAME_CELLS: usize = 8;
+const MAX_CALL_DEPTH: usize = 4;
 const TEMPLATE_HEADER: &str = "msgid \"\"\nmsgstr \"\"\n\"Content-Type: text/plain; charset=UTF-8\\n\"\n\"Language: ja\\n\"\n\n";
 
 /// Why a translation file could not be used.
@@ -44,10 +53,55 @@ pub enum TranslationError {
     Rom(String),
 }
 
-/// Translated messages keyed as [`key`] builds them.
+/// Translated messages keyed as [`key`] builds them, and the windows they
+/// need enlarged.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Translation {
     messages: HashMap<String, String>,
+    fits: HashMap<String, Fit>,
+}
+
+/// The inner size a window must offer for its translated messages.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Fit {
+    columns: usize,
+    rows: usize,
+}
+
+/// A window as a script opens it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Opened {
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+    kind: u8,
+    opener: usize,
+}
+
+impl Opened {
+    fn margin(&self) -> usize {
+        if self.kind & MENU_KIND != 0 {
+            MENU_MARGIN
+        } else {
+            TEXT_MARGIN
+        }
+    }
+
+    fn columns(&self) -> usize {
+        self.width.saturating_sub(2 * self.margin())
+    }
+
+    fn rows(&self) -> usize {
+        self.height.saturating_sub(2) / 2
+    }
+}
+
+/// Where a message lands: its window and who opened it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Placement {
+    id: u8,
+    window: Opened,
 }
 
 /// The key of a message: table, string index and the message's offset from
@@ -97,7 +151,98 @@ impl Translation {
             last = Some(field);
         }
         entry.store(&mut messages);
-        Ok(Self { messages })
+        Ok(Self {
+            messages,
+            fits: HashMap::new(),
+        })
+    }
+
+    /// Works out which windows the translated messages overflow and remembers
+    /// how much to enlarge them; returns one line per message that cannot
+    /// fit even a screen-wide window.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TranslationError`] when a table cannot be read.
+    pub fn fit(&mut self, rom: &[u8]) -> Result<Vec<String>, TranslationError> {
+        self.fits.clear();
+        let mut problems = Vec::new();
+        let mut placements = HashMap::new();
+        let mut visited = HashSet::new();
+        for context in self.messages.keys() {
+            let Some((table, index, _)) = split_key(context) else {
+                continue;
+            };
+            if !visited.insert((table.to_owned(), index)) {
+                continue;
+            }
+            let offsets = table_offsets(rom, table)?;
+            let mut walker = Walker::new(rom, table, &offsets);
+            walker.walk(index, 0);
+            placements.extend(walker.placements);
+        }
+        for (context, text) in &self.messages {
+            let Some(placement) = placements.get(context) else {
+                continue;
+            };
+            let (columns, rows) = needed(text);
+            let window = placement.window;
+            let fit_key = key(
+                placement_table(context),
+                window.opener,
+                usize::from(placement.id),
+            );
+            let is_menu = window.kind & MENU_KIND != 0;
+            let rows_needed = if is_menu { rows } else { 0 };
+            if columns <= window.columns() && rows_needed <= window.rows() {
+                continue;
+            }
+            if columns + 2 * window.margin() > SCREEN_COLUMNS || 2 + 2 * rows_needed > SCREEN_ROWS {
+                problems.push(format!(
+                    "{context}: needs {columns} cells, a window can hold {}",
+                    SCREEN_COLUMNS - 2 * window.margin()
+                ));
+                continue;
+            }
+            let entry = self.fits.entry(fit_key).or_default();
+            entry.columns = entry.columns.max(columns);
+            entry.rows = entry.rows.max(rows_needed);
+        }
+        problems.sort();
+        Ok(problems)
+    }
+
+    /// The rectangle window `id`, opened by string `index` of `table` as
+    /// `(x, y, width, height)`, should take so its translations fit.
+    #[must_use]
+    pub fn fit_window(
+        &self,
+        table: &str,
+        index: usize,
+        id: u8,
+        kind: u8,
+        rect: (u8, u8, u8, u8),
+    ) -> (u8, u8, u8, u8) {
+        let Some(fit) = self.fits.get(&key(table, index, usize::from(id))) else {
+            return rect;
+        };
+        let margin = if kind & MENU_KIND != 0 {
+            MENU_MARGIN
+        } else {
+            TEXT_MARGIN
+        };
+        let width = usize::from(rect.2).max(fit.columns + 2 * margin);
+        let height = usize::from(rect.3).max(if fit.rows > 0 { 2 + 2 * fit.rows } else { 0 });
+        let x = usize::from(rect.0).min(SCREEN_COLUMNS.saturating_sub(width));
+        let y = usize::from(rect.1).min(SCREEN_ROWS.saturating_sub(height));
+        let cell = |value: usize| u8::try_from(value).unwrap_or(u8::MAX);
+        (cell(x), cell(y), cell(width), cell(height))
+    }
+
+    /// Windows this translation enlarges.
+    #[must_use]
+    pub fn enlarged_windows(&self) -> usize {
+        self.fits.len()
     }
 
     /// The translation of a message, if the file has one.
@@ -118,6 +263,156 @@ impl Translation {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.messages.is_empty()
+    }
+}
+
+fn split_key(context: &str) -> Option<(&str, usize, usize)> {
+    let mut parts = context.splitn(3, '/');
+    let table = parts.next()?;
+    let index = parts.next()?.parse().ok()?;
+    let offset = parts.next()?.strip_prefix("0x")?;
+    Some((table, index, usize::from_str_radix(offset, 16).ok()?))
+}
+
+fn placement_table(context: &str) -> &str {
+    context.split('/').next().unwrap_or_default()
+}
+
+/// Cells the widest line of translated text needs, and its line count.
+fn needed(text: &str) -> (usize, usize) {
+    let mut widest = 0;
+    let mut lines = 0;
+    let mut current = 0;
+    for step in steps(text) {
+        match step {
+            MessageStep::Character(_) => current += 1,
+            MessageStep::PlayerName => current += NAME_CELLS,
+            MessageStep::Variable { digits, .. } => current += usize::from(digits.max(1)),
+            MessageStep::LineBreak => {
+                widest = widest.max(current);
+                lines += 1;
+                current = 0;
+            }
+            _ => {}
+        }
+    }
+    if current > 0 {
+        widest = widest.max(current);
+        lines += 1;
+    }
+    (widest, lines)
+}
+
+/// Walks a string and the strings it calls in order, tracking the windows
+/// they open, to find the window each message is printed in.
+struct Walker<'a> {
+    rom: &'a [u8],
+    table: &'a str,
+    offsets: &'a [usize],
+    windows: HashMap<u8, Opened>,
+    current: u8,
+    placements: HashMap<String, Placement>,
+}
+
+impl<'a> Walker<'a> {
+    fn new(rom: &'a [u8], table: &'a str, offsets: &'a [usize]) -> Self {
+        Self {
+            rom,
+            table,
+            offsets,
+            windows: HashMap::new(),
+            current: 0,
+            placements: HashMap::new(),
+        }
+    }
+
+    fn walk(&mut self, index: usize, depth: usize) {
+        let Some(start) = self.offsets.get(index).copied().filter(|start| *start != 0) else {
+            return;
+        };
+        let end = self
+            .offsets
+            .iter()
+            .copied()
+            .filter(|offset| *offset > start)
+            .min()
+            .unwrap_or(start + STRING_LIMIT)
+            .min(self.rom.len());
+        let mut at = start;
+        while at < end {
+            let Ok((instruction, next)) = decode_instruction(self.rom, at) else {
+                break;
+            };
+            at = next;
+            match instruction {
+                Instruction::OpenWindow {
+                    id,
+                    kind,
+                    x,
+                    y,
+                    width,
+                    height,
+                    ..
+                } => {
+                    self.windows.insert(
+                        id,
+                        Opened {
+                            x: usize::from(x),
+                            y: usize::from(y),
+                            width: usize::from(width),
+                            height: usize::from(height),
+                            kind,
+                            opener: index,
+                        },
+                    );
+                    self.current = id;
+                }
+                Instruction::CloseWindow { id: Some(id) } => {
+                    self.windows.remove(&id);
+                }
+                Instruction::CloseWindow { id: None } => self.windows.clear(),
+                Instruction::Present { id: Some(id) } => self.current = id,
+                Instruction::Present { id: None } => {
+                    if let Some(id) = self.windows.keys().max() {
+                        self.current = *id;
+                    }
+                }
+                Instruction::Call(callee) if depth < MAX_CALL_DEPTH => {
+                    self.walk(usize::from(callee), depth + 1);
+                }
+                Instruction::Message => {
+                    let offset = at - 1 - start;
+                    at = self.place(index, offset, at);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn place(&mut self, index: usize, offset: usize, mut at: usize) -> usize {
+        let mut id = self.current;
+        let mut leading = true;
+        loop {
+            let Ok((step, next)) = decode_message_step(self.rom, at) else {
+                return at;
+            };
+            at = next;
+            match step {
+                MessageStep::SwitchWindow(target) if leading => id = target,
+                MessageStep::End => break,
+                _ => leading = false,
+            }
+        }
+        if let Some(window) = self.windows.get(&id) {
+            self.placements.insert(
+                key(self.table, index, offset),
+                Placement {
+                    id,
+                    window: *window,
+                },
+            );
+        }
+        at
     }
 }
 
@@ -446,6 +741,34 @@ mod tests {
             template(&rom, &[Scope::parse("nowhere").unwrap()]),
             Err(TranslationError::NoSuchTable(_))
         ));
+    }
+
+    #[test]
+    fn enlarges_windows_the_translated_lines_overflow() {
+        let mut script = vec![0x01, 0, 0x21, 10, 10, 9, 8, 4, 0x20];
+        script.extend([0xA0, 0x82, 0x1D, 0x04, 0xFF, 0x22]);
+        let po = "msgctxt \"title/0/0x8\"\nmsgid \"\"\nmsgstr \"Nueva partida\\nContinuar\\nOpciones\\nExtra\"\n";
+        let mut translation = Translation::from_po(po).unwrap();
+        let mut rom = vec![0; 0x6C_0500 + 32];
+        rom[TITLE_MENU_SCRIPT_OFFSET..TITLE_MENU_SCRIPT_OFFSET + script.len()]
+            .copy_from_slice(&script);
+        let problems = translation.fit(&rom).unwrap();
+        assert!(problems.is_empty());
+        assert_eq!(translation.enlarged_windows(), 1);
+        assert_eq!(
+            translation.fit_window("title", 0, 0, 0x21, (10, 10, 9, 8)),
+            (10, 10, 17, 10)
+        );
+        assert_eq!(
+            translation.fit_window("title", 0, 1, 0x21, (10, 10, 9, 8)),
+            (10, 10, 9, 8)
+        );
+        assert_eq!(needed("ab{name}\ncd"), (10, 2));
+        let wide = Translation::from_po(
+            "msgctxt \"title/0/0x8\"\nmsgid \"\"\nmsgstr \"abcdefghijklmnopqrstuvwxyzabcdefg\"\n",
+        );
+        let problems = wide.unwrap().fit(&rom).unwrap();
+        assert_eq!(problems.len(), 1);
     }
 
     #[test]

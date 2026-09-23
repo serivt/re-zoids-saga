@@ -71,6 +71,19 @@ pub trait ScriptHost {
         let _ = (table, index, offset);
         None
     }
+    /// The rectangle window `id` of kind `kind`, opened by string `index`
+    /// of `table` as `rect`, should take: a translation may enlarge it.
+    fn fit_window(
+        &self,
+        table: &str,
+        index: usize,
+        id: u8,
+        kind: u8,
+        rect: (u8, u8, u8, u8),
+    ) -> (u8, u8, u8, u8) {
+        let _ = (table, index, id, kind);
+        rect
+    }
 }
 
 /// What the runner is waiting for.
@@ -407,7 +420,9 @@ impl ScriptRunner {
                 height,
                 style,
             } => {
-                host.open_window(id, kind, (x, y, width, height), style);
+                let index = self.frames.last().map_or(0, |frame| frame.index);
+                let rect = host.fit_window(self.table, index, id, kind, (x, y, width, height));
+                host.open_window(id, kind, rect, style);
                 self.window = id;
             }
             Instruction::Reset { mode } => {

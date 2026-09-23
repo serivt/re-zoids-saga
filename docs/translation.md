@@ -63,15 +63,22 @@ menu window keeps two cells free on each side for the cursor (see
 | Name-entry question | 28 | 2 |
 | Pause-menu list | 5 | 6 |
 
-Text longer than a line wraps mid-word and, in a menu, breaks the choices; keep each
-line within the cells above and break lines with `\n` where the original does.
+When a translation is loaded the launcher walks each translated string (and the
+strings it calls) to find the window every message lands in, and enlarges the windows
+whose translated lines do not fit: a window grows to the widest line plus its margins
+(and, for a menu, to the number of choices), sliding left or up to stay on screen.
+The title menu, for instance, grows from 5 to 13 cells for "Nueva partida". The
+launcher prints how many windows it enlarged and one line per message that cannot fit
+even a screen-wide window; those still wrap mid-word. The story box beside a
+portrait is already the full screen width, so its lines must stay within 22 cells.
 
 The ROM font has no half-width Latin letters, so ASCII draws with its full-width
-forms (`Ａ`), accented Latin letters draw as their plain ones (`é` as `e`, `ñ` as `n`,
-`¿` as `?`) and other characters the font lacks draw as the fallback glyph. A modern
-Latin font is future work.
+forms (`Ａ`). Accented letters are built from the plain letter with the mark drawn
+above it (acute, grave, circumflex, diaeresis, tilde), and `¿` and `¡` are `？` and
+`！` turned around; other characters the font lacks draw as the fallback glyph. A
+modern Latin font is future work.
 
 ## Not modeled yet
 
-Names, items and other strings the game prints outside scripts, and a check that a
-translation fits its windows.
+Names, items and other strings the game prints outside scripts, messages reached only
+through script jumps the layout walk does not follow, and the cedilla.

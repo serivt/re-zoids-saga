@@ -410,6 +410,17 @@ impl ScriptHost for ScriptWindows<'_> {
             .map(str::to_owned)
     }
 
+    fn fit_window(
+        &self,
+        table: &str,
+        index: usize,
+        id: u8,
+        kind: u8,
+        rect: (u8, u8, u8, u8),
+    ) -> (u8, u8, u8, u8) {
+        self.translation.fit_window(table, index, id, kind, rect)
+    }
+
     fn menu_line(&self, id: u8) -> usize {
         self.windows
             .get(usize::from(id))

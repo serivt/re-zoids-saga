@@ -18,6 +18,62 @@ fn full_width(ch: char) -> char {
     }
 }
 
+/// A mark drawn above a letter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Accent {
+    Acute,
+    Grave,
+    Circumflex,
+    Diaeresis,
+    Tilde,
+}
+
+fn accent(ch: char) -> Option<Accent> {
+    Some(match ch {
+        'á' | 'é' | 'í' | 'ó' | 'ú' | 'Á' | 'É' | 'Í' | 'Ó' | 'Ú' => Accent::Acute,
+        'à' | 'è' | 'ì' | 'ò' | 'ù' | 'À' | 'È' | 'Ì' | 'Ò' | 'Ù' => Accent::Grave,
+        'â' | 'ê' | 'î' | 'ô' | 'û' | 'Â' | 'Ê' | 'Î' | 'Ô' | 'Û' => Accent::Circumflex,
+        'ä' | 'ë' | 'ï' | 'ö' | 'ü' | 'Ä' | 'Ë' | 'Ï' | 'Ö' | 'Ü' => Accent::Diaeresis,
+        'ñ' | 'Ñ' | 'ã' | 'õ' | 'Ã' | 'Õ' => Accent::Tilde,
+        _ => return None,
+    })
+}
+
+/// The glyph turned upside down (and mirrored), as ¿ is to ?.
+fn turned(glyph: &Glyph) -> Glyph {
+    let mut pixels = glyph.pixels;
+    pixels.reverse();
+    Glyph { pixels }
+}
+
+/// The glyph with `mark` drawn in the two rows above its topmost pixel,
+/// or over its top rows when nothing is above them.
+fn accented(base: &Glyph, mark: Accent) -> Glyph {
+    let mut glyph = base.clone();
+    let is_ink = |index: u8| index != BACKGROUND_INDEX;
+    let top = (0..GLYPH_HEIGHT)
+        .find(|row| (0..GLYPH_WIDTH).any(|x| base.pixel(x, *row).is_some_and(is_ink)))
+        .unwrap_or(GLYPH_HEIGHT);
+    let ink = base
+        .pixels
+        .iter()
+        .copied()
+        .find(|p| is_ink(*p))
+        .unwrap_or(0);
+    let row = top.saturating_sub(3);
+    let dots: &[(usize, usize)] = match mark {
+        Accent::Acute => &[(4, 0), (3, 1)],
+        Accent::Grave => &[(3, 0), (4, 1)],
+        Accent::Circumflex => &[(3, 0), (2, 1), (4, 1)],
+        Accent::Diaeresis => &[(2, 0), (5, 0), (2, 1), (5, 1)],
+        Accent::Tilde => &[(2, 1), (3, 0), (4, 0), (5, 1)],
+    };
+    for (x, dy) in dots {
+        glyph.pixels[(row + dy) * GLYPH_WIDTH + x] = ink;
+    }
+    glyph
+}
+
 /// A Latin letter without its accent, or the character itself.
 fn plain_latin(ch: char) -> char {
     match ch {
@@ -65,11 +121,32 @@ impl<'rom> TextPainter<'rom> {
     /// full-width forms, and accented Latin letters with their plain ones.
     #[must_use]
     pub fn glyph(&self, ch: char) -> Option<Glyph> {
-        [ch, full_width(ch), full_width(plain_latin(ch))]
+        [ch, full_width(ch)]
             .into_iter()
             .filter_map(shift_jis_code)
             .find_map(|code| self.index.glyph(self.rom, code))
+            .or_else(|| self.synthesized(ch))
+            .or_else(|| self.font_glyph(full_width(plain_latin(ch))))
             .or_else(|| self.fallback.clone())
+    }
+
+    fn font_glyph(&self, ch: char) -> Option<Glyph> {
+        shift_jis_code(ch).and_then(|code| self.index.glyph(self.rom, code))
+    }
+
+    /// Latin characters the font lacks, built from the glyphs it has: the
+    /// inverted marks are the upright ones turned around, accented letters
+    /// carry their mark above the plain letter.
+    fn synthesized(&self, ch: char) -> Option<Glyph> {
+        match ch {
+            '¿' => self.font_glyph('？').map(|glyph| turned(&glyph)),
+            '¡' => self.font_glyph('！').map(|glyph| turned(&glyph)),
+            other => {
+                let mark = accent(other)?;
+                let base = self.font_glyph(full_width(plain_latin(other)))?;
+                Some(accented(&base, mark))
+            }
+        }
     }
 
     /// Draws `text` with its top-left corner at `(x, y)`, one glyph cell per
