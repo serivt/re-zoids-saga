@@ -204,6 +204,7 @@ impl<'rom> ScriptWindows<'rom> {
                     origin.1,
                     &portrait.image,
                     &portrait.palette,
+                    false,
                 );
             }
             for (row, line) in window.lines.iter().enumerate() {

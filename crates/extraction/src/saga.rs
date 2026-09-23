@@ -914,6 +914,7 @@ const SPRITE_RECORD_LEN: usize = 32;
 const SPRITE_COUNT: usize = 291;
 const SPRITE_TAG_LEN: usize = 4;
 const SPRITE_FRAME_LEN: usize = 24;
+const SPRITE_FRAME_MIRROR: u16 = 1;
 const SPRITE_ANIMATION_STEP_LEN: usize = 4;
 const SPRITE_ANIMATION_END: u16 = 0x8000;
 const SPRITE_ANIMATIONS_MAX: usize = 32;
@@ -951,6 +952,9 @@ pub struct SpriteFrame {
     pub width: usize,
     /// Height in pixels.
     pub height: usize,
+    /// Whether the image is drawn flipped left to right (right-facing
+    /// frames of most characters reuse the left-facing images this way).
+    pub mirrored: bool,
 }
 
 /// A sprite: same-sized images stored uncompressed, plus the frames and
@@ -1136,6 +1140,7 @@ fn read_frame(rom: &[u8], pointer: usize) -> Option<SpriteFrame> {
         y: signed(6),
         width: usize::from(half(8)),
         height: usize::from(half(10)),
+        mirrored: half(2) & SPRITE_FRAME_MIRROR != 0,
     })
 }
 
@@ -1274,6 +1279,7 @@ mod tests {
                     y: -16,
                     width: 32,
                     height: 32,
+                    mirrored: false,
                 },
                 SpriteFrame {
                     tile: 4,
@@ -1281,6 +1287,7 @@ mod tests {
                     y: 0,
                     width: 16,
                     height: 8,
+                    mirrored: false,
                 },
             ],
             animations: vec![],
@@ -1354,6 +1361,11 @@ mod tests {
                 &pointer(frames + index * 24),
             );
             put(&mut rom, frames + index * 24, &tile.to_le_bytes());
+            put(
+                &mut rom,
+                frames + index * 24 + 2,
+                &u16::from(index == 2).to_le_bytes(),
+            );
             put(&mut rom, frames + index * 24 + 4, &(-16i16).to_le_bytes());
             put(&mut rom, frames + index * 24 + 6, &(-8i16).to_le_bytes());
             put(&mut rom, frames + index * 24 + 8, &32u16.to_le_bytes());
@@ -1405,6 +1417,7 @@ mod tests {
                 y: -8,
                 width: 32,
                 height: 32,
+                mirrored: true,
             }
         );
         assert_eq!(sheet.frame_image(2).unwrap().indices[0], 2);

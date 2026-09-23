@@ -637,6 +637,7 @@ impl Field {
                 screen(y, record.y, scroll.1),
                 &image,
                 &sheet.palette,
+                record.mirrored,
             );
         }
     }
@@ -750,6 +751,7 @@ mod tests {
                 y: -16,
                 width: 32,
                 height: 32,
+                mirrored: false,
             })
             .collect();
         SpriteSheet {

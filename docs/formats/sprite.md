@@ -40,6 +40,7 @@ A frame record is 24 bytes:
 | Offset | Field |
 |---|---|
 | 0 | First tile in the sheet (image index × tiles per image) |
+| 2 | Bit 0: draw the image flipped left to right; the right-facing frames of most character sheets reuse the left-facing images this way (the player's `ch00` has its own) |
 | 4 | Signed x offset of the top-left corner from the sprite's anchor (−16 for 32×32) |
 | 6 | Signed y offset (−16) |
 | 8 | Width in pixels |
