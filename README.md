@@ -14,7 +14,8 @@ caches it in your user-data directory.
 
 ## Status
 
-Early scaffolding. The Cargo workspace and layer boundaries are in place; no game runs yet.
+Early. The workspace and layer boundaries are in place and the launcher identifies a ROM
+(cartridge header + SHA-1 against validated dumps). No game runs yet.
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements
@@ -31,10 +32,10 @@ See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 cargo build
 ```
 
-Run the launcher:
+Identify a ROM with the launcher:
 
 ```bash
-cargo run -p launcher
+cargo run -p launcher -- path/to/rom.gba
 ```
 
 Before submitting a change:
