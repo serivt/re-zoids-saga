@@ -11,6 +11,7 @@ gba-runtime.workspace = true
 localization.workspace = true
 extraction.workspace = true
 formats.workspace = true
+thiserror = "2.0.20"
 
 [lints]
 workspace = true

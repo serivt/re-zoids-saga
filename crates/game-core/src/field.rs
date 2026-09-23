@@ -1,22 +1,27 @@
 //! The field: a scene the player walks around, with the camera following.
 //!
-//! Movement matches the original: one pixel per frame while a direction is
-//! held, a 16×16 collision box at the bottom center of the 32×32 sprite
-//! tested against the scene's metatile attributes, and a camera that keeps
-//! the sprite at screen (104, 64) within the map's bounds. Animation uses
-//! the sprite sheet's layout: idle images `direction × 3 + [0, 1, 0, 2]`,
-//! walking images `12 + direction × 3 + [0, 1, 0, 2]`, four frames each.
+//! Movement matches the original: the player stands on a 16×16 metatile,
+//! a held direction starts a step onto the next metatile when it is not
+//! blocked, and a started step always completes at one pixel per frame.
+//! The sprite is 32×32 with its bottom-center 16×16 on the metatile below
+//! the standing one, so the sprite's top-left is `(16 × column − 8,
+//! 16 × row)`. The camera keeps the sprite at screen (104, 64) within the
+//! map's bounds. Animation uses the sprite sheet's layout: idle images
+//! `direction × 3 + [0, 1, 0, 2]`, walking images `12 + direction × 3 +
+//! [0, 1, 0, 2]`, four frames each. Completing a step onto an exit
+//! metatile reports the exit so the caller can warp.
 
-use extraction::saga::{METATILE_TILES, Scene, SpriteSheet};
+use extraction::saga::{self, METATILE_TILES, MapError, Scene, SceneError, SpriteSheet, Warp};
 use gba_runtime::ppu::{PaletteBank, SCREEN_HEIGHT, SCREEN_WIDTH, draw_background};
 use platform::{Button, Frame, Input};
+use thiserror::Error;
 
 use crate::draw_sprite;
 
 const TILE_SIZE: usize = 8;
 const METATILE_SIZE: usize = METATILE_TILES * TILE_SIZE;
-const COLLISION_BOX: (usize, usize, usize, usize) = (8, 16, 16, 16);
-const CAMERA_ANCHOR: (usize, usize) = (104, 64);
+const SPRITE_OFFSET_X: isize = -8;
+const CAMERA_ANCHOR: (isize, isize) = (104, 64);
 const FRAMES_PER_IMAGE: u32 = 4;
 const ANIMATION_CYCLE: [usize; 4] = [0, 1, 0, 2];
 const IMAGES_PER_DIRECTION: usize = 3;
@@ -36,10 +41,18 @@ pub enum Direction {
 }
 
 impl Direction {
+    const ALL: [Self; 4] = [Self::Up, Self::Down, Self::Left, Self::Right];
+
     fn from_input(input: Input) -> Option<Self> {
-        [Self::Up, Self::Down, Self::Left, Self::Right]
+        Self::ALL
             .into_iter()
             .find(|direction| input.is_held(direction.button()))
+    }
+
+    /// The direction the sprite sheet numbers `index`.
+    #[must_use]
+    pub fn from_index(index: usize) -> Option<Self> {
+        Self::ALL.get(index).copied()
     }
 
     const fn button(self) -> Button {
@@ -51,7 +64,7 @@ impl Direction {
         }
     }
 
-    fn delta(self) -> (isize, isize) {
+    const fn delta(self) -> (isize, isize) {
         match self {
             Self::Up => (0, -1),
             Self::Down => (0, 1),
@@ -60,7 +73,7 @@ impl Direction {
         }
     }
 
-    fn index(self) -> usize {
+    const fn index(self) -> usize {
         match self {
             Self::Up => 0,
             Self::Down => 1,
@@ -73,20 +86,61 @@ impl Direction {
 /// The player's position and animation state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Player {
-    /// Sprite top-left in map pixels.
-    pub x: usize,
-    /// Sprite top-left in map pixels.
-    pub y: usize,
+    /// Metatile column the player stands on.
+    pub column: usize,
+    /// Metatile row the player stands on.
+    pub row: usize,
     /// Facing direction.
     pub facing: Direction,
+    /// Pixels advanced into the step being taken, 0 when standing.
+    pub step: usize,
     /// Frames spent in the current animation.
     pub animation: u32,
-    /// Whether the last update moved the player.
+    /// Whether the player is stepping.
     pub walking: bool,
+}
+
+impl Player {
+    /// Sprite top-left in map pixels.
+    #[must_use]
+    pub fn position(&self) -> (isize, isize) {
+        let (dx, dy) = if self.walking {
+            self.facing.delta()
+        } else {
+            (0, 0)
+        };
+        let step = isize::try_from(self.step).unwrap_or(0);
+        (
+            metatile_pixels(self.column) + SPRITE_OFFSET_X + dx * step,
+            metatile_pixels(self.row) + dy * step,
+        )
+    }
+
+    /// The metatile the collision box sits on: below the standing one.
+    #[must_use]
+    pub fn footing(&self) -> (usize, usize) {
+        (self.column, self.row + 1)
+    }
+}
+
+fn metatile_pixels(cell: usize) -> isize {
+    isize::try_from(cell * METATILE_SIZE).unwrap_or(isize::MAX)
+}
+
+/// Why a field could not be loaded from the ROM.
+#[derive(Debug, Error)]
+pub enum FieldError {
+    /// The map record or warp is unreadable.
+    #[error(transparent)]
+    Map(#[from] MapError),
+    /// The scene is unreadable.
+    #[error(transparent)]
+    Scene(#[from] SceneError),
 }
 
 /// A scene with the player in it.
 pub struct Field {
+    map: usize,
     scene: Scene,
     sheet: SpriteSheet,
     palettes: PaletteBank,
@@ -95,22 +149,47 @@ pub struct Field {
 }
 
 impl Field {
-    /// Places the player at sprite position `(x, y)` in `scene`.
+    /// Stands the player on metatile `(column, row)` of `scene`.
     #[must_use]
-    pub fn new(scene: Scene, sheet: SpriteSheet, (x, y): (usize, usize)) -> Self {
+    pub fn new(scene: Scene, sheet: SpriteSheet, (column, row): (usize, usize)) -> Self {
         let palettes = PaletteBank::from_bgr555(&scene.palettes);
         Self {
+            map: 0,
             scene,
             sheet,
             palettes,
             player: Player {
-                x,
-                y,
+                column,
+                row,
                 facing: Direction::Down,
+                step: 0,
                 animation: 0,
                 walking: false,
             },
         }
+    }
+
+    /// Loads map `map` from `rom` and stands the player on `(column, row)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError`] when the map record or its scene cannot be read.
+    pub fn load(
+        rom: &[u8],
+        map: usize,
+        sheet: SpriteSheet,
+        (column, row): (usize, usize),
+    ) -> Result<Self, FieldError> {
+        let scene = saga::scene(rom, saga::map_record(rom, map)?.scene)?;
+        let mut field = Self::new(scene, sheet, (column, row));
+        field.map = map;
+        Ok(field)
+    }
+
+    /// The map record being walked.
+    #[must_use]
+    pub fn map(&self) -> usize {
+        self.map
     }
 
     /// The scene being walked.
@@ -119,52 +198,72 @@ impl Field {
         &self.scene
     }
 
-    /// Advances one frame with the buttons held.
-    pub fn update(&mut self, input: Input) {
-        let Some(direction) = Direction::from_input(input) else {
-            self.set_walking(false);
-            self.player.animation += 1;
-            return;
-        };
+    /// Advances one frame with the buttons held; returns the exit whose
+    /// metatile the player finished stepping onto, if any.
+    pub fn update(&mut self, input: Input) -> Option<usize> {
+        self.player.animation += 1;
+        if self.player.walking {
+            return self.advance_step();
+        }
+        let direction = Direction::from_input(input)?;
         if self.player.facing != direction {
             self.player.facing = direction;
             self.player.animation = 0;
         }
         let (dx, dy) = direction.delta();
-        let moved = self.try_step(dx, dy);
-        self.set_walking(moved);
-        self.player.animation += 1;
-    }
-
-    fn set_walking(&mut self, walking: bool) {
-        if self.player.walking != walking {
-            self.player.walking = walking;
+        let (column, row) = self.player.footing();
+        let target = (column.checked_add_signed(dx), row.checked_add_signed(dy));
+        if let (Some(column), Some(row)) = target
+            && !self.scene.blocked(column, row)
+        {
+            self.player.walking = true;
             self.player.animation = 0;
+            self.advance_step();
         }
+        None
     }
 
-    fn try_step(&mut self, dx: isize, dy: isize) -> bool {
-        let Some(x) = self.player.x.checked_add_signed(dx) else {
-            return false;
-        };
-        let Some(y) = self.player.y.checked_add_signed(dy) else {
-            return false;
-        };
-        if self.box_blocked(x, y) {
-            return false;
+    fn advance_step(&mut self) -> Option<usize> {
+        self.player.step += 1;
+        if self.player.step < METATILE_SIZE {
+            return None;
         }
-        self.player.x = x;
-        self.player.y = y;
-        true
+        let (dx, dy) = self.player.facing.delta();
+        self.player.column = self.player.column.saturating_add_signed(dx);
+        self.player.row = self.player.row.saturating_add_signed(dy);
+        self.player.step = 0;
+        self.player.walking = false;
+        let (column, row) = self.player.footing();
+        self.scene.exit(column, row)
     }
 
-    fn box_blocked(&self, x: usize, y: usize) -> bool {
-        let (left, top, width, height) = COLLISION_BOX;
-        let (x0, y0) = (x + left, y + top);
-        let (x1, y1) = (x0 + width - 1, y0 + height - 1);
-        [(x0, y0), (x1, y0), (x0, y1), (x1, y1)]
-            .iter()
-            .any(|(px, py)| self.scene.blocked(px / METATILE_SIZE, py / METATILE_SIZE))
+    /// Follows `exit` of the current map: loads the destination and stands
+    /// the player where the warp says.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError`] when the warp, the map record or the scene
+    /// cannot be read.
+    pub fn warp(&mut self, rom: &[u8], exit: usize) -> Result<Warp, FieldError> {
+        let warp = saga::warp(rom, self.map, exit)?;
+        let scene = saga::scene(rom, saga::map_record(rom, warp.map)?.scene)?;
+        self.enter(scene, warp.map, &warp);
+        Ok(warp)
+    }
+
+    /// Replaces the scene and places the player as `warp` says.
+    pub fn enter(&mut self, scene: Scene, map: usize, warp: &Warp) {
+        self.palettes = PaletteBank::from_bgr555(&scene.palettes);
+        self.scene = scene;
+        self.map = map;
+        self.player.column = warp.column;
+        self.player.row = warp.row;
+        self.player.step = 0;
+        self.player.walking = false;
+        self.player.animation = 0;
+        if let Some(facing) = warp.facing.and_then(Direction::from_index) {
+            self.player.facing = facing;
+        }
     }
 
     /// Camera scroll in map pixels: the sprite sits at the anchor unless the
@@ -175,9 +274,13 @@ impl Field {
         let map_height = self.scene.map.height * TILE_SIZE;
         let max_x = map_width.saturating_sub(SCREEN_WIDTH);
         let max_y = map_height.saturating_sub(SCREEN_HEIGHT);
+        let (x, y) = self.player.position();
+        let scroll = |position: isize, anchor: isize, max: usize| {
+            usize::try_from(position - anchor).unwrap_or(0).min(max)
+        };
         (
-            self.player.x.saturating_sub(CAMERA_ANCHOR.0).min(max_x),
-            self.player.y.saturating_sub(CAMERA_ANCHOR.1).min(max_y),
+            scroll(x, CAMERA_ANCHOR.0, max_x),
+            scroll(y, CAMERA_ANCHOR.1, max_y),
         )
     }
 
@@ -198,10 +301,9 @@ impl Field {
         let map = |x: usize, y: usize| self.scene.map.wrapping(x, y);
         draw_background(frame, map, tile, &self.palettes, scroll, true);
         if let Some(image) = self.sheet.frame(self.image_index()) {
-            let x = i32::try_from(self.player.x).unwrap_or(i32::MAX)
-                - i32::try_from(scroll.0).unwrap_or(0);
-            let y = i32::try_from(self.player.y).unwrap_or(i32::MAX)
-                - i32::try_from(scroll.1).unwrap_or(0);
+            let (x, y) = self.player.position();
+            let x = i32::try_from(x).unwrap_or(i32::MAX) - i32::try_from(scroll.0).unwrap_or(0);
+            let y = i32::try_from(y).unwrap_or(i32::MAX) - i32::try_from(scroll.1).unwrap_or(0);
             draw_sprite(frame, x, y, &image, &self.sheet.palette);
         }
     }
@@ -236,15 +338,22 @@ mod tests {
 
     use super::*;
 
-    /// A scene of `columns`×`rows` metatiles whose outer ring is blocked.
-    fn field(columns: usize, rows: usize) -> Field {
+    /// A scene of `columns`×`rows` metatiles whose outer ring is blocked,
+    /// with exit 1 at `(1, 2)`.
+    fn scene(columns: usize, rows: usize) -> Scene {
         let attributes = (0..columns * rows)
             .map(|i| {
                 let (c, r) = (i % columns, i / columns);
-                u16::from(c == 0 || r == 0 || c + 1 == columns || r + 1 == rows) << 15
+                if c == 0 || r == 0 || c + 1 == columns || r + 1 == rows {
+                    0x8000
+                } else if (c, r) == (1, 2) {
+                    0x4001
+                } else {
+                    0
+                }
             })
             .collect();
-        let scene = Scene {
+        Scene {
             tiles: Tileset::from_4bpp(&[]),
             palettes: vec![],
             map: TileMap {
@@ -258,7 +367,11 @@ mod tests {
                 entries: vec![0; 1024],
             },
             attributes,
-        };
+        }
+    }
+
+    /// The player standing on `(3, 1)` of a `columns`×`rows` scene.
+    fn field(columns: usize, rows: usize) -> Field {
         let sheet = SpriteSheet {
             tag: "mz25".to_owned(),
             frames: 0,
@@ -266,7 +379,7 @@ mod tests {
             palette: [0; 16],
             tiles: Tileset::from_4bpp(&[]),
         };
-        Field::new(scene, sheet, (16, 0))
+        Field::new(scene(columns, rows), sheet, (3, 1))
     }
 
     fn held(direction: Direction) -> Input {
@@ -274,24 +387,80 @@ mod tests {
     }
 
     #[test]
-    fn walks_one_pixel_per_frame_until_blocked() {
+    fn steps_a_whole_metatile_once_started() {
+        let mut field = field(6, 5);
+        assert_eq!(field.player.position(), (40, 16));
+        field.update(held(Direction::Right));
+        assert_eq!(field.player.position(), (41, 16));
+        assert!(field.player.walking);
+        for _ in 0..14 {
+            field.update(Input::default());
+        }
+        assert_eq!(field.player.position(), (55, 16));
+        assert!(field.player.walking);
+        field.update(Input::default());
+        assert_eq!(field.player.position(), (56, 16));
+        assert_eq!((field.player.column, field.player.row), (4, 1));
+        assert!(!field.player.walking);
+        field.update(Input::default());
+        assert_eq!(field.player.position(), (56, 16));
+    }
+
+    #[test]
+    fn keeps_stepping_while_held_and_stops_at_walls() {
         let mut field = field(6, 4);
         for _ in 0..40 {
-            field.update(held(Direction::Left));
-        }
-        assert_eq!(field.player.x, 8);
-        assert_eq!(field.player.facing, Direction::Left);
-        assert!(!field.player.walking);
-        for _ in 0..3 {
             field.update(held(Direction::Right));
         }
-        assert_eq!(field.player.x, 11);
-        assert!(field.player.walking);
+        assert_eq!((field.player.column, field.player.row), (4, 1));
+        assert_eq!(field.player.position(), (56, 16));
+        assert_eq!(field.player.facing, Direction::Right);
+        assert!(!field.player.walking);
+        field.update(held(Direction::Down));
+        assert_eq!(field.player.facing, Direction::Down);
+        assert_eq!(field.player.position(), (56, 16));
+        assert!(!field.player.walking);
+    }
+
+    #[test]
+    fn reports_the_exit_when_the_step_onto_it_completes() {
+        let mut field = field(6, 5);
+        let mut exits = Vec::new();
+        for _ in 0..32 {
+            exits.extend(field.update(held(Direction::Left)));
+        }
+        assert_eq!(exits, [1]);
+        assert_eq!(field.player.footing(), (1, 2));
+        assert_eq!(field.update(Input::default()), None);
+    }
+
+    #[test]
+    fn entering_a_scene_places_and_turns_the_player() {
+        let mut field = field(6, 5);
+        field.update(held(Direction::Left));
+        let warp = Warp {
+            map: 7,
+            column: 2,
+            row: 2,
+            facing: Some(3),
+            sound: 0,
+        };
+        field.enter(scene(8, 8), 7, &warp);
+        assert_eq!(field.map(), 7);
+        assert_eq!(field.player.position(), (24, 32));
+        assert_eq!(field.player.facing, Direction::Right);
+        assert!(!field.player.walking);
+        let keep = Warp {
+            facing: None,
+            ..warp
+        };
+        field.enter(scene(8, 8), 7, &keep);
+        assert_eq!(field.player.facing, Direction::Right);
     }
 
     #[test]
     fn animation_cycles_through_the_sheet_layout() {
-        let mut field = field(6, 4);
+        let mut field = field(6, 5);
         assert_eq!(field.image_index(), 3);
         field.update(held(Direction::Right));
         assert_eq!(field.image_index(), 21);
@@ -309,12 +478,13 @@ mod tests {
     fn camera_keeps_the_sprite_at_the_anchor_within_bounds() {
         let mut large = field(40, 20);
         assert_eq!(large.camera(), (0, 0));
-        large.player.x = 200;
-        large.player.y = 100;
-        assert_eq!(large.camera(), (96, 36));
-        large.player.x = 10_000;
-        large.player.y = 10_000;
+        large.player.column = 13;
+        large.player.row = 7;
+        assert_eq!(large.player.position(), (200, 112));
+        assert_eq!(large.camera(), (96, 48));
+        large.player.column = 1000;
+        large.player.row = 1000;
         assert_eq!(large.camera(), (640 - 240, 320 - 160));
-        assert_eq!(field(6, 4).camera(), (0, 0));
+        assert_eq!(field(6, 5).camera(), (0, 0));
     }
 }
