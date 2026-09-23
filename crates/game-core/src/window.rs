@@ -2,6 +2,7 @@
 
 use formats::tile::{TILE_SIZE, Tileset};
 use gba_runtime::ppu::{IndexedImage, Palette, draw_indexed};
+use localization::TextArea;
 use platform::Frame;
 
 const FILL: usize = 0x01;
@@ -15,6 +16,13 @@ const LEFT: usize = 0x10;
 const RIGHT: usize = 0x11;
 const DIVIDER_TOP: usize = 0x20;
 const DIVIDER_BOTTOM: usize = 0x21;
+
+/// Text area of the story dialogue box: the cells right of the portrait
+/// divider, below the speaker's name.
+pub const DIALOGUE_TEXT_AREA: TextArea = TextArea {
+    columns: 22,
+    rows: 2,
+};
 
 /// Draws windows from a frame tileset and its palette.
 pub struct WindowPainter {

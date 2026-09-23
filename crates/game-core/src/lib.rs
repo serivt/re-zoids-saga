@@ -6,4 +6,4 @@ pub mod window;
 
 pub use sprite::draw_sprite;
 pub use text::TextPainter;
-pub use window::WindowPainter;
+pub use window::{DIALOGUE_TEXT_AREA, WindowPainter};

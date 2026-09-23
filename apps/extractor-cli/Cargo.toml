@@ -6,6 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+game-core.workspace = true
+localization.workspace = true
 anyhow = "1.0.104"
 extraction.workspace = true
 

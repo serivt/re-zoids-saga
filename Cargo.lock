@@ -88,6 +88,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "extraction",
+ "game-core",
+ "localization",
 ]
 
 [[package]]
@@ -158,6 +160,7 @@ dependencies = [
  "game-legacy",
  "game-saga",
  "gba-runtime",
+ "localization",
  "platform",
  "platform-sdl3",
 ]

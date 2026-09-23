@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use extraction::{Identification, Title};
-use game_core::{TextPainter, WindowPainter, draw_sprite};
+use game_core::{DIALOGUE_TEXT_AREA, TextPainter, WindowPainter, draw_sprite};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
+use localization::monospace;
 use platform::{Display, Event, Frame, Rgb};
 use platform_sdl3::Sdl3Display;
 
@@ -118,7 +119,9 @@ fn render_string(rom: &[u8], title: Title, string_id: &str) -> Result<Frame> {
     let text = messages.first().map(String::as_str).unwrap_or_default();
     let (speaker, body) = text.split_once('\n').unwrap_or((text, ""));
     painter.draw(&mut frame, SPEAKER_X, SPEAKER_Y, speaker, window.palette());
-    painter.draw(&mut frame, SPEAKER_X, TEXT_Y, body, window.palette());
+    let layout = DIALOGUE_TEXT_AREA.layout(body, monospace);
+    let visible = layout.visible_lines().join("\n");
+    painter.draw(&mut frame, SPEAKER_X, TEXT_Y, &visible, window.palette());
     Ok(frame)
 }
 

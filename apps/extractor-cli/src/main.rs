@@ -5,8 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use extraction::{StringTable, Title};
 
-const USAGE: &str =
-    "usage:\n  extractor-cli identify <rom-path>\n  extractor-cli dump-text <rom-path> [table]";
+const USAGE: &str = "usage:\n  extractor-cli identify <rom-path>\n  extractor-cli dump-text <rom-path> [table]\n  extractor-cli check-layout <rom-path> [table]";
 
 fn main() -> Result<()> {
     let mut args = std::env::args_os().skip(1);
@@ -17,6 +16,10 @@ fn main() -> Result<()> {
         Some("dump-text") => {
             let table = args.next().and_then(|s| s.into_string().ok());
             dump_text(&rom_path, table.as_deref())
+        }
+        Some("check-layout") => {
+            let table = args.next().and_then(|s| s.into_string().ok());
+            check_layout(&rom_path, table.as_deref())
         }
         _ => bail!(USAGE),
     }
@@ -48,6 +51,37 @@ fn dump_text(rom_path: &Path, table_name: Option<&str>) -> Result<()> {
             println!();
         }
     }
+    Ok(())
+}
+
+fn check_layout(rom_path: &Path, table_name: Option<&str>) -> Result<()> {
+    let rom = read_rom(rom_path)?;
+    let identification = extraction::identify(&rom)?;
+    let area = game_core::DIALOGUE_TEXT_AREA;
+    let mut messages = 0;
+    let mut overflowing = 0;
+    for table in string_tables(identification.title, table_name)? {
+        for string in table.read(&rom)? {
+            for (index, text) in string.script.message_texts().iter().enumerate() {
+                messages += 1;
+                let body = text.split_once('\n').map_or("", |(_, body)| body);
+                let layout = area.layout(body, localization::monospace);
+                if layout.overflows() {
+                    overflowing += 1;
+                    println!(
+                        "{}#{index}: {} lines: {:?}",
+                        string.id,
+                        layout.lines.len(),
+                        layout.lines
+                    );
+                }
+            }
+        }
+    }
+    println!(
+        "{messages} messages, {overflowing} need more than {} lines of {} cells",
+        area.rows, area.columns
+    );
     Ok(())
 }
 
