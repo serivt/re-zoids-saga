@@ -6,10 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+extraction.workspace = true
 platform-sdl3.workspace = true
 game-saga.workspace = true
 game-legacy.workspace = true
 game-fuzors.workspace = true
+anyhow = "1.0.104"
 
 [lints]
 workspace = true
