@@ -16,7 +16,7 @@ loaded, plus the BIOS decompression log. Implemented in `crates/extraction/src/s
 | 8 | Pointer to an LZ77 block of background palettes (480 bytes = palettes 0–14) |
 | 12 | Pointer to an LZ77 block of 4bpp tiles shared by the map and the backdrop |
 | 16 | Pointer to an LZ77 block with the map: `width × height` 16-bit tilemap entries |
-| 20 | Pointer to an LZ77 block with one nibble per map cell (collision-like; not modeled yet) |
+| 20 | Pointer to an LZ77 block of 16-bit attributes, one per 16×16 metatile (`width/2 × height/2`); bit 15 blocks walking |
 
 The first room of the game is record 2: backdrop `0x0806B60C`, 96×40 cells, palettes
 `0x0806EA68`, tiles `0x0806EB18` (416 tiles), map `0x080713F0`, attributes `0x08071DC4`.

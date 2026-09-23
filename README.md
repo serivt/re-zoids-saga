@@ -19,8 +19,8 @@ Early. The workspace and layer boundaries are in place: the launcher identifies 
 string table of Zoids Saga (names, items, dialogue, battle quotes, menus), and the
 original 8×16 font, the text window (LZ77 tiles + palette) and the character
 portraits are extracted and drawn in an SDL3 window, with text wrapped the way the
-game does it, over the first room's scrolling map, backdrop and player sprite. No game
-runs yet.
+game does it. The first room is walkable: arrows move the player with the original
+speed, collision, camera and walking animation.
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements
@@ -37,10 +37,12 @@ See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 cargo build
 ```
 
-Identify a ROM and show a script string rendered with the game's font (any
-`<table>_<index>` id; `--dump frame.ppm` writes the frame instead of opening a window):
+Walk the first room (arrows move, Esc quits), or show a script string in its dialogue
+box (any `<table>_<index>` id); `--dump frame.ppm` writes a frame instead of opening a
+window:
 
 ```bash
+cargo run -p launcher -- path/to/rom.gba
 cargo run -p launcher -- path/to/rom.gba dialogue_00003
 ```
 

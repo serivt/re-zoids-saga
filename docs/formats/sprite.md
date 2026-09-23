@@ -20,15 +20,17 @@ the copied frames. Implemented in `crates/extraction/src/saga.rs` (`sprite_sheet
 | 24 | Pointer to the palette: 32 raw bytes, 16 BGR555 colors |
 | 28 | Pointer to the frames: uncompressed 4bpp tiles, `frames × tiles per frame × 32` bytes |
 
-The player is `ch00` (record 152): 32 frames of 32×32 pixels at `0x08205C7C`, palette at
-`0x08205C5C`. Frames are single sprites in one-dimensional mapping: 16 tiles in four rows
-of four.
+Tags are not unique: `mz25` names records 150 and 151. The player's map sprite is
+record 151 (`mz25`, 49 frames of 32×32 at `0x08202C5C`, palette at `0x08202C3C`);
+`ch00` (record 152) is another character. Frames are single sprites in one-dimensional
+mapping: 16 tiles in four rows of four. Idle images `direction × 3 + {0, 1, 0, 2}`
+repeat the same picture; walking images `12 + direction × 3 + {1, 2}` are the two
+stepping poses.
 
 ## How the game uses them
 
-At scene start the game copies frame 0 of each visible character into OBJ VRAM with
-`CpuSet` (the player to `0x06010200`, tiles 16–31) and the palette to an OBJ palette
-bank (the player to bank 1). Walking replaces the frame in place from the sheet:
-frames 6–8 and 15–17 were seen while the player moved in the first room. The sprite is
-a single 32×32 OBJ at screen (88, 64) in the first room, priority 2, palette index 0
-transparent.
+At scene start the game copies the current image of each visible character into OBJ
+VRAM with `CpuSet` (the player to `0x06010000`, tiles 0–15) and the palette to an OBJ
+palette bank. Walking replaces the image in place from the sheet every four frames.
+The player is a single 32×32 OBJ, palette index 0 transparent, at screen (88, 32) when
+the first room starts.
