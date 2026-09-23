@@ -61,15 +61,22 @@ Core architectural rules:
 
 Localization is a first-class subsystem, not an afterthought:
 
-- All user-visible text is stored as external localized data keyed by stable string IDs, e.g.:
-  ```json
-  { "id": "dialogue_00123", "ja": "…", "en": "…", "es": "…" }
-  ```
+- Translations live outside this repository, on the project's Weblate, as gettext PO
+  files. Every message is keyed by a stable ID (script table, string index and the
+  message's offset in the string, e.g. `dialogue/40/0x2e`); see
+  [docs/translation.md](docs/translation.md).
+- The translation template is generated from the player's own ROM by the launcher
+  (`--export-template`) and uploaded to Weblate; the original Japanese text is
+  copyrighted ROM content and is never committed, neither as a template nor inside a
+  PO file.
+- Players download the PO file of their language and hand it to the launcher
+  (`--translation`); messages it covers replace the ROM's text at run time, the rest
+  stays Japanese.
 - Internal text encoding is **UTF-8/Unicode** everywhere. Original ROM text encodings are converted at extraction time.
 - Text layout (line wrapping, box fitting) is computed dynamically by the engine per language and font — never pre-baked into the strings.
-- Fonts are modern TTF/OTF assets organized per script (latin, japanese, symbols), with fallback support.
+- Fonts: the ROM's font for now (Latin letters through their full-width forms); modern TTF/OTF assets organized per script (latin, japanese, symbols) with fallback support are future work.
 - Every localizable category (dialogue, menus, items, Zoids, attacks, characters, locations, tutorials) uses the same pipeline.
-- Localization completeness is validated in CI: missing translations, overflow against layout constraints, and invalid UTF-8 fail the build.
+- Validation of a translation against the windows' layout constraints is future work.
 
 ## Technology Stack
 
@@ -133,10 +140,6 @@ re-zoids-saga/
 │       ├── japanese/
 │       └── symbols/
 │
-├── locales/                     # this project's own translations, keyed by string ID
-│   ├── en/
-│   └── es/
-│
 ├── data/                        # gitignored — local development workspace for extracted
 │                                # game databases; at runtime the launcher caches extracted
 │                                # data in the OS user-data directory instead
@@ -155,7 +158,7 @@ Placement rules:
 - **`crates/games/*` crates stay thin.** Anything used by more than one title moves down into `game-core`. A game crate holds only title-specific behavior, data schemas, and wiring.
 - **`apps/*` are composition roots.** Binaries wire crates together and hold no game or engine logic of their own.
 - **`crates/extraction` owns the ROM-to-database pipeline as a library.** The launcher calls it at load time; `extractor-cli` is only a development wrapper around it. Extraction must be fast enough for a first-launch experience and idempotent, so cached databases can be invalidated purely by ROM hash and extractor version.
-- **`locales/` holds only original translations authored for this project** (English, Spanish, and any future language). Original Japanese text is copyrighted ROM content: it is produced by extraction on the user's machine and is never committed.
+- **No translation data is committed.** Templates and PO files live on Weblate and on players' machines; the repository holds only the exporter and the loader. Original Japanese text is copyrighted ROM content: it is produced by extraction on the user's machine and is never committed.
 - **`data/` is always gitignored.** Nothing derived from a ROM enters version control — including test fixtures, which must be synthetic. End users never see this directory; their extracted data lives in the OS user-data directory managed by the launcher.
 - Dependency direction is strictly downward: `apps → games → game-core → (gba-runtime, localization, extraction, formats) → platform`. A crate importing from a layer above it is an architecture violation.
 
@@ -186,7 +189,7 @@ Placement rules:
 
 - Every non-trivial module has unit tests. Reverse-engineered format parsers must have tests with synthetic fixtures (never real ROM data committed to the repo).
 - The GBA runtime components (PPU, APU, memory) are tested against known-good expected outputs from synthetic inputs.
-- Localization validation runs as part of the test suite.
+- The translation loader and template exporter are covered by tests with synthetic data.
 - Run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` before considering any change complete.
 
 ## Git Conventions
