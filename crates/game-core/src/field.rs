@@ -168,6 +168,15 @@ impl Player {
     }
 }
 
+/// An order given to a character by a cutscene.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NpcCommand {
+    /// Turn without moving.
+    Face(Direction),
+    /// Turn and walk one metatile, when the cell ahead is free.
+    Step(Direction),
+}
+
 /// A character standing on the map.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Npc {
@@ -384,9 +393,6 @@ impl Field {
 
     fn wander(&mut self, index: usize) {
         let npc = &self.npcs[index];
-        if !npc.wanders {
-            return;
-        }
         if npc.step > 0 {
             let npc = &mut self.npcs[index];
             npc.step += 1;
@@ -397,12 +403,23 @@ impl Field {
             }
             return;
         }
+        if !npc.wanders {
+            return;
+        }
         if npc.timer > 0 {
             self.npcs[index].timer -= 1;
             return;
         }
         self.rng.seed(self.frame);
         let direction = random_direction(self.rng.next(self.frame));
+        if !self.start_npc_step(index, direction) {
+            self.npcs[index].timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
+        }
+    }
+
+    /// Turns character `index` toward `direction` and starts a step when
+    /// the cell ahead is free; returns whether it stepped.
+    fn start_npc_step(&mut self, index: usize, direction: Direction) -> bool {
         let (dx, dy) = direction.delta();
         let (column, row) = self.npcs[index].footing();
         let target = (column.checked_add_signed(dx), row.checked_add_signed(dy));
@@ -417,9 +434,59 @@ impl Field {
             npc.row = npc.row.saturating_add_signed(dy);
             npc.step = 1;
             npc.animation_id = WALK_ANIMATION_BASE + direction.index();
-        } else {
-            npc.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
         }
+        free
+    }
+
+    /// Gives character `index` a cutscene order; returns whether a step
+    /// started (or, for a turn, whether the character exists).
+    pub fn command_npc(&mut self, index: usize, command: NpcCommand) -> bool {
+        if index >= self.npcs.len() {
+            return false;
+        }
+        match command {
+            NpcCommand::Face(direction) => {
+                self.npcs[index].face(direction);
+                true
+            }
+            NpcCommand::Step(direction) => self.start_npc_step(index, direction),
+        }
+    }
+
+    /// Whether character `index` is standing still (or absent).
+    #[must_use]
+    pub fn npc_idle(&self, index: usize) -> bool {
+        self.npcs.get(index).is_none_or(|npc| npc.step == 0)
+    }
+
+    /// Adds a character loaded from `rom` at `(column, row)`; returns its
+    /// index.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError`] when the sprite cannot be read.
+    pub fn spawn_npc(
+        &mut self,
+        rom: &[u8],
+        sprite: usize,
+        (column, row): (usize, usize),
+        facing: Direction,
+    ) -> Result<usize, FieldError> {
+        let sheet = saga::sprite_sheet(rom, sprite)?;
+        self.npcs.push(Npc {
+            column,
+            row,
+            sheet,
+            animation_id: facing.index(),
+            animation: 0,
+            dialogue: None,
+            turns: true,
+            wanders: false,
+            facing,
+            timer: 0,
+            step: 0,
+        });
+        Ok(self.npcs.len() - 1)
     }
 
     fn blocked_for_npc(&self, index: usize, column: usize, row: usize) -> bool {
@@ -840,6 +907,25 @@ mod tests {
         }
         assert_eq!(field.npcs[0].facing, Direction::Down);
         assert_eq!(field.npcs[0].timer, 0);
+    }
+
+    #[test]
+    fn cutscene_commands_turn_and_step_characters() {
+        let mut field = field(8, 8);
+        field.player.column = 6;
+        field.player.row = 5;
+        field.npcs.push(npc(3, 3, None, true));
+        assert!(field.command_npc(0, NpcCommand::Face(Direction::Left)));
+        assert_eq!(field.npcs[0].facing, Direction::Left);
+        assert!(!field.command_npc(0, NpcCommand::Step(Direction::Up)) || field.npcs[0].step == 1);
+        assert!(field.command_npc(0, NpcCommand::Step(Direction::Right)) || field.npcs[0].step > 0);
+        assert!(!field.npc_idle(0));
+        for _ in 0..NPC_STEP_FRAMES {
+            field.update(Input::default());
+        }
+        assert!(field.npc_idle(0));
+        assert!(!field.command_npc(5, NpcCommand::Face(Direction::Up)));
+        assert!(field.npc_idle(5));
     }
 
     #[test]
