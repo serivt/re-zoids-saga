@@ -1,6 +1,9 @@
 //! ROM layout of Zoids Saga (Japan, Rev 1).
 
+use formats::bgr555::{PALETTE_LEN, parse_palette};
 use formats::font::{FontError, Glyph, GlyphIndex, RANGE_ENTRY_LEN, TILE_LEN};
+use formats::lz77::Lz77Error;
+use formats::tile::Tileset;
 use thiserror::Error;
 
 use crate::string_table::StringTable;
@@ -79,4 +82,49 @@ pub fn font(rom: &[u8]) -> Result<(GlyphIndex, Glyph), FontReadError> {
 
 fn tile(rom: &[u8], offset: usize) -> Option<&[u8; TILE_LEN]> {
     rom.get(offset..offset + TILE_LEN)?.try_into().ok()
+}
+
+const WINDOW_TILESET_OFFSET: usize = 0x003B_9428;
+const WINDOW_PALETTE_OFFSET: usize = 0x006B_F9F8;
+
+/// Tiles and palette of the text window frame.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WindowSkin {
+    /// The 64 frame tiles, in the order the game loads them into VRAM.
+    pub tiles: Tileset,
+    /// The 16-color BGR555 palette the frame and the text use.
+    pub palette: [u16; 16],
+}
+
+/// Why the window skin could not be read.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum WindowSkinError {
+    /// The ROM is too short to hold the skin data.
+    #[error("ROM of {len} bytes is too short for the window skin")]
+    TooShort {
+        /// ROM length.
+        len: usize,
+    },
+    /// The tileset block is not valid LZ77.
+    #[error(transparent)]
+    Tiles(#[from] Lz77Error),
+}
+
+/// Reads the text window's frame tileset (LZ77-compressed in the ROM) and its palette.
+///
+/// # Errors
+///
+/// Returns [`WindowSkinError`] when the ROM is too short or the tileset does not decompress.
+pub fn window_skin(rom: &[u8]) -> Result<WindowSkin, WindowSkinError> {
+    let too_short = || WindowSkinError::TooShort { len: rom.len() };
+    let compressed = rom.get(WINDOW_TILESET_OFFSET..).ok_or_else(too_short)?;
+    let (tile_bytes, _) = formats::lz77::decompress(compressed)?;
+    let palette = rom
+        .get(WINDOW_PALETTE_OFFSET..WINDOW_PALETTE_OFFSET + PALETTE_LEN)
+        .and_then(parse_palette)
+        .ok_or_else(too_short)?;
+    Ok(WindowSkin {
+        tiles: Tileset::from_4bpp(&tile_bytes),
+        palette,
+    })
 }

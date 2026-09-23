@@ -144,12 +144,11 @@ impl Script {
         }
     }
 
-    /// The readable text of every message, messages separated by a blank
-    /// line, with `{name}` and `{var}` placeholders.
+    /// The readable text of each message, in order, with `{name}` and
+    /// `{var}` placeholders.
     #[must_use]
-    pub fn plain_text(&self) -> String {
-        let messages: Vec<String> = self
-            .elements
+    pub fn message_texts(&self) -> Vec<String> {
+        self.elements
             .iter()
             .filter_map(|element| match element {
                 Element::Message(pieces) => Some(message_text(pieces)),
@@ -159,8 +158,13 @@ impl Script {
                 | Element::Switch { .. }
                 | Element::Opcode { .. } => None,
             })
-            .collect();
-        messages.join("\n\n")
+            .collect()
+    }
+
+    /// The readable text of every message, messages separated by a blank line.
+    #[must_use]
+    pub fn plain_text(&self) -> String {
+        self.message_texts().join("\n\n")
     }
 }
 

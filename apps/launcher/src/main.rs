@@ -4,15 +4,21 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use extraction::{Identification, Title};
-use game_core::TextPainter;
-use gba_runtime::ppu::{Palette, SCREEN_HEIGHT, SCREEN_WIDTH};
+use game_core::{TextPainter, WindowPainter};
+use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{Display, Event, Frame, Rgb};
 use platform_sdl3::Sdl3Display;
 
 const USAGE: &str = "usage: launcher <rom-path> [string-id] [--dump <frame.ppm>]";
 const DEFAULT_STRING_ID: &str = "dialogue_00003";
 const WINDOW_SCALE: u32 = 3;
-const TEXT_MARGIN: i32 = 8;
+const BOX_ROW: usize = 12;
+const BOX_ROWS: usize = 8;
+const BOX_COLUMNS: usize = 30;
+const PORTRAIT_DIVIDER_COLUMN: usize = 7;
+const SPEAKER_X: i32 = 64;
+const SPEAKER_Y: i32 = 104;
+const TEXT_Y: i32 = 120;
 
 fn main() -> Result<()> {
     let options = Options::parse()?;
@@ -89,25 +95,18 @@ fn render_string(rom: &[u8], title: Title, string_id: &str) -> Result<Frame> {
         .with_context(|| format!("{table_name} has {} strings", strings.len()))?;
     let (glyphs, fallback) = extraction::saga::font(rom)?;
     let painter = TextPainter::new(rom, glyphs, Some(fallback));
+    let skin = extraction::saga::window_skin(rom)?;
+    let window = WindowPainter::new(skin.tiles, &skin.palette);
 
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::new(16, 24, 48));
-    painter.draw(
-        &mut frame,
-        TEXT_MARGIN,
-        TEXT_MARGIN,
-        &string.script.plain_text(),
-        &text_palette(),
-    );
+    window.draw_window(&mut frame, 0, BOX_ROW, BOX_COLUMNS, BOX_ROWS);
+    window.draw_divider(&mut frame, PORTRAIT_DIVIDER_COLUMN, BOX_ROW, BOX_ROWS);
+    let messages = string.script.message_texts();
+    let text = messages.first().map(String::as_str).unwrap_or_default();
+    let (speaker, body) = text.split_once('\n').unwrap_or((text, ""));
+    painter.draw(&mut frame, SPEAKER_X, SPEAKER_Y, speaker, window.palette());
+    painter.draw(&mut frame, SPEAKER_X, TEXT_Y, body, window.palette());
     Ok(frame)
-}
-
-fn text_palette() -> Palette {
-    let mut colors = [Rgb::new(16, 24, 48); 16];
-    colors[2] = Rgb::new(72, 80, 104);
-    colors[3] = Rgb::new(128, 136, 160);
-    colors[4] = Rgb::new(184, 192, 208);
-    colors[15] = Rgb::new(248, 248, 248);
-    Palette::new(colors)
 }
 
 fn show(title: &str, frame: &Frame) -> Result<()> {
