@@ -19,7 +19,7 @@ Early. The workspace and layer boundaries are in place: the launcher identifies 
 string table of Zoids Saga (names, items, dialogue, battle quotes, menus), and the
 original 8×16 font, the text window (LZ77 tiles + palette) and the character
 portraits are extracted and drawn in an SDL3 window, with text wrapped the way the
-game does it. No game runs yet.
+game does it, over the first room's scrolling map and backdrop. No game runs yet.
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements
