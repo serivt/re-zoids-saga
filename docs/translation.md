@@ -20,7 +20,8 @@ files translators produce are downloaded by each player and handed to the launch
 
    By default it covers the title menu, the name entry and dialogue strings 30–41 (the
    helpers every conversation shares and the opening). Any tables and ranges can be
-   named instead: `title`, `name-entry`, `pause-menu`, `dialogue` or `dialogue:30-41`.
+   named instead: `title`, `name-entry`, `pause-menu`, `dialogue` or `dialogue:30-41`,
+   and the guides' `system`, `zoid-guide` and `character-guide` (see [guide.md](guide.md)).
 2. The template is uploaded to Weblate as the source of a gettext component; every
    language is a PO file with the same keys.
 3. A player downloads the PO file of their language and starts the game with it:
@@ -91,7 +92,8 @@ on a line, in Latin letters of average width:
 When a translation is loaded the game walks each translated string (and the
 strings it calls) to find the window every message lands in, and enlarges the windows
 whose translated lines do not fit: a window grows to the widest line plus its margins
-(and, for a menu, to the number of choices), keeping its center where it was and
+(and, for a menu, to the number of choices, unless the original menu already had more
+lines than rows and scrolls), keeping its center where it was and
 staying on screen. A window is not enlarged when the larger one would cover another
 window open at the same time that the original did not already cover. The launcher
 prints one line per message that cannot fit even a screen-wide window or would cover

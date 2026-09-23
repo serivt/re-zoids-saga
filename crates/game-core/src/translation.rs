@@ -145,6 +145,9 @@ struct Placement {
     id: u8,
     window: Opened,
     others: Vec<Opened>,
+    /// Lines of the original message: a menu whose original already had
+    /// more lines than rows scrolls, so its window keeps its height.
+    source_lines: usize,
 }
 
 impl Opened {
@@ -274,7 +277,8 @@ impl Translation {
                 usize::from(placement.id),
             );
             let is_menu = window.kind & MENU_KIND != 0;
-            let rows_needed = if is_menu { rows } else { 0 };
+            let scrolls = placement.source_lines > window.rows();
+            let rows_needed = if is_menu && !scrolls { rows } else { 0 };
             if pixels <= window.columns() * CELL_WIDTH && rows_needed <= window.rows() {
                 continue;
             }
@@ -547,6 +551,7 @@ impl<'a> Walker<'a> {
     fn place(&mut self, index: usize, offset: usize, mut at: usize) -> usize {
         let mut id = self.current;
         let mut leading = true;
+        let mut source_lines = 1;
         loop {
             let Ok((step, next)) = decode_message_step(self.rom, at) else {
                 return at;
@@ -555,6 +560,10 @@ impl<'a> Walker<'a> {
             match step {
                 MessageStep::SwitchWindow(target) if leading => id = target,
                 MessageStep::End => break,
+                MessageStep::LineBreak => {
+                    source_lines += 1;
+                    leading = false;
+                }
                 _ => leading = false,
             }
         }
@@ -571,6 +580,7 @@ impl<'a> Walker<'a> {
                     id,
                     window: *window,
                     others,
+                    source_lines,
                 },
             );
         }
@@ -977,6 +987,28 @@ mod tests {
             template(&GameData::new(&rom), &[Scope::parse("nowhere").unwrap()]),
             Err(TranslationError::NoSuchTable(_))
         ));
+    }
+
+    #[test]
+    fn a_menu_that_already_scrolled_only_grows_wider() {
+        let mut script = vec![0x01, 0, 0x21, 10, 10, 9, 8, 4, 0x20];
+        script.extend([
+            0xA0, 0x82, 0x0D, 0xA0, 0x82, 0x0D, 0xA0, 0x82, 0x0D, 0xA0, 0x82,
+        ]);
+        script.extend([0x1D, 0x04, 0xFF, 0x22]);
+        let po = "msgctxt \"title/0/0x8\"\nmsgid \"\"\nmsgstr \"Nueva partida\\nB\\nC\\nD\"\n";
+        let mut translation = Translation::from_po(po).unwrap();
+        let mut rom = vec![0; 0x6C_0500 + 32];
+        rom[TITLE_MENU_SCRIPT_OFFSET..TITLE_MENU_SCRIPT_OFFSET + script.len()]
+            .copy_from_slice(&script);
+        let problems = translation
+            .fit(&GameData::new(&rom), &TextMetrics::default())
+            .unwrap();
+        assert!(problems.is_empty());
+        assert_eq!(
+            translation.fit_window("title", 0, 0, 0x21, (10, 10, 9, 8)),
+            (6, 10, 17, 8)
+        );
     }
 
     #[test]
