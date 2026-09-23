@@ -1123,7 +1123,7 @@ pub fn sprite_sheet(rom: &[u8], id: usize) -> Result<SpriteSheet, SpriteSheetErr
     })
 }
 
-fn read_animations(rom: &[u8], table: usize) -> Option<Vec<Vec<AnimationStep>>> {
+pub(crate) fn read_animations(rom: &[u8], table: usize) -> Option<Vec<Vec<AnimationStep>>> {
     let mut animations = Vec::new();
     for index in 0..SPRITE_ANIMATIONS_MAX {
         let at = table + index * 4;

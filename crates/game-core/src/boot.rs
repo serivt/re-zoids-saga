@@ -238,8 +238,33 @@ pub enum TitleChoice {
     NewGame,
     /// つづきから: continue a saved game.
     Continue,
-    /// オプション: options (not available yet).
-    Options,
+    /// オプション, ゾイド図鑑: the Zoid guide.
+    ZoidGuide,
+    /// オプション, キャラクター図鑑: the character guide.
+    CharacterGuide,
+    /// オプション, 通信対戦: a battle over the link cable (not available).
+    CableDuel,
+    /// オプション, Ｚｉデータ受け渡し: trading Zi data over the link cable
+    /// (not available).
+    ZiExchange,
+}
+
+impl TitleChoice {
+    /// The choice the title script stores in var1: 0 and 1 from the first
+    /// menu, the option's line plus 4 from the second, except 8 and 11 for
+    /// the link-cable options.
+    #[must_use]
+    pub fn from_script(value: u16) -> Option<Self> {
+        match value {
+            0 => Some(Self::NewGame),
+            1 => Some(Self::Continue),
+            4 => Some(Self::ZoidGuide),
+            5 => Some(Self::CharacterGuide),
+            8 => Some(Self::CableDuel),
+            11 => Some(Self::ZiExchange),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,11 +349,7 @@ impl TitleScreen {
             TitleState::Menu => {
                 if self.runner.update(rom, input, windows)? {
                     self.state = TitleState::Waiting;
-                    return Ok(Some(match self.runner.saved_vars()[1] {
-                        0 => TitleChoice::NewGame,
-                        1 => TitleChoice::Continue,
-                        _ => TitleChoice::Options,
-                    }));
+                    return Ok(TitleChoice::from_script(self.runner.saved_vars()[1]));
                 }
             }
         }

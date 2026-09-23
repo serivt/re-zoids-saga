@@ -136,7 +136,8 @@ first.
 - `game_core::GameData` is the data provider: every asset and table the game reads
   comes through it by identifier (map, scene, sprite, portrait, font, skin, boot
   graphics, wallpaper, experience table, map music, script tables, sound numbers, the
-  save layout and the new-game state).
+  save layout and the new-game state, the guides' pictures, parts and character
+  entries).
   Its `bytes()` is the one deliberate escape, used by the script interpreter and the
   sound driver, which address the image directly.
 - `game_core::extension` holds `Event`, `GameSound`, the `Extension` trait (every

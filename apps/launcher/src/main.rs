@@ -13,7 +13,7 @@ use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{AudioOut, Display, Event, Frame, Rgb};
 use platform_sdl3::{FileStorage, Sdl3Display};
 
-const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, Esc quits); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, dialogue), by default the title, the name entry and dialogue 30-41";
+const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R, Esc quits); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, dialogue, system, zoid-guide, character-guide), by default the title, the name entry and dialogue 30-41";
 const DEFAULT_TEMPLATE_SCOPES: [&str; 3] = ["title", "name-entry", "dialogue:30-41"];
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_MAP: usize = extraction::saga::FIRST_ROOM_MAP;

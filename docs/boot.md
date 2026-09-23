@@ -38,7 +38,8 @@ subtitle and the copyright lines; OBJ tiles 0–111 are the 4bpp block from tile
 fade, and START again runs the menu script at ROM `0x6C04FE`: reset, open menu window 0
 at (10, 10) 9×8 tiles, the three choices, a menu, then a switch on var1 (0 new game,
 1 continue, 2 options). The script ends by storing the variables and resetting the text
-system, which clears them, so the game reads the choice from the stored copy.
+system, which clears them, so the game reads the choice from the stored copy. The
+second menu's options and the guides they open are described in [guide.md](guide.md).
 
 ## Name entry
 

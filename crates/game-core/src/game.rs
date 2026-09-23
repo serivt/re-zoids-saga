@@ -31,6 +31,7 @@ use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::data::GameData;
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Direction, Field, FieldError, FieldEvent, NpcCommand};
+use crate::guide::{Guide, GuideError, GuideKind};
 use crate::menu::{MenuStep, Party, PauseMenu};
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptError, ScriptRunner};
@@ -151,6 +152,8 @@ pub enum Stage {
     Menu,
     /// Between the title and a continued game.
     Continuing,
+    /// The Zoid or character guide.
+    Guide,
 }
 
 /// Why the game could not go on.
@@ -180,6 +183,9 @@ pub enum GameError {
     /// The save layout or the new-game state could not be read.
     #[error(transparent)]
     SaveData(#[from] SaveDataError),
+    /// A guide failed.
+    #[error(transparent)]
+    Guide(#[from] GuideError),
 }
 
 enum Screen {
@@ -191,6 +197,7 @@ enum Screen {
     Field,
     Menu(PauseMenu),
     Continuing(Continuing),
+    Guide(Box<Guide>),
 }
 
 /// Where continuing is: the title held then fading out, black (with the
@@ -400,6 +407,7 @@ impl<'rom> Game<'rom> {
             Screen::Field => Stage::Field,
             Screen::Menu(_) => Stage::Menu,
             Screen::Continuing(_) => Stage::Continuing,
+            Screen::Guide(_) => Stage::Guide,
         }
     }
 
@@ -451,6 +459,10 @@ impl<'rom> Game<'rom> {
                 match title.update(rom, input, &mut self.windows)? {
                     Some(TitleChoice::NewGame) => self.new_game(input)?,
                     Some(TitleChoice::Continue) => self.begin_continue(),
+                    Some(TitleChoice::ZoidGuide) => self.open_guide(GuideKind::Zoids)?,
+                    Some(TitleChoice::CharacterGuide) => {
+                        self.open_guide(GuideKind::Characters)?;
+                    }
                     _ => {}
                 }
             }
@@ -500,6 +512,14 @@ impl<'rom> Game<'rom> {
                 }
             },
             Screen::Continuing(_) => self.update_continue(input)?,
+            Screen::Guide(guide) => {
+                guide.update(&self.data, input, &mut self.windows)?;
+                if guide.is_closed() {
+                    self.windows.close_window(None);
+                    self.screen = Screen::Title(TitleScreen::new(&self.data)?);
+                    Self::emit(&self.extensions, &Event::TitleShown);
+                }
+            }
         }
         for sound in self.windows.take_sounds() {
             self.sound.play(usize::from(sound))?;
@@ -546,6 +566,27 @@ impl<'rom> Game<'rom> {
             &self.extensions,
             GameSound::NameEntryMusic,
         )?;
+        Ok(())
+    }
+
+    /// Leaves the title for a guide, which reads what the player has seen
+    /// from the save, or from a new game's state when there is none.
+    fn open_guide(&mut self, kind: GuideKind) -> Result<(), GameError> {
+        let image = self
+            .storage
+            .as_ref()
+            .and_then(|storage| storage.load().ok().flatten());
+        let state = match self.save.read(image).game() {
+            Some(saved) => saved.state.clone(),
+            None => self.data.new_game_state()?,
+        };
+        let screen = std::mem::replace(&mut self.screen, Screen::Loading(0));
+        let Screen::Title(title) = screen else {
+            self.screen = screen;
+            return Ok(());
+        };
+        self.windows.close_window(None);
+        self.screen = Screen::Guide(Box::new(Guide::new(&self.data, kind, state, title)?));
         Ok(())
     }
 
@@ -982,6 +1023,7 @@ impl<'rom> Game<'rom> {
                 self.windows.draw(frame, &self.skin, &self.painter);
             }
             Screen::Menu(menu) => menu.draw(frame, &self.windows, &self.skin, &self.painter),
+            Screen::Guide(guide) => guide.draw(frame, &self.windows, &self.skin, &self.painter),
             Screen::Continuing(continuing) => {
                 match continuing.phase {
                     ContinuePhase::Holding(_) | ContinuePhase::FadingOut(_) => {

@@ -5,6 +5,7 @@ pub mod data;
 pub mod extension;
 pub mod field;
 pub mod game;
+pub mod guide;
 pub mod menu;
 pub mod rng;
 pub mod save;

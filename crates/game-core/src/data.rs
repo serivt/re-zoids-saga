@@ -8,6 +8,10 @@ use extraction::saga::{
     PauseWallpaper, Portrait, PortraitError, Scene, SceneError, SpriteSheet, SpriteSheetError,
     TitleGraphics, Warp, WindowSkin, WindowSkinError,
 };
+use extraction::saga_guide::{
+    self, CHARACTER_ENTRIES, CHARACTER_GUIDE_SCRIPTS, GuidePicture, SYSTEM_SCRIPTS,
+    ZOID_GUIDE_SCRIPTS, ZoidPart,
+};
 use extraction::saga_save::{self, SaveDataError};
 use extraction::string_table::StringTableError;
 use formats::SaveLayout;
@@ -178,6 +182,43 @@ impl<'rom> GameData<'rom> {
         saga_save::new_game_state(self.rom)
     }
 
+    /// The picture of Zoid `id` in the guide, if it has one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BootError`] when it cannot be read.
+    pub fn zoid_picture(&self, id: usize) -> Result<Option<GuidePicture>, BootError> {
+        saga_guide::zoid_picture(self.rom, id)
+    }
+
+    /// The backdrop behind Zoid `id` in the guide, if it has one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BootError`] when it cannot be read.
+    pub fn zoid_backdrop(&self, id: usize) -> Result<Option<GuidePicture>, BootError> {
+        saga_guide::zoid_backdrop(self.rom, id)
+    }
+
+    /// The parts the guide draws over Zoid `id`'s picture.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BootError`] when one cannot be read.
+    pub fn zoid_parts(&self, id: usize) -> Result<Vec<ZoidPart>, BootError> {
+        saga_guide::zoid_parts(self.rom, id)
+    }
+
+    /// Where every character's guide entry starts, in the order of the
+    /// save's character table.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`StringTableError`] when the table cannot be read.
+    pub fn character_entries(&self) -> Result<Vec<usize>, StringTableError> {
+        CHARACTER_ENTRIES.offsets(self.rom)
+    }
+
     /// The song a map's own code starts, if one is found.
     #[must_use]
     pub fn map_music(&self, map: usize) -> Option<usize> {
@@ -215,6 +256,11 @@ impl<'rom> GameData<'rom> {
             TITLE_TABLE => vec![saga::TITLE_MENU_SCRIPT_OFFSET],
             NAME_ENTRY_TABLE => saga::NAME_ENTRY_SCRIPTS.offsets(self.rom)?,
             PAUSE_MENU_TABLE => saga::PAUSE_MENU_SCRIPTS.offsets(self.rom)?,
+            name if name == SYSTEM_SCRIPTS.name => SYSTEM_SCRIPTS.offsets(self.rom)?,
+            name if name == ZOID_GUIDE_SCRIPTS.name => ZOID_GUIDE_SCRIPTS.offsets(self.rom)?,
+            name if name == CHARACTER_GUIDE_SCRIPTS.name => {
+                CHARACTER_GUIDE_SCRIPTS.offsets(self.rom)?
+            }
             DIALOGUE_TABLE => match saga::string_table(DIALOGUE_TABLE) {
                 Some(table) => table.offsets(self.rom)?,
                 None => return Ok(None),

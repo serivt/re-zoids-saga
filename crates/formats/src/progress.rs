@@ -31,6 +31,10 @@ const NAME: usize = 0xD18;
 const MONEY: usize = 0xD28;
 const MESSAGE_SPEED: usize = 0x3618;
 const SONG: usize = 0x3F0E;
+const ZOIDS_SEEN: usize = 0x33E2;
+const CHARACTERS: usize = 0x34A4;
+const CHARACTER_LEN: usize = 4;
+const CHARACTER_IN_GUIDE: u16 = 0x20;
 const HALF_WIDTH_FIRST: char = '!';
 const HALF_WIDTH_LAST: char = '~';
 const FULL_WIDTH_OFFSET: u32 = 0xFF01 - 0x21;
@@ -156,6 +160,23 @@ impl Progress {
     }
 }
 
+/// Whether the player has seen the Zoid of picture `id`: its byte in the
+/// table at `+0x33E2` is not zero.
+#[must_use]
+pub fn zoid_seen(state: &[u8], id: usize) -> bool {
+    state.get(ZOIDS_SEEN + id).is_some_and(|seen| *seen != 0)
+}
+
+/// Whether character `index` is in the character guide: bit `0x20` of its
+/// half-word in the four-byte records at `+0x34A4`.
+#[must_use]
+pub fn character_known(state: &[u8], index: usize) -> bool {
+    let at = CHARACTERS + index * CHARACTER_LEN;
+    state
+        .get(at..at + 2)
+        .is_some_and(|bits| u16::from_le_bytes([bits[0], bits[1]]) & CHARACTER_IN_GUIDE != 0)
+}
+
 fn check_len(state: &[u8]) -> Result<(), ProgressError> {
     if state.len() == STATE_LEN {
         Ok(())
@@ -256,6 +277,16 @@ mod tests {
         assert_eq!(state[0x3618], 4);
         assert_eq!(state[0x0D], 0x80);
         assert_eq!(state[0x100], 0xAB);
+    }
+
+    #[test]
+    fn tells_seen_zoids_and_known_characters() {
+        let mut state = block();
+        state[0x33E2 + 5] = 1;
+        state[0x34A4 + 4 * 2] = 0x23;
+        assert!(zoid_seen(&state, 5) && !zoid_seen(&state, 6));
+        assert!(character_known(&state, 2) && !character_known(&state, 3));
+        assert!(!zoid_seen(&state, STATE_LEN));
     }
 
     #[test]
