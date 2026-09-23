@@ -18,7 +18,8 @@ Early. The workspace and layer boundaries are in place: the launcher identifies 
 (cartridge header + SHA-1 against validated dumps), the script text codec decodes every
 string table of Zoids Saga (names, items, dialogue, battle quotes, menus), and the
 original 8×16 font, the text window (LZ77 tiles + palette) and the character
-portraits are extracted and drawn in an SDL3 window. No game runs yet.
+portraits are extracted and drawn in an SDL3 window, with text wrapped the way the
+game does it. No game runs yet.
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements
@@ -42,10 +43,12 @@ Identify a ROM and show a script string rendered with the game's font (any
 cargo run -p launcher -- path/to/rom.gba dialogue_00003
 ```
 
-Dump the game text (all tables, or one of `name`, `item`, `dialogue`, `battle`, `menu`):
+Dump the game text (all tables, or one of `name`, `item`, `dialogue`, `battle`, `menu`),
+or report the messages that overflow the dialogue box after wrapping:
 
 ```bash
 cargo run -p extractor-cli -- dump-text path/to/rom.gba dialogue
+cargo run -p extractor-cli -- check-layout path/to/rom.gba dialogue
 ```
 
 Before submitting a change:

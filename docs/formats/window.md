@@ -43,3 +43,17 @@ Indices into the decompressed tileset:
 The box spans the bottom 8 tile rows (rows 12–19) and the full 30 columns. A divider
 at column 7 separates the portrait (columns 1–6) from the text. The speaker name is
 drawn at pixel (64, 104), the text lines from (64, 120) every 16 pixels.
+
+## Text wrapping
+
+Source: the window callback's put-character case (ROM `0x0803E330`). Each window keeps a
+cursor column and row; before drawing a glyph, if the column has reached the window's
+text width the cursor moves to column 0 of the next row. Wrapping is therefore
+**character-level at the cell width, with no kinsoku rules**; rows clamp at 32. An
+explicit line break (`0x0D`, handler at `0x08040256`) moves to the next row and, when
+that row is past the visible ones, asks the window to scroll one line first.
+
+The story dialogue box gives the text 22 cells per row and 2 visible rows under the
+speaker's name (`game_core::DIALOGUE_TEXT_AREA`). 180 of the 4,931 dialogue messages
+need a third row after wrapping (`extractor-cli check-layout`); how the original shows
+them (scroll, extra row or truncation) is not yet observed.
