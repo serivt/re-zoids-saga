@@ -68,10 +68,12 @@ pub enum Instruction {
         /// Whether B also ends the wait.
         cancelable: bool,
     },
-    /// `0x06`: menu selection; not modeled, arguments kept.
+    /// `0x06`: let the player pick a line of the current window with the
+    /// cursor; A stores 1 in var0 and the line in var1, and with `0x10` in
+    /// the high nibble B ends it with var0 = 0.
     Menu {
-        /// The three argument bytes.
-        args: [u8; 3],
+        /// Mode byte as stored.
+        mode: u8,
     },
     /// `0x07`: jump by the entry the variable selects, relative to the opcode.
     Switch {
@@ -349,7 +351,7 @@ fn window_instruction(code: u8, cursor: &mut Cursor<'_>) -> Result<Instruction, 
             }
         }
         0x06 => Instruction::Menu {
-            args: cursor.bytes::<3>()?,
+            mode: cursor.byte()?,
         },
         0x0D => Instruction::Draw { id: cursor.byte()? },
         0x0E => Instruction::ClearWindow { id: cursor.byte()? },

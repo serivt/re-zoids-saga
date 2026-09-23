@@ -60,7 +60,7 @@ current text window, and runs strings recursively through calls. Jump offsets ar
 | `0x03` | 1 | Close window `a0` (`0xFF` = all) and redraw the others |
 | `0x04` | 1 | Present window `a0` (`0xFF` = all) |
 | `0x05` | 1 | Wait for a key: low nibble 0 accepts A (sets var0 = 1, plays sound `0x41`), `0x10` in the high nibble lets B end it with var0 = 0; the prompt blinks 20 frames off, 20 on |
-| `0x06` | 3 | Menu selection (not modeled) |
+| `0x06` | 1 | Menu on the current window: up/down move the cursor (sound `0x40`); A sets var0 = 1 and var1 = the line (sound `0x47`); with `0x10` in the high nibble B ends it with var0 = 0 |
 | `0x07` | table | Switch: `a0 & 7` selects entry `n` of a table of signed 16-bit offsets; the table has no length field and ends where its nearest target begins |
 | `0x08` | 2 | Jump |
 | `0x09` | 3 | var[`a0 & 7`] = `a1 | a2 << 8` |
