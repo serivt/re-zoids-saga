@@ -117,6 +117,34 @@ impl Window {
         self.columns() * CELL_WIDTH
     }
 
+    /// Whether putting a character `advance` pixels wide would scroll the
+    /// text up: the lines are full and a break is pending or the line has
+    /// no room left.
+    #[must_use]
+    pub fn would_scroll(&self, advance: usize) -> bool {
+        if self.lines.len() < self.rows().max(1) {
+            return false;
+        }
+        if self.pending_break {
+            return true;
+        }
+        let advance = match self.layout {
+            TextLayout::Cells => CELL_WIDTH,
+            TextLayout::Proportional => advance,
+        };
+        self.widths
+            .last()
+            .is_some_and(|width| width + advance > self.pixels())
+    }
+
+    /// Turns a page: the first line (a speaker's name) stays and the rest
+    /// is cleared, the next characters starting on a fresh line below it.
+    pub fn turn_page(&mut self) {
+        self.lines.truncate(1);
+        self.widths.truncate(1);
+        self.pending_break = !self.lines.is_empty();
+    }
+
     fn put_char(&mut self, ch: char, advance: usize, inset: usize) {
         let (advance, inset) = match self.layout {
             TextLayout::Cells => (CELL_WIDTH, 0),
@@ -461,6 +489,19 @@ impl ScriptHost for ScriptWindows<'_> {
         }
     }
 
+    fn page_full(&self, id: u8, ch: char) -> bool {
+        self.windows
+            .get(usize::from(id))
+            .and_then(Option::as_ref)
+            .is_some_and(|window| window.would_scroll(self.metrics.advance(ch)))
+    }
+
+    fn turn_page(&mut self, id: u8) {
+        if let Some(window) = self.window_mut(id) {
+            window.turn_page();
+        }
+    }
+
     fn typewriter(&self, id: u8) -> bool {
         self.windows
             .get(usize::from(id))
@@ -660,6 +701,33 @@ mod tests {
         assert_eq!(window.lines, ["efgh", "ij", "k"]);
         assert!(host.typewriter(1));
         assert!(!host.typewriter(2));
+    }
+
+    #[test]
+    fn a_full_window_reports_that_the_next_character_would_scroll() {
+        let mut host = windows();
+        host.open_window(1, 0x10, (0, 12, 6, 8), 1);
+        for ch in "abcdefghij".chars() {
+            host.put_char(1, ch);
+        }
+        assert!(!host.page_full(1, 'k'));
+        host.put_char(1, 'k');
+        host.put_char(1, 'l');
+        assert!(host.page_full(1, 'm'));
+        host.turn_page(1);
+        host.put_char(1, 'm');
+        let window = host.windows()[1].as_ref().unwrap();
+        assert_eq!(window.lines, ["abcd", "m"]);
+        host.line_break(1);
+        host.put_char(1, 'n');
+        host.line_break(1);
+        assert!(host.page_full(1, 'o'));
+        host.turn_page(1);
+        host.put_char(1, 'o');
+        let window = host.windows()[1].as_ref().unwrap();
+        assert_eq!(window.lines, ["abcd", "o"]);
+        host.clear_window(1);
+        assert!(!host.page_full(1, 'o'));
     }
 
     #[test]

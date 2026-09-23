@@ -7,6 +7,12 @@
 //! original costs one frame here: presenting, closing or clearing a window,
 //! showing a portrait, and each character of a typewriter window. The key
 //! wait polls once per frame and blinks the prompt 20 frames off, 20 on.
+//!
+//! One addition to the original: a message that would scroll its window
+//! (a translation longer than the Japanese text) stops before the line that
+//! scrolls and waits for A with the same prompt; the window then turns a
+//! page, keeping only its first line (the speaker's name), so nothing
+//! leaves the screen unread.
 
 use crate::extension::Event;
 use formats::script_ops::{
@@ -44,6 +50,18 @@ pub trait ScriptHost {
     fn line_break(&mut self, id: u8);
     /// Whether window `id` shows text one character per frame.
     fn typewriter(&self, id: u8) -> bool;
+    /// Whether printing `ch` in window `id` would scroll its text: the
+    /// runner then waits for a key before going on, so a translation
+    /// longer than the window is read a line at a time.
+    fn page_full(&self, id: u8, ch: char) -> bool {
+        let _ = (id, ch);
+        false
+    }
+    /// Turns the page of window `id` after the key of a full page: its
+    /// first line stays, the rest is cleared.
+    fn turn_page(&mut self, id: u8) {
+        let _ = id;
+    }
     /// Shows a portrait in window `id`.
     fn portrait(&mut self, id: u8, character: u8, expression: u8);
     /// Shows or hides the "more" prompt of window `id`.
@@ -105,6 +123,10 @@ enum Wait {
     Menu {
         cancelable: bool,
         cursor: usize,
+    },
+    Page {
+        ch: char,
+        elapsed: u32,
     },
     Done,
 }
@@ -205,10 +227,11 @@ impl ScriptRunner {
         self.wait == Wait::Done
     }
 
-    /// Whether the runner is waiting for a key.
+    /// Whether the runner is waiting for a key, to go on with the script
+    /// or with a message that would scroll.
     #[must_use]
     pub fn is_waiting_for_key(&self) -> bool {
-        matches!(self.wait, Wait::Key { .. })
+        matches!(self.wait, Wait::Key { .. } | Wait::Page { .. })
     }
 
     /// The eight script variables.
@@ -267,6 +290,11 @@ impl ScriptRunner {
             }
             Wait::Menu { cancelable, cursor } => {
                 if !self.poll_menu(cancelable, cursor, keys, host) {
+                    return Ok(false);
+                }
+            }
+            Wait::Page { ch, elapsed } => {
+                if !self.poll_page(ch, elapsed, keys, host) {
                     return Ok(false);
                 }
             }
@@ -337,6 +365,21 @@ impl ScriptRunner {
         }
         host.prompt(self.window, false);
         self.wait = Wait::Frames(1);
+        true
+    }
+
+    fn poll_page(&mut self, ch: char, elapsed: u32, keys: u16, host: &mut impl ScriptHost) -> bool {
+        if keys & KEY_A == 0 {
+            let elapsed = elapsed + 1;
+            host.prompt(self.text_window, elapsed / PROMPT_HALF_PERIOD % 2 == 1);
+            self.wait = Wait::Page { ch, elapsed };
+            return false;
+        }
+        host.prompt(self.text_window, false);
+        host.play_sound(CONFIRM_SOUND);
+        host.turn_page(self.text_window);
+        self.wait = Wait::None;
+        self.print(ch, host);
         true
     }
 
@@ -605,6 +648,9 @@ impl ScriptRunner {
             }
         };
         match step {
+            MessageStep::Character(ch) if host.page_full(self.text_window, ch) => {
+                self.wait = Wait::Page { ch, elapsed: 0 };
+            }
             MessageStep::Character(ch) => self.print(ch, host),
             MessageStep::LineBreak => host.line_break(self.text_window),
             MessageStep::SwitchWindow(id) => self.text_window = id,
@@ -679,6 +725,9 @@ mod tests {
         flags: HashSet<u16>,
         open: HashSet<u8>,
         translations: std::collections::HashMap<String, String>,
+        page_rows: usize,
+        lines: std::collections::HashMap<u8, usize>,
+        pending_break: HashSet<u8>,
     }
 
     impl ScriptHost for Recorder {
@@ -710,9 +759,26 @@ mod tests {
         }
         fn put_char(&mut self, id: u8, ch: char) {
             self.log.push(format!("char {id} {ch}"));
+            let lines = self.lines.entry(id).or_insert(1);
+            if self.pending_break.remove(&id) {
+                *lines += 1;
+            }
         }
         fn line_break(&mut self, id: u8) {
             self.log.push(format!("break {id}"));
+            if !self.pending_break.insert(id) {
+                *self.lines.entry(id).or_insert(1) += 1;
+            }
+        }
+        fn page_full(&self, id: u8, _ch: char) -> bool {
+            self.page_rows > 0
+                && self.lines.get(&id).copied().unwrap_or(0) >= self.page_rows
+                && self.pending_break.contains(&id)
+        }
+        fn turn_page(&mut self, id: u8) {
+            self.log.push(format!("turn {id}"));
+            self.lines.insert(id, 1);
+            self.pending_break.insert(id);
         }
         fn typewriter(&self, id: u8) -> bool {
             self.typewriter.contains(&id)
@@ -815,6 +881,60 @@ mod tests {
         assert_eq!(host.log[9..], ["char 1 B", "reveal 1"]);
         assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert!(runner.is_done());
+    }
+
+    #[test]
+    fn a_message_that_would_scroll_waits_for_a_key_and_turns_a_page() {
+        let mut script = vec![0x01, 1, 0x10, 0, 12, 30, 8, 1, 0x20];
+        for (line, ch) in ["あ", "い", "あ", "い", "あ"].into_iter().enumerate() {
+            if line > 0 {
+                script.push(0x0D);
+            }
+            script.extend(text(ch));
+        }
+        script.extend([0x1D, 0x22]);
+        let (bytes, offsets) = rom(&[script]);
+        let mut runner = ScriptRunner::new(offsets);
+        let mut host = Recorder {
+            page_rows: 3,
+            ..Recorder::default()
+        };
+        runner.start(0).unwrap();
+        for _ in 0..4 {
+            assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
+        }
+        assert_eq!(host.log.last().unwrap(), "break 1");
+        assert!(runner.is_waiting_for_key());
+        for _ in 0..20 {
+            runner.update(&bytes, Input::default(), &mut host).unwrap();
+        }
+        assert_eq!(host.log.last().unwrap(), "prompt 1 true");
+        assert_eq!(
+            host.log
+                .iter()
+                .filter(|entry| *entry == "char 1 い")
+                .count(),
+            1
+        );
+        let a = Input::default().with(Button::A);
+        assert!(!runner.update(&bytes, a, &mut host).unwrap());
+        assert_eq!(
+            host.log[host.log.len() - 5..],
+            [
+                "prompt 1 false",
+                "sound 0x41",
+                "turn 1",
+                "char 1 い",
+                "reveal 1"
+            ]
+        );
+        assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
+        assert_eq!(
+            host.log[host.log.len() - 3..],
+            ["break 1", "char 1 あ", "reveal 1"]
+        );
+        assert!(!runner.is_waiting_for_key());
+        assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
     }
 
     #[test]

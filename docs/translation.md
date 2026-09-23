@@ -82,7 +82,7 @@ on a line, in Latin letters of average width:
 
 | Where | Pixels per line | Roughly | Lines |
 |---|---|---|---|
-| Story box (dialogue) | 224, or 176 beside a portrait | 40 or 30 letters | 2 per page, longer messages scroll |
+| Story box (dialogue) | 224, or 176 beside a portrait | 40 or 30 letters | 3 beside a portrait; a longer message waits for A when full, then turns a page: the name row stays and two fresh lines follow |
 | Title menu | 40 before enlarging | 7 letters | 3 |
 | Name-entry help | 160 | 28 letters | 1 |
 | Name-entry question | 224 | 40 letters | 2 |
