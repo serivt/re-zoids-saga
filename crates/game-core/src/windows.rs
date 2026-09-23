@@ -54,6 +54,8 @@ pub struct Window {
     pub visible: bool,
     /// Line the menu cursor sits on, if the window is a menu being used.
     pub cursor: Option<usize>,
+    /// Line the last menu ended on; the next one starts there.
+    pub line: usize,
     /// Order in which the window was opened; later windows cover earlier ones.
     pub opened: u64,
 }
@@ -266,6 +268,7 @@ impl ScriptHost for ScriptWindows<'_> {
                 prompt: false,
                 visible: false,
                 cursor: None,
+                line: 0,
                 opened,
             });
         }
@@ -287,13 +290,19 @@ impl ScriptHost for ScriptWindows<'_> {
             Some(id) => {
                 if let Some(window) = self.window_mut(id) {
                     window.visible = true;
+                    window.cursor = None;
                 }
             }
-            None => self
-                .windows
-                .iter_mut()
-                .flatten()
-                .for_each(|window| window.visible = true),
+            None => self.windows.iter_mut().flatten().for_each(|window| {
+                window.visible = true;
+                window.cursor = None;
+            }),
+        }
+    }
+
+    fn reveal(&mut self, id: u8) {
+        if let Some(window) = self.window_mut(id) {
+            window.visible = true;
         }
     }
 
@@ -380,7 +389,23 @@ impl ScriptHost for ScriptWindows<'_> {
     fn set_cursor(&mut self, id: u8, line: Option<usize>) {
         if let Some(window) = self.window_mut(id) {
             window.cursor = line;
+            if let Some(line) = line {
+                window.line = line;
+            }
         }
+    }
+
+    fn menu_line(&self, id: u8) -> usize {
+        self.windows
+            .get(usize::from(id))
+            .and_then(Option::as_ref)
+            .map_or(0, |window| window.line)
+    }
+
+    fn is_open(&self, id: u8) -> bool {
+        self.windows
+            .get(usize::from(id))
+            .is_some_and(Option::is_some)
     }
 }
 
@@ -392,6 +417,21 @@ mod tests {
 
     fn windows() -> ScriptWindows<'static> {
         ScriptWindows::new(&[], "アトレー")
+    }
+
+    #[test]
+    fn a_window_remembers_its_menu_line_until_it_is_redrawn() {
+        let mut host = windows();
+        host.open_window(3, 0x21, (0, 0, 9, 14), 4);
+        host.set_cursor(3, Some(2));
+        assert_eq!(host.windows()[3].as_ref().and_then(|w| w.cursor), Some(2));
+        host.reveal(3);
+        assert_eq!(host.windows()[3].as_ref().and_then(|w| w.cursor), Some(2));
+        host.present(None);
+        assert_eq!(host.windows()[3].as_ref().and_then(|w| w.cursor), None);
+        assert_eq!(host.menu_line(3), 2);
+        assert!(host.is_open(3));
+        assert!(!host.is_open(4));
     }
 
     #[test]

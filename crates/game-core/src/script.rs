@@ -15,6 +15,7 @@ use formats::script_ops::{
 use platform::{Button, Input};
 
 const VARIABLES: usize = 8;
+const WINDOWS: u8 = 8;
 const PROMPT_HALF_PERIOD: u32 = 20;
 const CONFIRM_SOUND: u8 = 0x41;
 const MENU_MOVE_SOUND: u8 = 0x40;
@@ -30,8 +31,10 @@ pub trait ScriptHost {
     fn open_window(&mut self, id: u8, kind: u8, rect: (u8, u8, u8, u8), style: u8);
     /// Closes window `id`, or all of them.
     fn close_window(&mut self, id: Option<u8>);
-    /// Shows window `id` (or all) with its current contents.
+    /// Redraws window `id` (or all of them) with its current contents.
     fn present(&mut self, id: Option<u8>);
+    /// Makes window `id` visible as its text is typed, without a redraw.
+    fn reveal(&mut self, id: u8);
     /// Empties the text of window `id`.
     fn clear_window(&mut self, id: u8);
     /// Prints one character in window `id`.
@@ -58,6 +61,10 @@ pub trait ScriptHost {
     fn menu_lines(&self, id: u8) -> usize;
     /// Places (or removes) the menu cursor of window `id`.
     fn set_cursor(&mut self, id: u8, line: Option<usize>);
+    /// Whether window `id` is open.
+    fn is_open(&self, id: u8) -> bool;
+    /// Line the next menu in window `id` starts on: where its last one ended.
+    fn menu_line(&self, id: u8) -> usize;
 }
 
 /// What the runner is waiting for.
@@ -106,6 +113,7 @@ pub struct ScriptRunner {
     vars: [u16; VARIABLES],
     saved: [u16; VARIABLES],
     window: u8,
+    text_window: u8,
     pending: Vec<char>,
     wait: Wait,
     previous: Input,
@@ -122,6 +130,7 @@ impl ScriptRunner {
             vars: [0; VARIABLES],
             saved: [0; VARIABLES],
             window: 0,
+            text_window: 0,
             pending: Vec::new(),
             wait: Wait::Done,
             previous: Input::default(),
@@ -162,6 +171,12 @@ impl ScriptRunner {
     #[must_use]
     pub fn vars(&self) -> &[u16; VARIABLES] {
         &self.vars
+    }
+
+    /// Where string `index` starts in the ROM, if the table has it.
+    #[must_use]
+    pub fn string_offset(&self, index: usize) -> Option<usize> {
+        self.string(index).ok()
     }
 
     /// Advances one frame; returns `true` when the script has finished.
@@ -210,6 +225,30 @@ impl ScriptRunner {
             self.step(rom, host)?;
         }
         Ok(self.wait == Wait::Done)
+    }
+
+    fn begin_menu(&mut self, cancelable: bool, host: &mut impl ScriptHost) {
+        let cursor = host
+            .menu_line(self.window)
+            .min(host.menu_lines(self.window).saturating_sub(1));
+        host.set_cursor(self.window, Some(cursor));
+        self.wait = Wait::Menu { cancelable, cursor };
+    }
+
+    /// Makes window `id` the current one, as the game's code does before
+    /// printing into a window a script did not open last.
+    pub fn select_window(&mut self, id: u8) {
+        self.window = id;
+    }
+
+    /// Runs a menu on window `id` without a script, as the game's code
+    /// does for lists it fills itself; the result lands in the variables
+    /// like the menu opcode's.
+    pub fn run_menu(&mut self, id: u8, cancelable: bool, host: &mut impl ScriptHost) {
+        self.frames.clear();
+        self.pending.clear();
+        self.window = id;
+        self.begin_menu(cancelable, host);
     }
 
     fn poll_key(
@@ -273,7 +312,6 @@ impl ScriptRunner {
             return false;
         }
         self.vars[1] = u16::try_from(cursor).unwrap_or(u16::MAX);
-        host.set_cursor(self.window, None);
         self.wait = Wait::Frames(1);
         true
     }
@@ -304,7 +342,10 @@ impl ScriptRunner {
                     self.wait = Wait::Done;
                 }
             }
-            Instruction::Message => frame.in_message = true,
+            Instruction::Message => {
+                frame.in_message = true;
+                self.text_window = self.window;
+            }
             Instruction::Call(index) => {
                 let base = self.string(usize::from(index))?;
                 self.frames.push(Frame {
@@ -356,6 +397,9 @@ impl ScriptRunner {
             }
             Instruction::Present { id } => {
                 host.present(id);
+                self.window = id
+                    .or_else(|| (0..WINDOWS).rev().find(|id| host.is_open(*id)))
+                    .unwrap_or(self.window);
                 self.wait = Wait::Frames(1);
             }
             Instruction::Draw { id } => host.present(Some(id)),
@@ -390,13 +434,7 @@ impl ScriptRunner {
             }
             Instruction::Sound(id) => host.play_sound(id),
             Instruction::Delay(frames) if frames > 0 => self.wait = Wait::Frames(u32::from(frames)),
-            Instruction::Menu { mode } => {
-                host.set_cursor(self.window, Some(0));
-                self.wait = Wait::Menu {
-                    cancelable: mode & 0xF0 == 0x10,
-                    cursor: 0,
-                };
-            }
+            Instruction::Menu { mode } => self.begin_menu(mode & 0xF0 == 0x10, host),
             _ => {}
         }
     }
@@ -466,8 +504,8 @@ impl ScriptRunner {
         frame.pc = next;
         match step {
             MessageStep::Character(ch) => self.print(ch, host),
-            MessageStep::LineBreak => host.line_break(self.window),
-            MessageStep::SwitchWindow(id) => self.window = id,
+            MessageStep::LineBreak => host.line_break(self.text_window),
+            MessageStep::SwitchWindow(id) => self.text_window = id,
             MessageStep::PlayerName => self.queue_text(&host.player_name()),
             MessageStep::Variable { var, digits, .. } => {
                 let text = format!(
@@ -492,9 +530,9 @@ impl ScriptRunner {
     }
 
     fn print(&mut self, ch: char, host: &mut impl ScriptHost) {
-        host.put_char(self.window, ch);
-        if host.typewriter(self.window) {
-            host.present(Some(self.window));
+        host.put_char(self.text_window, ch);
+        if host.typewriter(self.text_window) {
+            host.reveal(self.text_window);
             self.wait = Wait::Frames(1);
         }
     }
@@ -536,6 +574,7 @@ mod tests {
         log: Vec<String>,
         typewriter: HashSet<u8>,
         flags: HashSet<u16>,
+        open: HashSet<u8>,
     }
 
     impl ScriptHost for Recorder {
@@ -545,12 +584,22 @@ mod tests {
             if style & 1 != 0 {
                 self.typewriter.insert(id);
             }
+            self.open.insert(id);
         }
         fn close_window(&mut self, id: Option<u8>) {
             self.log.push(format!("close {id:?}"));
+            match id {
+                Some(id) => {
+                    self.open.remove(&id);
+                }
+                None => self.open.clear(),
+            }
         }
         fn present(&mut self, id: Option<u8>) {
             self.log.push(format!("present {id:?}"));
+        }
+        fn reveal(&mut self, id: u8) {
+            self.log.push(format!("reveal {id}"));
         }
         fn clear_window(&mut self, id: u8) {
             self.log.push(format!("clear {id}"));
@@ -599,6 +648,12 @@ mod tests {
         fn set_cursor(&mut self, id: u8, line: Option<usize>) {
             self.log.push(format!("cursor {id} {line:?}"));
         }
+        fn is_open(&self, id: u8) -> bool {
+            self.open.contains(&id)
+        }
+        fn menu_line(&self, _: u8) -> usize {
+            0
+        }
     }
 
     /// Lays strings out one after another from offset 16 and returns the
@@ -642,13 +697,13 @@ mod tests {
         assert_eq!(host.log, ["open 1 0x10 (0, 12, 30, 8) 1", "present None"]);
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert_eq!(host.log.len(), 4);
-        assert_eq!(host.log[2..], ["char 1 あ", "present Some(1)"]);
+        assert_eq!(host.log[2..], ["char 1 あ", "reveal 1"]);
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert_eq!(host.log.len(), 6);
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
-        assert_eq!(host.log[6..], ["break 1", "char 1 A", "present Some(1)"]);
+        assert_eq!(host.log[6..], ["break 1", "char 1 A", "reveal 1"]);
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
-        assert_eq!(host.log[9..], ["char 1 B", "present Some(1)"]);
+        assert_eq!(host.log[9..], ["char 1 B", "reveal 1"]);
         assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert!(runner.is_done());
     }
@@ -762,7 +817,7 @@ mod tests {
         assert_eq!(runner.vars()[..2], [1, 2]);
         assert_eq!(
             host.log[host.log.len() - 2..],
-            ["sound 0x47", "cursor 0 None"]
+            ["cursor 0 Some(2)", "sound 0x47"]
         );
         assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
         let mut runner = ScriptRunner::new(vec![24]);
@@ -797,5 +852,36 @@ mod tests {
         runner.start(0).unwrap();
         assert!(run(&bytes, &mut runner, &mut host, 3));
         assert_eq!(host.log[2..], ["char 0  ", "char 0 4", "char 0 2"]);
+    }
+
+    #[test]
+    fn menus_and_prompts_follow_the_last_presented_window() {
+        let mut script = vec![
+            0x01, 0, 0x20, 0, 14, 30, 6, 4, // help line
+            0x01, 3, 0x21, 0, 0, 9, 14, 4, // menu
+            0x20, 0x1C, 0, // text goes to window 0
+        ];
+        script.extend(text("あ"));
+        script.extend([
+            0x1D, 0x04, 0xFF, // presenting everything selects window 3
+            0x06, 0x10, // menu
+            0x04, 0, // presenting window 0 selects it
+            0x05, 0x00, // wait key prompts in window 0
+            0x22,
+        ]);
+        let (bytes, offsets) = rom(&[script]);
+        let mut runner = ScriptRunner::new(offsets);
+        let mut host = Recorder::default();
+        runner.start(0).unwrap();
+        run(&bytes, &mut runner, &mut host, 3);
+        assert_eq!(
+            host.log[2..],
+            ["char 0 あ", "present None", "cursor 3 Some(0)"]
+        );
+        let a = Input::default().with(Button::A);
+        runner.update(&bytes, a, &mut host).unwrap();
+        run(&bytes, &mut runner, &mut host, 3);
+        assert!(runner.is_waiting_for_key());
+        assert_eq!(host.log.last().unwrap(), "prompt 0 false");
     }
 }
