@@ -6,6 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+formats.workspace = true
+game-core.workspace = true
+gba-runtime.workspace = true
+platform.workspace = true
 extraction.workspace = true
 platform-sdl3.workspace = true
 game-saga.workspace = true

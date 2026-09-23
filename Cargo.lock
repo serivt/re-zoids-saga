@@ -106,6 +106,7 @@ dependencies = [
  "formats",
  "gba-runtime",
  "localization",
+ "platform",
 ]
 
 [[package]]
@@ -151,9 +152,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "extraction",
+ "formats",
+ "game-core",
  "game-fuzors",
  "game-legacy",
  "game-saga",
+ "gba-runtime",
+ "platform",
  "platform-sdl3",
 ]
 
@@ -176,6 +181,9 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 [[package]]
 name = "platform"
 version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "platform-sdl3"

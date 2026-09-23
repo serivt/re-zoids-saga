@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+platform.workspace = true
 gba-runtime.workspace = true
 localization.workspace = true
 extraction.workspace = true
