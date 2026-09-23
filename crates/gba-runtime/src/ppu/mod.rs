@@ -1,8 +1,10 @@
 //! Tile, background and sprite rendering to the framebuffer.
 
+pub mod background;
 pub mod indexed;
 pub mod palette;
 
+pub use background::{PaletteBank, TileMapEntry, draw_background};
 pub use indexed::{IndexedImage, draw_indexed};
 pub use palette::Palette;
 
