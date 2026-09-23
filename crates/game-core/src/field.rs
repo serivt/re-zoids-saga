@@ -15,7 +15,11 @@
 //! player when level with it. Completing a step onto an exit metatile
 //! reports the exit so the caller can warp; pressing A while standing and
 //! facing a character turns it to the player (unless it is furniture) and
-//! reports its dialogue so the caller can open a talk box.
+//! reports its dialogue so the caller can open a talk box. Wandering
+//! characters (kind 2) wait a random `0..=127` frames, turn to a random
+//! direction and, when the metatile ahead of their footing is free, walk
+//! there at half the player's speed (32 frames); a blocked direction only
+//! turns them and rolls a new wait.
 
 use extraction::saga::{
     self, METATILE_TILES, MapError, PLAYER_SPRITE, Scene, SceneError, SpriteSheet,
@@ -26,6 +30,7 @@ use platform::{Button, Frame, Input};
 use thiserror::Error;
 
 use crate::draw_sprite;
+use crate::rng::Rng;
 
 const TILE_SIZE: usize = 8;
 const METATILE_SIZE: usize = METATILE_TILES * TILE_SIZE;
@@ -33,6 +38,9 @@ const ANCHOR_OFFSET: (isize, isize) = (8, 16);
 const CAMERA_ANCHOR: (isize, isize) = (120, 80);
 const ANIMATION_SPEED_SHIFT: u32 = 1;
 const FURNITURE_BEHAVIOR: u16 = 2;
+const WANDER_KIND: u16 = 2;
+const NPC_STEP_FRAMES: u32 = 32;
+const IDLE_TIMER_MASK: u16 = 0x7F;
 
 /// Where the player faces, in the order the sprite sheet uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -177,6 +185,15 @@ pub struct Npc {
     pub dialogue: Option<usize>,
     /// Whether it turns toward the player when spoken to.
     pub turns: bool,
+    /// Whether it walks around on its own.
+    pub wanders: bool,
+    /// Where it faces.
+    pub facing: Direction,
+    /// Frames left before it acts again while standing.
+    pub timer: u16,
+    /// Frames into the step being taken, 0 when standing; the standing
+    /// metatile is already the step's destination.
+    pub step: u32,
 }
 
 impl Npc {
@@ -184,6 +201,35 @@ impl Npc {
     #[must_use]
     pub fn footing(&self) -> (usize, usize) {
         (self.column, self.row + 1)
+    }
+
+    /// Anchor in map pixels, behind the destination by what is left of
+    /// the step.
+    #[must_use]
+    pub fn anchor(&self) -> (isize, isize) {
+        let (x, y) = anchor(self.column, self.row);
+        if self.step == 0 {
+            return (x, y);
+        }
+        let (dx, dy) = self.facing.delta();
+        let left =
+            isize::try_from((NPC_STEP_FRAMES - self.step.min(NPC_STEP_FRAMES)) / 2).unwrap_or(0);
+        (x - dx * left, y - dy * left)
+    }
+
+    fn face(&mut self, direction: Direction) {
+        self.facing = direction;
+        self.animation_id = direction.index();
+        self.animation = 0;
+    }
+}
+
+fn random_direction(value: u16) -> Direction {
+    match value >> 14 {
+        0 => Direction::Up,
+        1 => Direction::Down,
+        2 => Direction::Left,
+        _ => Direction::Right,
     }
 }
 
@@ -245,6 +291,8 @@ pub struct Field {
     /// The characters standing on the map.
     pub npcs: Vec<Npc>,
     previous: Input,
+    frame: u16,
+    rng: Rng,
 }
 
 impl Field {
@@ -267,6 +315,8 @@ impl Field {
             },
             npcs: Vec::new(),
             previous: Input::default(),
+            frame: 0,
+            rng: Rng::default(),
         }
     }
 
@@ -302,9 +352,11 @@ impl Field {
     pub fn update(&mut self, input: Input) -> Option<FieldEvent> {
         let pressed_a = input.is_held(Button::A) && !self.previous.is_held(Button::A);
         self.previous = input;
+        self.frame = self.frame.wrapping_add(1);
         self.player.animation += 1;
-        for npc in &mut self.npcs {
-            npc.animation += 1;
+        for index in 0..self.npcs.len() {
+            self.npcs[index].animation += 1;
+            self.wander(index);
         }
         if self.player.walking {
             return self.advance_step().map(FieldEvent::Exit);
@@ -330,15 +382,78 @@ impl Field {
         None
     }
 
+    fn wander(&mut self, index: usize) {
+        let npc = &self.npcs[index];
+        if !npc.wanders {
+            return;
+        }
+        if npc.step > 0 {
+            let npc = &mut self.npcs[index];
+            npc.step += 1;
+            if npc.step >= NPC_STEP_FRAMES {
+                npc.step = 0;
+                npc.animation_id = npc.facing.index();
+                npc.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
+            }
+            return;
+        }
+        if npc.timer > 0 {
+            self.npcs[index].timer -= 1;
+            return;
+        }
+        self.rng.seed(self.frame);
+        let direction = random_direction(self.rng.next(self.frame));
+        let (dx, dy) = direction.delta();
+        let (column, row) = self.npcs[index].footing();
+        let target = (column.checked_add_signed(dx), row.checked_add_signed(dy));
+        let free = match target {
+            (Some(column), Some(row)) => !self.blocked_for_npc(index, column, row),
+            _ => false,
+        };
+        let npc = &mut self.npcs[index];
+        npc.face(direction);
+        if free {
+            npc.column = npc.column.saturating_add_signed(dx);
+            npc.row = npc.row.saturating_add_signed(dy);
+            npc.step = 1;
+            npc.animation_id = WALK_ANIMATION_BASE + direction.index();
+        } else {
+            npc.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
+        }
+    }
+
+    fn blocked_for_npc(&self, index: usize, column: usize, row: usize) -> bool {
+        let (dx, dy) = if self.player.walking {
+            self.player.facing.delta()
+        } else {
+            (0, 0)
+        };
+        let (fc, fr) = self.player.footing();
+        let player_cells = [
+            (fc, fr),
+            (fc.wrapping_add_signed(dx), fr.wrapping_add_signed(dy)),
+        ];
+        self.scene.blocked(column, row)
+            || self.scene.exit(column, row).is_some()
+            || player_cells.contains(&(column, row))
+            || self
+                .npcs
+                .iter()
+                .enumerate()
+                .any(|(other, npc)| other != index && npc.footing() == (column, row))
+    }
+
     fn talk(&mut self) -> Option<FieldEvent> {
         let (dx, dy) = self.player.facing.delta();
         let (column, row) = self.player.footing();
         let ahead = (column.checked_add_signed(dx)?, row.checked_add_signed(dy)?);
-        let index = self.npcs.iter().position(|npc| npc.footing() == ahead)?;
+        let index = self
+            .npcs
+            .iter()
+            .position(|npc| npc.step == 0 && npc.footing() == ahead)?;
         let npc = &mut self.npcs[index];
         if npc.turns {
-            npc.animation_id = self.player.facing.opposite().index();
-            npc.animation = 0;
+            npc.face(self.player.facing.opposite());
         }
         npc.dialogue.map(|dialogue| FieldEvent::Talk {
             npc: index,
@@ -436,7 +551,7 @@ impl Field {
         let mut actors = vec![(&self.sheet, self.player_frame(), self.player.anchor())];
         actors.extend(self.npcs.iter().map(|npc| {
             let frame = current_frame(&npc.sheet, npc.animation_id, npc.animation);
-            (&npc.sheet, frame, anchor(npc.column, npc.row))
+            (&npc.sheet, frame, npc.anchor())
         }));
         actors.sort_by_key(|(_, _, (_, y))| *y);
         for (sheet, current, (x, y)) in actors {
@@ -481,6 +596,10 @@ fn load_map(rom: &[u8], map: usize) -> Result<(Scene, SpriteSheet, Vec<Npc>), Fi
                 animation: 0,
                 dialogue: object.event_id().map(usize::from),
                 turns: object.behavior < FURNITURE_BEHAVIOR,
+                wanders: object.kind == WANDER_KIND,
+                facing: Direction::from_index(object.animation).unwrap_or(Direction::Down),
+                timer: 0,
+                step: 0,
             }))
         })
         .collect::<Result<_, _>>()?;
@@ -645,7 +764,94 @@ mod tests {
             animation: 9,
             dialogue,
             turns,
+            wanders: false,
+            facing: Direction::Down,
+            timer: 0,
+            step: 0,
         }
+    }
+
+    fn wanderer(column: usize, row: usize) -> Npc {
+        Npc {
+            wanders: true,
+            ..npc(column, row, None, true)
+        }
+    }
+
+    #[test]
+    fn wandering_characters_step_when_the_cell_ahead_is_free() {
+        let mut field = field(8, 8);
+        field.player.column = 6;
+        field.player.row = 5;
+        let mut walker = wanderer(3, 3);
+        walker.timer = 2;
+        field.npcs.push(walker);
+        field.update(Input::default());
+        field.update(Input::default());
+        assert_eq!(field.npcs[0].timer, 0);
+        assert_eq!(field.npcs[0].step, 0);
+        field.update(Input::default());
+        let npc = &field.npcs[0];
+        assert!(npc.step == 1 || npc.timer > 0);
+        let stepped = npc.step == 1;
+        let facing = npc.facing;
+        if stepped {
+            assert_eq!(npc.animation_id, WALK_ANIMATION_BASE + facing.index());
+            let (dx, dy) = facing.delta();
+            assert_eq!(
+                (npc.column, npc.row),
+                (
+                    3usize.wrapping_add_signed(dx),
+                    3usize.wrapping_add_signed(dy)
+                )
+            );
+            let (ax, ay) = npc.anchor();
+            let (tx, ty) = anchor(npc.column, npc.row);
+            assert_eq!((ax, ay), (tx - dx * 15, ty - dy * 15));
+            for _ in 0..31 {
+                field.update(Input::default());
+            }
+            let npc = &field.npcs[0];
+            assert_eq!(npc.step, 0);
+            assert_eq!(npc.animation_id, facing.index());
+            assert_eq!(npc.anchor(), anchor(npc.column, npc.row));
+            assert!(npc.timer <= IDLE_TIMER_MASK);
+        } else {
+            assert_eq!(npc.animation_id, facing.index());
+        }
+    }
+
+    #[test]
+    fn wandering_characters_only_turn_when_walled_in() {
+        let mut field = field(3, 4);
+        field.player.column = 1;
+        field.player.row = 2;
+        field.npcs.push(wanderer(1, 0));
+        for _ in 0..400 {
+            field.update(Input::default());
+            let npc = &field.npcs[0];
+            assert_eq!((npc.column, npc.row, npc.step), (1, 0, 0));
+        }
+        let mut furniture = wanderer(1, 0);
+        furniture.wanders = false;
+        field.npcs[0] = furniture;
+        for _ in 0..200 {
+            field.update(Input::default());
+        }
+        assert_eq!(field.npcs[0].facing, Direction::Down);
+        assert_eq!(field.npcs[0].timer, 0);
+    }
+
+    #[test]
+    fn a_stepping_character_blocks_its_destination_and_cannot_be_talked_to() {
+        let mut field = field(6, 5);
+        let mut walker = wanderer(4, 1);
+        walker.step = 5;
+        walker.facing = Direction::Down;
+        field.npcs.push(walker);
+        field.update(held(Direction::Right));
+        assert!(!field.player.walking);
+        assert_eq!(field.update(Input::default().with(Button::A)), None);
     }
 
     #[test]
