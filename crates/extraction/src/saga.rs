@@ -483,38 +483,93 @@ pub fn warp(rom: &[u8], map: usize, exit: usize) -> Result<Warp, MapError> {
     })
 }
 
-const SPRITE_TABLE_OFFSET: usize = 0x0031_8E04;
+const SPRITE_TABLE_OFFSET: usize = 0x0031_8DFC;
 const SPRITE_RECORD_LEN: usize = 32;
-const SPRITE_COUNT: usize = 248;
-const SPRITE_TILE_ROWS: usize = 4;
-/// Record of the player's map sprite sheet (tagged `mz25`; tags are not unique).
-pub const PLAYER_SPRITE_SHEET: usize = 151;
+const SPRITE_COUNT: usize = 291;
+const SPRITE_TAG_LEN: usize = 4;
+const SPRITE_FRAME_LEN: usize = 24;
+const SPRITE_ANIMATION_STEP_LEN: usize = 4;
+const SPRITE_ANIMATION_END: u16 = 0x8000;
+const SPRITE_ANIMATIONS_MAX: usize = 32;
+const SPRITE_ANIMATION_STEPS_MAX: usize = 128;
+/// Sprite id of the player's map sprite (`ch00`).
+pub const PLAYER_SPRITE: usize = 0x98;
+/// Animation ids of a walking sprite: idle animations are the facing
+/// direction in sprite sheet order, walking ones follow them.
+pub const WALK_ANIMATION_BASE: usize = 4;
 
-/// A sheet of same-sized sprite frames stored uncompressed.
+/// One step of a sprite animation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AnimationStep {
+    /// Frame record index.
+    pub frame: usize,
+    /// Ticks the frame stays; the game halves them for walking sprites.
+    pub duration: u32,
+}
+
+/// A drawable frame: a block of the sheet's tiles placed relative to the
+/// sprite's anchor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpriteFrame {
+    /// First tile in the sheet.
+    pub tile: usize,
+    /// Horizontal offset of the top-left corner from the anchor.
+    pub x: i16,
+    /// Vertical offset of the top-left corner from the anchor.
+    pub y: i16,
+    /// Width in pixels.
+    pub width: usize,
+    /// Height in pixels.
+    pub height: usize,
+}
+
+/// A sprite: same-sized images stored uncompressed, plus the frames and
+/// animations that use them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpriteSheet {
-    /// Four-character tag, e.g. `ch00` for the player or `mz25` for a map Zoid.
+    /// Four-character tag, e.g. `ch00` for the player or `mz10` for a map Zoid.
     pub tag: String,
-    /// Number of frames.
-    pub frames: usize,
-    /// Tiles per frame, laid out in rows of four (16 tiles = 32×32 pixels).
-    pub tiles_per_frame: usize,
+    /// Number of images.
+    pub images: usize,
+    /// Tiles per image, laid out in rows of four (16 tiles = 32×32 pixels).
+    pub tiles_per_image: usize,
     /// The 16-color BGR555 palette.
     pub palette: [u16; 16],
-    /// Every frame's tiles, frame after frame.
+    /// Every image's tiles, image after image.
     pub tiles: Tileset,
+    /// Frame records referenced by the animations.
+    pub frames: Vec<SpriteFrame>,
+    /// Animations as lists of steps.
+    pub animations: Vec<Vec<AnimationStep>>,
 }
 
 impl SpriteSheet {
-    /// Composes frame `index`; `None` when it does not exist.
+    /// Composes image `index`; `None` when it does not exist.
     #[must_use]
-    pub fn frame(&self, index: usize) -> Option<TileImage> {
-        if index >= self.frames || self.tiles_per_frame % SPRITE_TILE_ROWS != 0 {
+    pub fn image(&self, index: usize) -> Option<TileImage> {
+        if index >= self.images || self.tiles_per_image % SPRITE_TILE_ROWS != 0 {
             return None;
         }
-        let first = index * self.tiles_per_frame;
-        let frame_tiles = Tileset::from_pixels(
-            (first..first + self.tiles_per_frame)
+        let columns = self.tiles_per_image / SPRITE_TILE_ROWS;
+        self.compose(index * self.tiles_per_image, columns, SPRITE_TILE_ROWS)
+    }
+
+    /// Composes the picture of frame record `index`; `None` when it does
+    /// not exist.
+    #[must_use]
+    pub fn frame_image(&self, index: usize) -> Option<TileImage> {
+        let frame = self.frames.get(index)?;
+        let (columns, rows) = (frame.width / TILE_SIDE, frame.height / TILE_SIDE);
+        self.compose(frame.tile, columns, rows)
+    }
+
+    fn compose(&self, first: usize, columns: usize, rows: usize) -> Option<TileImage> {
+        let count = columns * rows;
+        if count == 0 || first + count > self.tiles.len() {
+            return None;
+        }
+        let tiles = Tileset::from_pixels(
+            (first..first + count)
                 .map(|tile| {
                     self.tiles
                         .tile(tile)
@@ -526,95 +581,144 @@ impl SpriteSheet {
         let piece = TilePiece {
             column: 0,
             row: 0,
-            columns: self.tiles_per_frame / SPRITE_TILE_ROWS,
-            rows: SPRITE_TILE_ROWS,
+            columns,
+            rows,
         };
-        Some(TileImage::compose(&frame_tiles, &[piece]))
+        Some(TileImage::compose(&tiles, &[piece]))
     }
 }
+
+const SPRITE_TILE_ROWS: usize = 4;
+const TILE_SIDE: usize = 8;
 
 /// Why a sprite sheet could not be read.
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SpriteSheetError {
     /// No such record.
-    #[error("no sprite sheet {index}; the table has {SPRITE_COUNT}")]
-    NoSuchSheet {
-        /// Requested index.
-        index: usize,
+    #[error("no sprite {id}; ids run from 1 to {}", SPRITE_COUNT - 1)]
+    NoSuchSprite {
+        /// Requested id.
+        id: usize,
     },
     /// No record carries the tag.
-    #[error("no sprite sheet tagged {tag:?}")]
+    #[error("no sprite tagged {tag:?}")]
     NoSuchTag {
         /// Requested tag.
         tag: String,
     },
     /// The ROM is too short for the record or its data.
-    #[error("ROM of {len} bytes is too short for sprite sheet {index}")]
+    #[error("ROM of {len} bytes is too short for sprite {id}")]
     TooShort {
         /// ROM length.
         len: usize,
-        /// Sheet index.
-        index: usize,
+        /// Sprite id.
+        id: usize,
     },
 }
 
-/// Reads sprite sheet `index` of the table at ROM `0x318E04`.
+/// Reads sprite `id` (1-based, as map objects name them).
 ///
 /// # Errors
 ///
-/// Returns [`SpriteSheetError`] when the index is out of range or the ROM is too short.
-pub fn sprite_sheet(rom: &[u8], index: usize) -> Result<SpriteSheet, SpriteSheetError> {
-    if index >= SPRITE_COUNT {
-        return Err(SpriteSheetError::NoSuchSheet { index });
+/// Returns [`SpriteSheetError`] when the id is out of range or the ROM is too short.
+pub fn sprite_sheet(rom: &[u8], id: usize) -> Result<SpriteSheet, SpriteSheetError> {
+    if id == 0 || id >= SPRITE_COUNT {
+        return Err(SpriteSheetError::NoSuchSprite { id });
     }
-    let too_short = || SpriteSheetError::TooShort {
-        len: rom.len(),
-        index,
-    };
-    let offset = SPRITE_TABLE_OFFSET + index * SPRITE_RECORD_LEN;
+    let too_short = || SpriteSheetError::TooShort { len: rom.len(), id };
+    let offset = SPRITE_TABLE_OFFSET + id * SPRITE_RECORD_LEN;
     let record = rom
         .get(offset..offset + SPRITE_RECORD_LEN)
         .ok_or_else(too_short)?;
-    let word = |i: usize| {
-        u32::from_le_bytes([
-            record[4 * i],
-            record[4 * i + 1],
-            record[4 * i + 2],
-            record[4 * i + 3],
-        ])
-    };
-    let tag = String::from_utf8_lossy(&record[8..12]).into_owned();
-    let frames = word(3) as usize;
-    let tiles_per_frame = word(5) as usize;
-    let palette_offset = rom_offset(&record[24..28]).ok_or_else(too_short)?;
-    let tiles_offset = rom_offset(&record[28..32]).ok_or_else(too_short)?;
+    let pointer = |at: usize| rom_offset(&record[at..at + 4]).ok_or_else(too_short);
+    let half = |at: usize| usize::from(u16::from_le_bytes([record[at], record[at + 1]]));
+    let tag = String::from_utf8_lossy(&record[16..16 + SPRITE_TAG_LEN]).into_owned();
+    let images = half(20);
+    let tiles_per_image = half(28);
     let palette = rom
-        .get(palette_offset..palette_offset + PALETTE_LEN)
+        .get(pointer(0)?..pointer(0)? + PALETTE_LEN)
         .and_then(parse_palette)
         .ok_or_else(too_short)?;
     let tile_bytes = rom
-        .get(tiles_offset..tiles_offset + frames * tiles_per_frame * TILE_LEN)
+        .get(pointer(4)?..pointer(4)? + images * tiles_per_image * TILE_LEN)
         .ok_or_else(too_short)?;
+    let animations = read_animations(rom, pointer(8)?).ok_or_else(too_short)?;
+    let frame_count = animations
+        .iter()
+        .flatten()
+        .map(|step| step.frame + 1)
+        .max()
+        .unwrap_or(0);
+    let frames = (0..frame_count)
+        .map(|index| read_frame(rom, pointer(12)? + index * 4).ok_or_else(too_short))
+        .collect::<Result<_, _>>()?;
     Ok(SpriteSheet {
         tag,
-        frames,
-        tiles_per_frame,
+        images,
+        tiles_per_image,
         palette,
         tiles: Tileset::from_4bpp(tile_bytes),
+        frames,
+        animations,
     })
 }
 
-/// Reads the first sprite sheet carrying `tag`; tags repeat, so callers that
-/// need a specific record use [`sprite_sheet`].
+fn read_animations(rom: &[u8], table: usize) -> Option<Vec<Vec<AnimationStep>>> {
+    let mut animations = Vec::new();
+    for index in 0..SPRITE_ANIMATIONS_MAX {
+        let at = table + index * 4;
+        let Some(sequence) = rom.get(at..at + 4).and_then(rom_offset) else {
+            break;
+        };
+        if sequence >= rom.len() {
+            break;
+        }
+        animations.push(read_steps(rom, sequence)?);
+    }
+    Some(animations)
+}
+
+fn read_steps(rom: &[u8], mut at: usize) -> Option<Vec<AnimationStep>> {
+    let mut steps = Vec::new();
+    for _ in 0..SPRITE_ANIMATION_STEPS_MAX {
+        let bytes = rom.get(at..at + SPRITE_ANIMATION_STEP_LEN)?;
+        let frame = u16::from_le_bytes([bytes[0], bytes[1]]);
+        if frame >= SPRITE_ANIMATION_END {
+            return Some(steps);
+        }
+        steps.push(AnimationStep {
+            frame: usize::from(frame),
+            duration: u32::from(u16::from_le_bytes([bytes[2], bytes[3]])),
+        });
+        at += SPRITE_ANIMATION_STEP_LEN;
+    }
+    None
+}
+
+fn read_frame(rom: &[u8], pointer: usize) -> Option<SpriteFrame> {
+    let at = rom_offset(rom.get(pointer..pointer + 4)?)?;
+    let bytes = rom.get(at..at + SPRITE_FRAME_LEN)?;
+    let half = |i: usize| u16::from_le_bytes([bytes[i], bytes[i + 1]]);
+    let signed = |i: usize| i16::from_le_bytes([bytes[i], bytes[i + 1]]);
+    Some(SpriteFrame {
+        tile: usize::from(half(0)),
+        x: signed(4),
+        y: signed(6),
+        width: usize::from(half(8)),
+        height: usize::from(half(10)),
+    })
+}
+
+/// Reads the first sprite carrying `tag`.
 ///
 /// # Errors
 ///
 /// Returns [`SpriteSheetError`] when no record has the tag or the ROM is too short.
 pub fn sprite_sheet_by_tag(rom: &[u8], tag: &str) -> Result<SpriteSheet, SpriteSheetError> {
-    (0..SPRITE_COUNT)
-        .find(|index| {
-            let offset = SPRITE_TABLE_OFFSET + index * SPRITE_RECORD_LEN + 8;
-            rom.get(offset..offset + 4) == Some(tag.as_bytes())
+    (1..SPRITE_COUNT)
+        .find(|id| {
+            let offset = SPRITE_TABLE_OFFSET + id * SPRITE_RECORD_LEN + 16;
+            rom.get(offset..offset + SPRITE_TAG_LEN) == Some(tag.as_bytes())
         })
         .map_or_else(
             || {
@@ -622,8 +726,87 @@ pub fn sprite_sheet_by_tag(rom: &[u8], tag: &str) -> Result<SpriteSheet, SpriteS
                     tag: tag.to_owned(),
                 })
             },
-            |index| sprite_sheet(rom, index),
+            |id| sprite_sheet(rom, id),
         )
+}
+
+const OBJECT_TABLE_OFFSET: usize = 0x0032_82B4;
+const OBJECT_TABLE_ENTRY_LEN: usize = 8;
+const OBJECT_LEN: usize = 20;
+const OBJECT_SPRITE_LOOKUP: u16 = 0x8000;
+const OBJECT_NO_SCRIPT: u32 = 0x8000_0000;
+
+/// An object placed on a map: the player (object 0) or a character.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapObject {
+    /// Sprite id; 0 for none, bit 15 set to use the party's Zoid.
+    pub sprite: u16,
+    /// OBJ palette slot the game reserves for it.
+    pub palette_slot: usize,
+    /// Metatile column the object stands on.
+    pub column: usize,
+    /// Metatile row the object stands on.
+    pub row: usize,
+    /// Script reference, `None` when the object has none.
+    pub script: Option<u32>,
+    /// Kind: 0 for the player, 1 or 2 for characters, 4 for invisible triggers.
+    pub kind: u16,
+    /// Extra parameter of the kind; meaning not modeled.
+    pub parameter: u16,
+    /// Animation the object starts with.
+    pub animation: usize,
+    /// Behavior: 0 for characters, 1 for map Zoids, 2 for furniture-like sprites.
+    pub behavior: u16,
+}
+
+impl MapObject {
+    /// The sprite sheet to draw, when the object names a fixed one.
+    #[must_use]
+    pub fn sprite_sheet_id(&self) -> Option<usize> {
+        (self.sprite != 0 && self.sprite & OBJECT_SPRITE_LOOKUP == 0)
+            .then_some(usize::from(self.sprite))
+    }
+}
+
+/// Reads the objects of map `map`; object 0 is the player's entry.
+///
+/// # Errors
+///
+/// Returns [`MapError`] when the map is out of range or the ROM is too
+/// short for its object list.
+pub fn map_objects(rom: &[u8], map: usize) -> Result<Vec<MapObject>, MapError> {
+    if map >= MAP_COUNT {
+        return Err(MapError::NoSuchMap { index: map });
+    }
+    let too_short = || MapError::TooShort {
+        len: rom.len(),
+        index: map,
+    };
+    let entry = OBJECT_TABLE_OFFSET + map * OBJECT_TABLE_ENTRY_LEN;
+    let entry = rom
+        .get(entry..entry + OBJECT_TABLE_ENTRY_LEN)
+        .ok_or_else(too_short)?;
+    let count = usize::from(u16::from_le_bytes([entry[0], entry[1]]));
+    let list = rom_offset(&entry[4..8]).ok_or_else(too_short)?;
+    (0..count)
+        .map(|index| {
+            let at = list + index * OBJECT_LEN;
+            let bytes = rom.get(at..at + OBJECT_LEN).ok_or_else(too_short)?;
+            let half = |i: usize| u16::from_le_bytes([bytes[i], bytes[i + 1]]);
+            let script = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+            Ok(MapObject {
+                sprite: half(0),
+                palette_slot: usize::from(half(2)),
+                column: usize::from(half(4)),
+                row: usize::from(half(6)),
+                script: (script != OBJECT_NO_SCRIPT).then_some(script),
+                kind: half(12),
+                parameter: half(14),
+                animation: usize::from(half(16)),
+                behavior: half(18),
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -632,33 +815,211 @@ mod tests {
 
     use super::*;
 
-    fn sheet(frames: usize, tiles_per_frame: usize) -> SpriteSheet {
-        let tiles = (0..frames * tiles_per_frame)
+    fn sheet(images: usize, tiles_per_image: usize) -> SpriteSheet {
+        let tiles = (0..images * tiles_per_image)
             .map(|index| [u8::try_from(index % 16).unwrap_or(0); formats::tile::TILE_PIXELS])
             .collect();
         SpriteSheet {
             tag: "ch00".to_owned(),
-            frames,
-            tiles_per_frame,
+            images,
+            tiles_per_image,
             palette: [0; 16],
             tiles: Tileset::from_pixels(tiles),
+            frames: vec![
+                SpriteFrame {
+                    tile: 16,
+                    x: -16,
+                    y: -16,
+                    width: 32,
+                    height: 32,
+                },
+                SpriteFrame {
+                    tile: 4,
+                    x: 0,
+                    y: 0,
+                    width: 16,
+                    height: 8,
+                },
+            ],
+            animations: vec![],
         }
     }
 
     #[test]
-    fn composes_square_frames_in_tile_rows_of_four() {
+    fn composes_square_images_in_tile_rows_of_four() {
         let sheet = sheet(2, 16);
-        let frame = sheet.frame(1).unwrap();
-        assert_eq!((frame.width, frame.height), (32, 32));
-        assert_eq!(frame.indices[0], 0);
-        assert_eq!(frame.indices[8], 1);
-        assert_eq!(frame.indices[8 * 32], 4);
-        assert_eq!(sheet.frame(2), None);
+        let image = sheet.image(1).unwrap();
+        assert_eq!((image.width, image.height), (32, 32));
+        assert_eq!(image.indices[0], 0);
+        assert_eq!(image.indices[8], 1);
+        assert_eq!(image.indices[8 * 32], 4);
+        assert_eq!(sheet.image(2), None);
     }
 
     #[test]
-    fn rejects_frames_that_do_not_form_whole_rows() {
-        assert_eq!(sheet(1, 6).frame(0), None);
+    fn composes_frames_from_their_tile_block() {
+        assert_eq!(sheet(1, 16).frame_image(0), None);
+        let sheet = sheet(2, 16);
+        let image = sheet.frame_image(0).unwrap();
+        assert_eq!((image.width, image.height), (32, 32));
+        assert_eq!(image.indices[0], 0);
+        let small = sheet.frame_image(1).unwrap();
+        assert_eq!((small.width, small.height), (16, 8));
+        assert_eq!(small.indices[0], 4);
+        assert_eq!(small.indices[8], 5);
+        assert_eq!(sheet.frame_image(2), None);
+    }
+
+    #[test]
+    fn rejects_images_that_do_not_form_whole_rows() {
+        assert_eq!(sheet(1, 6).image(0), None);
+    }
+
+    fn put(rom: &mut [u8], at: usize, bytes: &[u8]) {
+        rom[at..at + bytes.len()].copy_from_slice(bytes);
+    }
+
+    fn pointer(offset: usize) -> [u8; 4] {
+        (0x0800_0000 + u32::try_from(offset).unwrap()).to_le_bytes()
+    }
+
+    /// A ROM holding sprite 2 with two idle-style animations.
+    fn rom_with_sprite_2() -> Vec<u8> {
+        let data = SPRITE_TABLE_OFFSET + SPRITE_COUNT * SPRITE_RECORD_LEN;
+        let (palette, tiles, frames, animations, sequences) = (
+            data,
+            data + 32,
+            data + 32 + 3 * 512,
+            data + 2000,
+            data + 2100,
+        );
+        let mut rom = vec![0; data + 2200];
+        let record = SPRITE_TABLE_OFFSET + 2 * SPRITE_RECORD_LEN;
+        put(&mut rom, record, &pointer(palette));
+        put(&mut rom, record + 4, &pointer(tiles));
+        put(&mut rom, record + 8, &pointer(animations));
+        put(&mut rom, record + 12, &pointer(frames + 100));
+        put(&mut rom, record + 16, b"ch01");
+        put(&mut rom, record + 20, &3u16.to_le_bytes());
+        put(&mut rom, record + 28, &16u32.to_le_bytes());
+        rom[palette + 2] = 0x7F;
+        rom[tiles + 512] = 0x21;
+        rom[tiles + 1024] = 0x02;
+        for (index, tile) in [0u16, 16, 32].iter().enumerate() {
+            put(
+                &mut rom,
+                frames + 100 + index * 4,
+                &pointer(frames + index * 24),
+            );
+            put(&mut rom, frames + index * 24, &tile.to_le_bytes());
+            put(&mut rom, frames + index * 24 + 4, &(-16i16).to_le_bytes());
+            put(&mut rom, frames + index * 24 + 6, &(-8i16).to_le_bytes());
+            put(&mut rom, frames + index * 24 + 8, &32u16.to_le_bytes());
+            put(&mut rom, frames + index * 24 + 10, &32u16.to_le_bytes());
+        }
+        put(&mut rom, animations, &pointer(sequences));
+        put(&mut rom, animations + 4, &pointer(sequences + 12));
+        let steps: [u16; 8] = [0, 8, 1, 8, 0xFFFF, 0, 2, 4];
+        for (i, half) in steps.iter().enumerate() {
+            put(&mut rom, sequences + 2 * i, &half.to_le_bytes());
+        }
+        put(&mut rom, sequences + 16, &0xFFFFu16.to_le_bytes());
+        rom
+    }
+
+    #[test]
+    fn reads_sprite_records_with_frames_and_animations() {
+        let rom = rom_with_sprite_2();
+        let sheet = sprite_sheet(&rom, 2).unwrap();
+        assert_eq!(sheet.tag, "ch01");
+        assert_eq!((sheet.images, sheet.tiles_per_image), (3, 16));
+        assert_eq!(sheet.palette[1], 0x7F);
+        assert_eq!(sheet.image(1).unwrap().indices[0], 1);
+        assert_eq!(
+            sheet.animations,
+            vec![
+                vec![
+                    AnimationStep {
+                        frame: 0,
+                        duration: 8
+                    },
+                    AnimationStep {
+                        frame: 1,
+                        duration: 8
+                    },
+                ],
+                vec![AnimationStep {
+                    frame: 2,
+                    duration: 4
+                }],
+            ]
+        );
+        assert_eq!(sheet.frames.len(), 3);
+        assert_eq!(
+            sheet.frames[2],
+            SpriteFrame {
+                tile: 32,
+                x: -16,
+                y: -8,
+                width: 32,
+                height: 32,
+            }
+        );
+        assert_eq!(sheet.frame_image(2).unwrap().indices[0], 2);
+        assert_eq!(
+            sprite_sheet(&rom, 0),
+            Err(SpriteSheetError::NoSuchSprite { id: 0 })
+        );
+        assert_eq!(sprite_sheet_by_tag(&rom, "ch01").unwrap().tag, "ch01");
+        assert!(matches!(
+            sprite_sheet(&rom, 3),
+            Err(SpriteSheetError::TooShort { id: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn reads_map_objects() {
+        let list = OBJECT_TABLE_OFFSET + MAP_COUNT * OBJECT_TABLE_ENTRY_LEN;
+        let mut rom = vec![0; list + 2 * OBJECT_LEN];
+        let entry = OBJECT_TABLE_OFFSET + 4 * OBJECT_TABLE_ENTRY_LEN;
+        put(&mut rom, entry, &2u16.to_le_bytes());
+        put(&mut rom, entry + 4, &pointer(list));
+        let halves: [u16; 20] = [
+            0x98, 0, 0, 0, 0, 0x8000, 0, 0, 0, 0, 0xF6, 4, 6, 2, 0x02E2, 0x8000, 1, 0, 0, 2,
+        ];
+        for (i, half) in halves.iter().enumerate() {
+            put(&mut rom, list + 2 * i, &half.to_le_bytes());
+        }
+        let objects = map_objects(&rom, 4).unwrap();
+        assert_eq!(objects.len(), 2);
+        assert_eq!(objects[0].sprite_sheet_id(), Some(0x98));
+        assert_eq!(objects[0].script, None);
+        assert_eq!(
+            objects[1],
+            MapObject {
+                sprite: 0xF6,
+                palette_slot: 4,
+                column: 6,
+                row: 2,
+                script: Some(0x8000_02E2),
+                kind: 1,
+                parameter: 0,
+                animation: 0,
+                behavior: 2,
+            }
+        );
+        assert_eq!(
+            MapObject {
+                sprite: 0x8001,
+                ..objects[1].clone()
+            }
+            .sprite_sheet_id(),
+            None
+        );
+        assert!(matches!(
+            map_objects(&rom, 5),
+            Err(MapError::TooShort { .. })
+        ));
     }
 
     /// A ROM holding map record 4 and its two warps.
