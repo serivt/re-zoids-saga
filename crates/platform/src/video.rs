@@ -80,6 +80,53 @@ impl Frame {
     }
 }
 
+/// A button on the pad.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Button {
+    /// D-pad up.
+    Up,
+    /// D-pad down.
+    Down,
+    /// D-pad left.
+    Left,
+    /// D-pad right.
+    Right,
+    /// Confirm.
+    A,
+    /// Cancel.
+    B,
+    /// Start.
+    Start,
+}
+
+impl Button {
+    const fn bit(self) -> u8 {
+        1 << (self as u8)
+    }
+}
+
+/// The set of buttons held at this moment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Input {
+    held: u8,
+}
+
+impl Input {
+    /// Whether `button` is held.
+    #[must_use]
+    pub const fn is_held(self, button: Button) -> bool {
+        self.held & button.bit() != 0
+    }
+
+    /// This input with `button` held as well.
+    #[must_use]
+    pub const fn with(self, button: Button) -> Self {
+        Self {
+            held: self.held | button.bit(),
+        }
+    }
+}
+
 /// Something the person did to the display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
@@ -111,6 +158,9 @@ pub trait Display {
 
     /// Events that happened since the last call, in order.
     fn poll_events(&mut self) -> Vec<Event>;
+
+    /// Buttons held right now.
+    fn input(&self) -> Input;
 }
 
 #[cfg(test)]
@@ -125,6 +175,15 @@ mod tests {
         assert_eq!(frame.pixel(1, 1), Some(Rgb::new(9, 9, 9)));
         assert_eq!(frame.pixel(2, 0), None);
         assert_eq!(frame.pixel(0, 0), Some(Rgb::new(1, 2, 3)));
+    }
+
+    #[test]
+    fn input_tracks_held_buttons() {
+        let input = Input::default().with(Button::Left).with(Button::A);
+        assert!(input.is_held(Button::Left));
+        assert!(input.is_held(Button::A));
+        assert!(!input.is_held(Button::Right));
+        assert_eq!(Input::default().held, 0);
     }
 
     #[test]

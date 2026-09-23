@@ -62,11 +62,11 @@ impl PaletteBank {
     }
 }
 
-/// Fills the whole frame with a background whose top-left cell is map cell
-/// `(scroll_x, scroll_y)`. `entry` returns the raw tilemap entry at a cell,
-/// wrapping as the caller sees fit; `tile` returns a tile's palette indices.
-/// With `transparent`, pixels of index 0 are left untouched, as for
-/// backgrounds drawn above the backdrop.
+/// Fills the whole frame with a background scrolled by `(scroll_x, scroll_y)`
+/// pixels. `entry` returns the raw tilemap entry at a cell, wrapping as the
+/// caller sees fit; `tile` returns a tile's palette indices. With
+/// `transparent`, pixels of index 0 are left untouched, as for backgrounds
+/// drawn above the backdrop.
 pub fn draw_background<'t>(
     frame: &mut Frame,
     entry: impl Fn(usize, usize) -> u16,
@@ -75,28 +75,34 @@ pub fn draw_background<'t>(
     (scroll_x, scroll_y): (usize, usize),
     transparent: bool,
 ) {
-    let columns = frame.width().div_ceil(TILE_SIZE);
-    let rows = frame.height().div_ceil(TILE_SIZE);
+    let (first_column, offset_x) = (scroll_x / TILE_SIZE, scroll_x % TILE_SIZE);
+    let (first_row, offset_y) = (scroll_y / TILE_SIZE, scroll_y % TILE_SIZE);
+    let columns = frame.width().div_ceil(TILE_SIZE) + 1;
+    let rows = frame.height().div_ceil(TILE_SIZE) + 1;
     for row in 0..rows {
         for column in 0..columns {
-            let cell = TileMapEntry::from_u16(entry(scroll_x + column, scroll_y + row));
+            let cell = TileMapEntry::from_u16(entry(first_column + column, first_row + row));
             let Some(pixels) = tile(usize::from(cell.tile)) else {
                 continue;
             };
             let palette = palettes.palette(cell.palette);
+            let origin_x = column * TILE_SIZE;
+            let origin_y = row * TILE_SIZE;
             for y in 0..TILE_SIZE {
+                let Some(frame_y) = (origin_y + y).checked_sub(offset_y) else {
+                    continue;
+                };
                 for x in 0..TILE_SIZE {
+                    let Some(frame_x) = (origin_x + x).checked_sub(offset_x) else {
+                        continue;
+                    };
                     let source_x = if cell.flip_x { TILE_SIZE - 1 - x } else { x };
                     let source_y = if cell.flip_y { TILE_SIZE - 1 - y } else { y };
                     let index = pixels[source_y * TILE_SIZE + source_x];
                     if transparent && index == 0 {
                         continue;
                     }
-                    frame.set_pixel(
-                        column * TILE_SIZE + x,
-                        row * TILE_SIZE + y,
-                        palette.color(index),
-                    );
+                    frame.set_pixel(frame_x, frame_y, palette.color(index));
                 }
             }
         }
@@ -150,6 +156,23 @@ mod tests {
         assert_eq!(frame.pixel(7, 0), Some(Rgb::new(255, 0, 0)));
         assert_eq!(frame.pixel(6, 0), Some(Rgb::new(0, 255, 0)));
         assert_eq!(frame.pixel(0, 0), Some(Rgb::new(0, 0, 0)));
+    }
+
+    #[test]
+    fn scrolls_by_pixels() {
+        let tiles = tiles();
+        let mut frame = Frame::new(8, 8, Rgb::default());
+        draw_background(
+            &mut frame,
+            |x, _| u16::from(x == 1),
+            |i| tiles.get(i),
+            &bank(),
+            (3, 0),
+            false,
+        );
+        assert_eq!(frame.pixel(5, 0), Some(Rgb::new(255, 0, 0)));
+        assert_eq!(frame.pixel(6, 0), Some(Rgb::new(0, 255, 0)));
+        assert_eq!(frame.pixel(4, 0), Some(Rgb::new(0, 0, 0)));
     }
 
     #[test]

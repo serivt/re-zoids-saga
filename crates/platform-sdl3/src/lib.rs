@@ -1,8 +1,8 @@
 //! SDL3 implementation of the platform traits.
 
-use platform::{Display, Event, Frame, PlatformError};
+use platform::{Button, Display, Event, Frame, Input, PlatformError};
 use sdl3::event::Event as SdlEvent;
-use sdl3::keyboard::Keycode;
+use sdl3::keyboard::{Keycode, Scancode};
 use sdl3::pixels::PixelFormat;
 use sdl3::render::{ScaleMode, TextureCreator, WindowCanvas};
 use sdl3::video::WindowContext;
@@ -10,6 +10,15 @@ use sdl3::{EventPump, Sdl};
 
 const BACKEND: &str = "sdl3";
 const BYTES_PER_PIXEL: usize = 3;
+const KEY_MAP: [(Scancode, Button); 7] = [
+    (Scancode::Up, Button::Up),
+    (Scancode::Down, Button::Down),
+    (Scancode::Left, Button::Left),
+    (Scancode::Right, Button::Right),
+    (Scancode::X, Button::A),
+    (Scancode::Z, Button::B),
+    (Scancode::Return, Button::Start),
+];
 
 /// A window backed by SDL3 that shows frames of a fixed size, scaled up
 /// with nearest-neighbor sampling.
@@ -89,6 +98,14 @@ impl Display for Sdl3Display {
             .map_err(backend_error)?;
         self.canvas.present();
         Ok(())
+    }
+
+    fn input(&self) -> Input {
+        let keys = self.event_pump.keyboard_state();
+        KEY_MAP
+            .iter()
+            .filter(|(scancode, _)| keys.is_scancode_pressed(*scancode))
+            .fold(Input::default(), |input, (_, button)| input.with(*button))
     }
 
     fn poll_events(&mut self) -> Vec<Event> {

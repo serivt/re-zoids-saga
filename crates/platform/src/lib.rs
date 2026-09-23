@@ -2,4 +2,4 @@
 
 pub mod video;
 
-pub use video::{Display, Event, Frame, PlatformError, Rgb};
+pub use video::{Button, Display, Event, Frame, Input, PlatformError, Rgb};
