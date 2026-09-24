@@ -9,6 +9,7 @@ use extraction::saga::{
     TitleGraphics, Warp, WindowSkin, WindowSkinError,
 };
 use extraction::saga_battle::{self, BattleImage, BattleScene, EffectSprite};
+use extraction::saga_formation::{self, BattleField};
 use extraction::saga_guide::{
     self, CHARACTER_ENTRIES, CHARACTER_GUIDE_SCRIPTS, GuidePicture, SYSTEM_SCRIPTS,
     ZOID_GUIDE_SCRIPTS, ZoidPart,
@@ -241,6 +242,25 @@ impl<'rom> GameData<'rom> {
     /// Returns [`SpriteSheetError`] when it cannot be read.
     pub fn zoid_status_sprite(&self, zoid: usize) -> Result<SpriteSheet, SpriteSheetError> {
         saga::zoid_status_sprite(self.rom, zoid)
+    }
+
+    /// The field the formation screen shows the party on.
+    #[must_use]
+    pub fn battle_field(&self) -> Option<BattleField> {
+        saga_formation::battle_field(self.rom)
+    }
+
+    /// Where the unit in formation slot `slot` stands on the formation
+    /// screen.
+    #[must_use]
+    pub fn slot_anchor(&self, slot: usize) -> Option<(i32, i32)> {
+        saga_formation::slot_anchor(self.rom, slot)
+    }
+
+    /// The cursor the formation screen marks a slot with.
+    #[must_use]
+    pub fn slot_cursor(&self) -> Option<EffectSprite> {
+        saga_formation::slot_cursor(self.rom)
     }
 
     /// The party's members and formation as `state` holds them.

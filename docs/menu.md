@@ -11,11 +11,16 @@ every page of the four members' Zoids was shown, screenshots frame by frame, and
 of the printers named below. For the weapons list and the equipment screen: the same
 traces while the Shield Liger's laser was taken off, moved to another rack and listed,
 write watchpoints on the stock and the unit's parts, and dumps of VRAM, OAM, palettes
-and the display registers on the part lists. Saving is described in
-[formats/save.md](formats/save.md). Implemented in
-`crates/game-core/src/menu.rs`; data in `crates/extraction/src/saga.rs`
-(`PAUSE_MENU_SCRIPTS`, `PART_NAME_SCRIPTS`, `pause_wallpaper`) and
-`crates/extraction/src/saga_party.rs` (`unit_parts`, `part`).
+and the display registers on the part lists. For the formation screen: a read of its
+task (`0x08037B84`) and of the routines named below, breakpoints on the script runner,
+the sound call and the loaders while units were taken out, placed and the list paged,
+on the party the labyrinth leaves and on one with more members, a broken unit and an
+L unit; VRAM, OAM and palette dumps, and screenshots of every frame compared with the
+port's. Saving is described in [formats/save.md](formats/save.md). Implemented in
+`crates/game-core/src/menu/` (`formation.rs` for the formation screen); data in
+`crates/extraction/src/saga.rs` (`PAUSE_MENU_SCRIPTS`, `PART_NAME_SCRIPTS`,
+`pause_wallpaper`), `crates/extraction/src/saga_party.rs` (`unit_parts`, `part`,
+`join_formation`, `leave_formation`) and `crates/extraction/src/saga_formation.rs`.
 
 ## Scripts
 
@@ -329,6 +334,12 @@ Four rules of the original, taken from its handlers, make the scripts work:
 - The windows share one tile map, so the last window drawn covers the others. Drawing a
   window (`0x0D`) or presenting it draws it again on top; presenting all of them draws
   them in id order. The parts pages rely on this.
+- The menus of modes 2 to 6 (opcodes `0x36` and `0x3C`) draw page marks on the
+  window's sides when they start (`0x08040DA0`, `0x08040BA8`): ◂L on the left border
+  and R▸ on the right, each two tiles high around the middle row (window tiles
+  `0x36`/`0x37` and `0x38`/`0x39`, the lower one flipped vertically), as the game's
+  code sets bits 0 and 1 of the window's byte `+0xF` (`0x080339F8`). The up and down
+  marks of a scrolled list sit in the middle of the top and bottom borders.
 - A window remembers the line its last menu ended on and the next menu starts there,
   so the cursor returns to the item that was chosen. The cursor tiles stay until the
   window is redrawn: a notice leaves them on the list, opening a submenu (which presents
@@ -366,10 +377,65 @@ The game keeps a fade level (IWRAM `0x03002356`), 0 to 31, that the screen shows
     frames, so the menu brightens over the last 16;
   - the main list's menu runs on the 43rd frame after the build.
 - **Closing**, counted from B on the main list: sound `0x3F`, then the menu, its
-  wallpaper still moving, darkens a level a frame from the fourth frame. On the 34th
+  wallpaper still moving, darkens a level a frame from the fifth frame. On the 34th
   frame the map is loaded again, so the actors' animations start over. The field stays
-  black 14 frames, then brightens a level a frame, and the player moves once it is
+  black 16 frames, then brightens a level a frame, and the player moves once it is
   bright.
+
+## Formation screen
+
+部隊編成 hands over to a task of its own (`0x08037B84`); the menu's code waits for it
+(`0x0805203C`). Its windows and texts are scripts of the `battle-menu` and
+`battle-text` tables (see [formats/script-text.md](formats/script-text.md)):
+
+| Script | Content |
+|---|---|
+| menu 1 | Reset the text system |
+| menu 2, 8 | The help line, window 1 at (0, 16) 30×4; the list, window 2 at (15, 4) 15×12, and the header, window 3 at (15, 0) 15×4 |
+| menu 5, 9, 10; 6, 13, 14; 7, 11, 12 | Present, draw and clear windows 1, 2 and 3 |
+| menu 15 | Draw window 2 and run its menu: opcode `0x3C` in mode 6, cancelable |
+| text 0x17, 0x18, 0x19 | The helps: Ａボタンで選択　Ｂボタンで終了です, 場所を選び、Ａボタンで部隊に編成できます, 選択した場所にいるゾイドを　Ａボタンで部隊から外します |
+| text 0x11, 0x16, 0x32, 106 | The marks before a name: ★ in the formation, × without a unit, 壊 for a broken unit (bit `0x800`), a full-width space otherwise |
+| text 0x12–0x14, 0x1C | The sizes Ｓ, Ｍ, Ｌ, and － without a unit |
+| text 0x15 | 搭乗していません, the header for a member without a unit |
+
+The screen, from back to front, is the battle field's grid (BG3) and platform (BG2)
+(see `crates/extraction/src/saga_formation.rs`), the units' pictures, the windows
+(BG0) and the slot cursor. Each unit stands at its slot's position of the battle's
+player side, 120 pixels further left, in the picture the status screen shows; the
+nearer ones (lower on the screen) cover the others. Slots 0–2 are the left column
+from top to bottom, 3–5 the right one. The cursor (entity 4, OBJ priority 0) sits 8
+pixels right of and 16 above the slot's position, in the first frame of its animation:
+the screen does not run the entities' animations.
+
+- **List**: the members, five a page (`0x080380E8`), each with its mark, name and, from
+  cell 10, its size. The header shows the Zoid of the member under the cursor, and is
+  printed again only when that Zoid changes (`0x08038314`). L and R turn the page when
+  there is one, with the page marks, and put the cursor on the first line.
+- **A**: sound `0x47`; on a member in the formation the cursor goes to its slot to take
+  the unit out; on one with a unit that is not broken, to slot 1 to place it; nothing
+  otherwise. **Left** puts the cursor on the first occupied slot (slot 0 when none) to
+  take a unit out. **B** or **START** leaves.
+- **On the field** (`0x080383C0`): up and down move within a column, left and right
+  between the columns' matching slots, with sound `0x40`; an L unit being placed only
+  moves between the middles (1 and 4). A places (sound `0x51`) or takes out (`0x3E`),
+  B goes back (`0x3F`); then the cursor goes, the page is printed again and the list's
+  menu runs.
+- **Placing** (`0x080371AC`) empties the slot first, or the middle of its column when an
+  L unit fills it; an L unit empties its whole column and stands in the middle. Taking
+  out (`0x08037258`) empties the slot, or the column's middle for an L unit. The game
+  does not check that the slot holds anyone: on an empty slot it clears the bits of the
+  entries of unit and character `0xFF`, the character's inside the game-state block.
+- **Entering**, counted from the frame the choice is made: the menu's wallpaper stops
+  and the menu darkens a level a frame from the fifth frame; the screen is built in the
+  dark on the 36th frame, brightens a level a frame from the 60th, its help line is
+  printed on the 95th and the list's menu runs.
+- **Leaving**, counted from B or START: no sound; the screen darkens a level a frame from
+  the fifth frame, and on the 44th the text system is reset and the main menu is built
+  again with the cursor on 部隊編成. Its wallpaper starts over from its first position
+  and moves a pixel a frame but for the 6th and 7th frames; the fade level holds at 31
+  for three frames, falls one a frame but for those two, and the main list's menu runs
+  on the 38th frame, which stops the wallpaper once more.
 
 ## Flows
 
@@ -377,7 +443,7 @@ START on the field opens the menu; B on the main list closes it (see above). ス
 status list: 部隊 shows the unit list, which A or B leaves; キャラクター the character
 screen; 武器 the weapons list; Ｚｉデータ and Ｚｉデータ用アイテム print their notices;
 図鑑 asks ゾイド or キャラ and opens that guide (see [guide.md](guide.md)). 武装 shows the
-equipment screen. コンフィグ shows the message speed (3 on a new game) with the
+equipment screen. 部隊編成 shows the formation screen (see above). コンフィグ shows the message speed (3 on a new game) with the
 cursor on it; picking a number stores it in the party and returns to the main list
 with the cursor on コンフィグ, as the original does. セーブ asks; はい writes the save
 and answers セーブしました, or セーブを中止しました when it could not be written, and
@@ -385,14 +451,20 @@ and answers セーブしました, or セーブを中止しました when it cou
 
 ## Not modeled yet
 
-部隊編成 (a separate screen with its own wallpaper) and
-the ボタン page of the config end in the まだできてません notice.
+The ボタン page of the config ends in the まだできてません notice.
+
+The formation screen tints a unit's picture darker (every channel less 24,
+`0x08031E90`) when its battle record has bit `0x4000`; a broken unit (bit `0x800`) did
+not show it, and what sets that bit is not known yet, so the port draws every unit as
+it is.
 
 The original spends a frame on each window it opens, clears or presents, and its game
 stands still meanwhile: the wallpaper and the blinking stop, and keys go unread. The
 port draws a screen at once, then counts the frames its scripts would have cost and
 holds the menu for that long. The key waits and the blinking then start within a frame
-of the original's.
+of the original's. The steps of a transition in between do not show (on the formation
+screen, the header cleared before the new name, the help line cleared before its new
+text), and a menu's cursor answers a key two frames before the original's.
 
 The menu's wallpaper in the screens after the main list still drifts from the
 original's: the frames each transition stops it for are only approximated.

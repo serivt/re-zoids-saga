@@ -26,7 +26,8 @@ event, with the original timing (see [docs/events.md](docs/events.md)). The thro
 room's two battle scenes play as in the original, shots included (see
 [docs/battle.md](docs/battle.md)); the battle system itself is not implemented yet. The
 pause menu shows the party, each Zoid's status and parts, the stocked weapons, and
-changes the parts on a Zoid's racks (see [docs/menu.md](docs/menu.md)).
+changes the parts on a Zoid's racks and who stands in the formation (see
+[docs/menu.md](docs/menu.md)).
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements

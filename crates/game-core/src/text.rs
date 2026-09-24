@@ -17,6 +17,30 @@ const LATIN_INSET: usize = 3;
 /// Pixels one cell of the ROM font takes.
 pub const CELL_WIDTH: usize = GLYPH_WIDTH;
 const FULL_WIDTH_OFFSET: u32 = 0xFEE0;
+/// The first of the characters that move a line's text to a cell: the
+/// character after `CELL_STOP + n` starts at cell `n`, however wide the
+/// text before it is. The game's code sets its text position this way
+/// before it prints a value in a column; with a translation's
+/// proportional text, spaces would not reach the same cell.
+pub const CELL_STOP: u32 = 0xE000;
+const CELL_STOPS: u32 = 0x100;
+
+/// The cell a column mark moves the text to.
+#[must_use]
+pub fn cell_stop(ch: char) -> Option<usize> {
+    let offset = u32::from(ch).checked_sub(CELL_STOP)?;
+    (offset < CELL_STOPS).then(|| usize::try_from(offset).unwrap_or(0))
+}
+
+/// The mark that moves the text to cell `column`.
+#[must_use]
+pub fn cell_stop_mark(column: usize) -> char {
+    u32::try_from(column)
+        .ok()
+        .filter(|column| *column < CELL_STOPS)
+        .and_then(|column| char::from_u32(CELL_STOP + column))
+        .unwrap_or(IDEOGRAPHIC_SPACE)
+}
 const IDEOGRAPHIC_SPACE: char = '\u{3000}';
 
 /// The full-width form of a printable ASCII character, or the character
@@ -290,6 +314,10 @@ impl<'rom> TextPainter<'rom> {
                     .map_or(0, |first| self.metrics.inset(first))
             };
             for ch in content.chars() {
+                if let Some(column) = cell_stop(ch) {
+                    pen = pen.max(column * CELL_WIDTH);
+                    continue;
+                }
                 if let Some(glyph) = self.metrics.latin_glyph(ch) {
                     let inset = if cells {
                         (CELL_WIDTH - usize::from(glyph.width).min(CELL_WIDTH)) / 2

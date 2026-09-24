@@ -39,6 +39,10 @@ pub const NAME_TABLE: &str = "name";
 pub const BATTLE_TABLE: &str = "battle";
 /// Table of the parts' names.
 pub const PART_TABLE: &str = "part";
+/// Table of the battle menus' scripts, which the formation screen uses.
+pub const BATTLE_MENU_TABLE: &str = "battle-menu";
+/// Table of the battle messages' scripts, which the formation screen uses.
+pub const BATTLE_TEXT_TABLE: &str = "battle-text";
 /// Key prefix of the name entry's character pages: `name-entry/alphabet/N`.
 pub const ALPHABET_PREFIX: &str = "name-entry/alphabet/";
 /// Key of the name entry's help line.

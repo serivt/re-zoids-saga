@@ -7,9 +7,9 @@
 //! help text and runs the menu. Choices open the status submenu (48, 49)
 //! with the unit list, the character screen, each Zoid's status and parts
 //! pages (68–102, 164–218) and the stocked weapons (103–107), the
-//! equipment screen (128–150, in `equipment`), the message-speed setting
-//! (151–159)
-//! or the save question (160, 61, 161, 162), or print a notice. The
+//! equipment screen (128–150, in `equipment`), the formation screen (a
+//! task of its own over the battle field, in `formation`), the
+//! message-speed setting (151–159) or the save question (160, 61, 161, 162), or print a notice. The
 //! screens this port does not have end in the table's "not done yet"
 //! notice (63). Behind the windows a logo map drifts one pixel per frame
 //! diagonally over a static texture.
@@ -30,6 +30,7 @@ use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
 mod equipment;
+mod formation;
 mod parts;
 
 const SCRIPT_WAIT_KEY: usize = 37;
@@ -117,6 +118,7 @@ const MAP_PIXELS: i32 = 256;
 const ITEM_STATUS: u16 = 0;
 const ITEM_ITEMS: u16 = 1;
 const ITEM_WEAPONS: u16 = 2;
+const ITEM_FORMATION: u16 = 3;
 const ITEM_CONFIG: u16 = 4;
 const ITEM_SAVE: u16 = 5;
 const STATUS_UNIT: u16 = 0;
@@ -148,9 +150,16 @@ const INTRO_STALL_FRAMES: u32 = 2;
 /// Frames from B on the main list until the field returns, the screen
 /// darkening a level a frame from the fourth.
 const CLOSE_FRAMES: u32 = 34;
-const CLOSE_DELAY: u32 = 3;
+const CLOSE_DELAY: u32 = 4;
 const GUIDE_FADE_TOP: u32 = 31;
 const GUIDE_FADE_HOLD: u32 = 12;
+/// Frames from the formation screen's end until the main list's menu
+/// runs again (`0x0805203C`, then the menu's state 1 at `0x0804E938`).
+const FORMATION_RETURN_FRAMES: u32 = 38;
+/// The frames after the rebuild at which the wallpaper stands still while
+/// the menu's scripts draw, and the fade level with it.
+const FORMATION_RETURN_STALL: (u32, u32) = (6, 7);
+const FORMATION_RETURN_HOLD: u32 = 3;
 const SCREEN_WIDTH: usize = 240;
 const SCREEN_HEIGHT: usize = 160;
 const EQUIP_IMAGE_TILES: usize = 16;
@@ -343,6 +352,10 @@ pub struct PauseMenu {
     state: MenuState,
     scroll: i32,
     guide: Option<Box<Guide>>,
+    formation: Option<Box<formation::Formation>>,
+    /// Frames since the formation screen handed back, while the main menu
+    /// brightens.
+    formation_return: Option<u32>,
     book_line: usize,
     returning: Option<u32>,
     /// Frames since the menu was built, while it brightens.
@@ -421,6 +434,8 @@ impl PauseMenu {
             state: MenuState::Closed,
             scroll: 0,
             guide: None,
+            formation: None,
+            formation_return: None,
             book_line: 0,
             returning: None,
             intro: None,
@@ -685,6 +700,25 @@ impl PauseMenu {
             self.intro = (frames < INTRO_FRAMES).then_some(frames);
             return Ok(Some(MenuStep::Open));
         }
+        if let Some(formation) = &mut self.formation {
+            formation.update(rom, input, windows, &mut self.game_state)?;
+            if formation.is_closed() {
+                self.formation = None;
+                self.return_from_formation(rom, windows)?;
+            }
+            return Ok(Some(MenuStep::Open));
+        }
+        if let Some(frames) = self.formation_return {
+            let frames = frames + 1;
+            if frames < FORMATION_RETURN_FRAMES {
+                self.scroll = formation_return_scroll(frames);
+                self.formation_return = Some(frames);
+            } else {
+                self.formation_return = None;
+                self.return_to(rom, Return::Main, windows)?;
+            }
+            return Ok(Some(MenuStep::Open));
+        }
         if let Some(guide) = &mut self.guide {
             guide.update(&GameData::new(rom), input, windows)?;
             if guide.is_closed() {
@@ -742,6 +776,24 @@ impl PauseMenu {
         windows.set_cursor(BOOK_WINDOW, None);
         self.busy = 0;
         self.returning = Some(0);
+        Ok(())
+    }
+
+    /// Back from the formation screen (`0x0805203C`): the main menu built
+    /// again in the dark with the cursor on 部隊編成 and the wallpaper from
+    /// its start, and the party as the screen left it. The menu brightens
+    /// and its list runs again 38 frames later.
+    fn return_from_formation(
+        &mut self,
+        rom: &[u8],
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        self.roster = GameData::new(rom).roster(&self.game_state);
+        self.build(rom, windows)?;
+        windows.present(None);
+        self.scroll = 0;
+        self.busy = 0;
+        self.formation_return = Some(0);
         Ok(())
     }
 
@@ -1078,6 +1130,12 @@ impl PauseMenu {
                 self.notice(SCRIPT_NO_ITEMS, Return::Main)
             }
             ITEM_WEAPONS => self.open_equipment(rom, windows),
+            ITEM_FORMATION => {
+                let formation = formation::Formation::new(&GameData::new(rom), &self.game_state);
+                self.formation = Some(Box::new(formation));
+                self.scroll += 1;
+                Ok(())
+            }
             ITEM_CONFIG => {
                 windows.clear_window(HELP_WINDOW);
                 self.run_now(rom, SCRIPT_SPEED_WINDOW, windows)?;
@@ -1253,6 +1311,20 @@ impl PauseMenu {
         skin: &WindowPainter,
         painter: &TextPainter,
     ) {
+        if let Some(formation) = &self.formation {
+            if formation.covers() {
+                formation.draw(frame, windows, skin, painter, &self.game_state);
+            } else {
+                self.draw_menu(frame, windows, skin, painter);
+                darken(frame, shown_level(formation.fade()));
+            }
+            return;
+        }
+        if let Some(frames) = self.formation_return {
+            self.draw_menu(frame, windows, skin, painter);
+            darken(frame, formation_return_darkness(frames));
+            return;
+        }
         if let Some(guide) = &self.guide {
             if guide.covered() {
                 self.draw_menu(frame, windows, skin, painter);
@@ -1450,6 +1522,40 @@ fn intro_darkness(frames: u32) -> u8 {
 /// screen shows it from 16 down.
 fn return_darkness(frames: u32) -> u8 {
     let level = GUIDE_FADE_TOP.saturating_sub(frames.saturating_sub(GUIDE_FADE_HOLD));
+    u8::try_from(level.min(u32::from(FADE_STEPS))).unwrap_or(FADE_STEPS)
+}
+
+/// The wallpaper's scroll `frames` after the menu was rebuilt behind the
+/// formation screen: it moves a pixel a frame from its start but for the
+/// two frames the menu's scripts take.
+fn formation_return_scroll(frames: u32) -> i32 {
+    let (first, last) = FORMATION_RETURN_STALL;
+    let scroll = if frames < first {
+        frames
+    } else if frames <= last {
+        first - 1
+    } else {
+        frames - (last - first + 1)
+    };
+    i32::try_from(scroll).unwrap_or(0)
+}
+
+/// How dark the rebuilt menu is `frames` after it was built: the game's
+/// fade level holds at 31, falls a level a frame but for the same two
+/// frames, and shows from 16 down.
+fn formation_return_darkness(frames: u32) -> u8 {
+    let (first, last) = FORMATION_RETURN_STALL;
+    let fallen = frames.saturating_sub(FORMATION_RETURN_HOLD);
+    let fallen = if frames > last {
+        fallen - (last - first + 1)
+    } else {
+        fallen.min(first - 1 - FORMATION_RETURN_HOLD)
+    };
+    shown_level(GUIDE_FADE_TOP.saturating_sub(fallen))
+}
+
+/// The darkness a fade level of 0 to 31 shows: the screen is black from 16.
+fn shown_level(level: u32) -> u8 {
     u8::try_from(level.min(u32::from(FADE_STEPS))).unwrap_or(FADE_STEPS)
 }
 

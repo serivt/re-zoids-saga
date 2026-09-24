@@ -75,10 +75,13 @@ pub enum Instruction {
         /// Mode byte as stored.
         mode: u8,
     },
-    /// `0x36`: the menu the game's own screens drive: like `0x06`, but a
-    /// cursor move also ends it, with var0 = `0x20` (up) or `0x40` (down)
-    /// and the new line in var1, so the caller can redraw; `mode` 2 also
-    /// ends it on L (var0 = 2) or R (var0 = 4), 3 on L only and 4 on R only.
+    /// `0x36` and `0x3C`: the menu the game's own screens drive: like
+    /// `0x06`, but a cursor move also ends it, with var0 = `0x20` (up) or
+    /// `0x40` (down) and the new line in var1, so the caller can redraw;
+    /// `mode` 2 also ends it on L (var0 = 2) or R (var0 = 4), 3 on L only,
+    /// 4 on R only, 5 on L, R or left (var0 = 8), and 6 on those, right
+    /// (var0 = `0x10`), START (var0 = `0x80`) or SELECT (var0 = 0). The
+    /// two handlers (`0x0803F86C`, `0x0803F400`) differ in no key.
     MoveMenu {
         /// Key set.
         mode: u8,
@@ -315,7 +318,7 @@ pub fn decode_instruction(bytes: &[u8], at: usize) -> Result<(Instruction, usize
     let instruction = match code {
         0x22 => Instruction::End,
         0x00 => Instruction::Nop,
-        0x01..=0x06 | 0x0D..=0x0F | 0x36 | 0x37 | 0x3A | 0x3B | 0x3D => {
+        0x01..=0x06 | 0x0D..=0x0F | 0x36 | 0x37 | 0x3A..=0x3D => {
             window_instruction(code, &mut cursor)?
         }
         0x07 | 0x08 | 0x10..=0x14 => control_flow(code, &mut cursor, at)?,
@@ -366,7 +369,7 @@ fn window_instruction(code: u8, cursor: &mut Cursor<'_>) -> Result<Instruction, 
         0x06 => Instruction::Menu {
             mode: cursor.byte()?,
         },
-        0x36 => {
+        0x36 | 0x3C => {
             let arg = cursor.byte()?;
             Instruction::MoveMenu {
                 mode: arg & 0x0F,
@@ -701,6 +704,20 @@ mod tests {
         assert_eq!(decode(&[0x3D, 30]), (Instruction::Delay(30), 2));
         assert_eq!(decode(&[0x22]), (Instruction::End, 1));
         assert_eq!(decode(&[0x20, 0x41]), (Instruction::Message, 1));
+    }
+
+    #[test]
+    fn the_widest_move_menu_decodes_like_the_other() {
+        assert_eq!(
+            decode(&[0x3C, 0x16]),
+            (
+                Instruction::MoveMenu {
+                    mode: 6,
+                    cancelable: true
+                },
+                2
+            )
+        );
     }
 
     #[test]

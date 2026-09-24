@@ -15,7 +15,7 @@ use platform::Frame;
 
 use crate::data::GameData;
 use crate::extension::{Event, SharedExtensions};
-use crate::text::{CELL_WIDTH, TextMetrics};
+use crate::text::{CELL_WIDTH, TextMetrics, cell_stop_mark};
 use crate::{FrameStyle, ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
 /// Name the player carries when none was entered.
@@ -31,7 +31,6 @@ const MENU_MARGIN: usize = 2;
 const FULL_WIDTH_SPACE: char = '\u{3000}';
 const TEXT_MARGIN: usize = 1;
 const PROMPT_FROM_RIGHT: usize = 2;
-const NAME_RESET_MODE: u8 = 1;
 
 /// One open window.
 #[derive(Debug, Clone)]
@@ -72,8 +71,8 @@ pub struct Window {
     pub pending_break: bool,
     /// Order in which the window was opened; later windows cover earlier ones.
     pub opened: u64,
-    /// Scroll marks the game's code sets itself for a list it pages
-    /// through, in place of the ones the lines give.
+    /// Page marks the game's code sets itself for a list it pages
+    /// through: whether pages lie before and after the shown one.
     pub marks: Option<(bool, bool)>,
 }
 
@@ -172,21 +171,27 @@ impl Window {
     /// full-width spaces up to it and never wrapping: how the game's code
     /// places values in a window.
     fn put_at(&mut self, column: usize, ch: char) {
-        self.apply_break();
-        self.ensure_line();
-        let used = self.lines.last().map_or(0, |line| line.chars().count());
-        for _ in used..column {
-            self.push(FULL_WIDTH_SPACE, CELL_WIDTH, 0);
-        }
+        self.pad_to(column);
         self.push(ch, CELL_WIDTH, 0);
     }
 
+    /// Moves the current line's text to cell `column`: with spaces, as
+    /// the original prints them, when every character so far takes a
+    /// cell, with a column mark after a translation's narrower letters.
     fn pad_to(&mut self, column: usize) {
         self.apply_break();
         self.ensure_line();
-        let used = self.lines.last().map_or(0, |line| line.chars().count());
-        for _ in used..column {
-            self.push(FULL_WIDTH_SPACE, CELL_WIDTH, 0);
+        let target = column * CELL_WIDTH;
+        let used = self.widths.last().copied().unwrap_or(0);
+        if used >= target {
+            return;
+        }
+        if used % CELL_WIDTH == 0 {
+            for _ in used / CELL_WIDTH..column {
+                self.push(FULL_WIDTH_SPACE, CELL_WIDTH, 0);
+            }
+        } else {
+            self.push(cell_stop_mark(column), target - used, 0);
         }
     }
 
@@ -237,9 +242,6 @@ impl Window {
     /// Whether lines are hidden above and below the shown ones.
     #[must_use]
     pub fn hidden_lines(&self) -> (bool, bool) {
-        if let Some(marks) = self.marks {
-            return marks;
-        }
         let filled = self
             .lines
             .iter()
@@ -332,8 +334,10 @@ impl<'rom> ScriptWindows<'rom> {
         }
     }
 
-    /// Sets the scroll marks of window `id`: whether more lines lie above
-    /// and below, as the game's code does for a list it pages through.
+    /// Sets the page marks of window `id`, on its left and right borders:
+    /// whether pages lie before and after the shown one, as the game's code
+    /// does for a list it pages through with L and R (the window's byte
+    /// `+0xF`, which the menus of modes 2 to 6 draw).
     pub fn set_scroll_marks(&mut self, id: u8, marks: (bool, bool)) {
         if let Some(window) = self.window_mut(id) {
             window.marks = Some(marks);
@@ -464,6 +468,14 @@ impl<'rom> ScriptWindows<'rom> {
                     (window.y, window.y + window.height - 1),
                     window.hidden_lines(),
                 );
+                if let Some(marks) = window.marks {
+                    skin.draw_page_marks(
+                        frame,
+                        (window.x, (window.x + window.width).saturating_sub(1)),
+                        window.y + window.height / 2,
+                        marks,
+                    );
+                }
             }
         }
     }
@@ -653,11 +665,8 @@ impl ScriptHost for ScriptWindows<'_> {
         self.player_name.clone()
     }
 
-    fn reset(&mut self, mode: u8) {
+    fn reset(&mut self, _mode: u8) {
         self.windows.iter_mut().for_each(|slot| *slot = None);
-        if mode == NAME_RESET_MODE {
-            self.player_name.clear();
-        }
     }
 
     fn menu_lines(&self, id: u8) -> usize {
@@ -875,9 +884,24 @@ mod tests {
         host.play_sound(0x41);
         assert_eq!(host.take_sounds(), [0x41]);
         assert!(host.take_sounds().is_empty());
-        assert_eq!(host.player_name(), "アトレー");
         host.reset(1);
-        assert_eq!(host.player_name(), "");
+        assert_eq!(host.player_name(), "アトレー");
+    }
+
+    #[test]
+    fn padding_reaches_the_cell_after_narrow_letters() {
+        let mut host = ScriptWindows::new(&[], "");
+        host.open_window(2, 0x21, (15, 4, 15, 12), 4);
+        host.put_char(2, '★');
+        host.pad_to(2, 3);
+        let window = |host: &ScriptWindows<'_>| host.windows()[2].clone().unwrap();
+        assert_eq!(window(&host).lines[0], "★\u{3000}\u{3000}");
+        if let Some(Some(window)) = host.windows.get_mut(2) {
+            window.widths[0] = 13;
+        }
+        host.pad_to(2, 10);
+        assert_eq!(window(&host).widths[0], 10 * CELL_WIDTH);
+        assert!(window(&host).lines[0].ends_with(cell_stop_mark(10)));
     }
 
     #[test]

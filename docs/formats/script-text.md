@@ -63,7 +63,7 @@ with the variables it saved, which is how the chest and deck-command messages pr
 |---|---|---|
 | `0x00` | 0 | Nothing |
 | `0x01` | 7 | Open window `a0` of kind `a1` at tiles (`a2`, `a3`), `a4`×`a5` tiles, style `a6` (bit 0: text appears one character per frame); it becomes the current window |
-| `0x02` | 1 | Reset the text system; mode 1 also clears the name buffer; modes below `0x10` zero the variables |
+| `0x02` | 1 | Reset the text system; mode 1 also zeroes the half-words at RAM `0x02007588` and `0x0200758A` (the handler at `0x0803E73C`), which leaves the name buffer after them as it is; modes below `0x10` zero the variables |
 | `0x03` | 1 | Close window `a0` (`0xFF` = all) and redraw the others |
 | `0x04` | 1 | Present window `a0`, which becomes the current window; `0xFF` presents every open window in id order and leaves the highest current |
 | `0x05` | 1 | Wait for a key, prompting in the current window, which it shows even when the script did not present it: low nibble 0 accepts A (sets var0 = 1, plays sound `0x41`), `0x10` in the high nibble lets B end it with var0 = 0; the prompt blinks 20 frames off, 20 on |
@@ -88,8 +88,9 @@ with the variables it saved, which is how the chest and deck-command messages pr
 | `0x33` | 3 | Clear or set game flag `a0 | a1 << 8` |
 | `0x34` | 2 | var[`a0`] = game flag var[`a1`] |
 | `0x35` | 3 | var[`a0`] = game flag `a1 | a2 << 8` |
-| `0x36` | 1 | Menu that also ends on a cursor move: var0 = `0x20` (up) or `0x40` (down) and var1 = the new line, so the game's code can redraw; mode 2 also ends on L (var0 = 2) or R (var0 = 4), 3 on L, 4 on R; A sets var0 = 1, and `0x10` in the high nibble lets B end it with var0 = 0. Moves play sound `0x40`, A `0x47` (handler `0x0803F86C`) |
-| `0x38`, `0x3C` | 2, 1 | Not modeled |
+| `0x36` | 1 | Menu that also ends on a cursor move: var0 = `0x20` (up) or `0x40` (down) and var1 = the new line, so the game's code can redraw; mode 2 also ends on L (var0 = 2) or R (var0 = 4), 3 on L, 4 on R, 5 on L, R or left (var0 = 8), 6 on those, right (var0 = `0x10`), START (var0 = `0x80`, with sound `0x47`) or SELECT (var0 = 0); modes 2 to 6 draw the page marks the game's code set on the window's sides; A sets var0 = 1, and `0x10` in the high nibble lets B end it with var0 = 0. Moves play sound `0x40`, A `0x47` (handler `0x0803F86C`) |
+| `0x3C` | 1 | The same menu as `0x36`, whose handler (`0x0803F400`) differs in no key; the formation screen's list runs it in mode 6 |
+| `0x38` | 2 | Not modeled |
 | `0x37` | 3 | Portrait of character var[`a1`], expression var[`a2`] in window `a0` |
 | `0x39` | 3 | var[`a0`] = `a1` |
 | `0x3A` | 1 | Play sound effect `0x3C + a0` |

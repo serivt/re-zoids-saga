@@ -196,7 +196,7 @@ fn sprite_at(rom: &[u8], at: usize) -> Option<EffectSprite> {
     })
 }
 
-fn read_pieces(rom: &[u8], mut at: usize) -> Option<Vec<EffectPiece>> {
+pub(crate) fn read_pieces(rom: &[u8], mut at: usize) -> Option<Vec<EffectPiece>> {
     let mut pieces = Vec::new();
     for _ in 0..PIECES_MAX {
         let bytes = rom.get(at..at + PIECE_LEN)?;

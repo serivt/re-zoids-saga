@@ -93,6 +93,10 @@ const CHARACTER_COUNT: usize = 87;
 const PARTY_MEMBER: u16 = 2;
 /// Slots of the formation.
 pub const FORMATION_SLOTS: usize = 6;
+/// Slots of a formation column: the front, then the back.
+const COLUMN: usize = 3;
+/// The size class of an L unit, which fills a column.
+const LARGE: u8 = 2;
 const PILOT_TABLE: usize = 0x0067_B35C;
 const PILOT_CHAPTERS: usize = 10;
 const AREA: usize = 2;
@@ -614,6 +618,77 @@ fn place(state: &mut [u8], character: u8, slot: u8) {
     set_half(state, entry, bits);
 }
 
+/// The formation slot `character` stands in (`0x080378A4`).
+#[must_use]
+pub fn formation_slot(state: &[u8], character: u8) -> Option<usize> {
+    (0..FORMATION_SLOTS).find(|slot| state.get(FORMATION + slot * 4 + 1) == Some(&character))
+}
+
+/// Puts `character`'s unit in formation slot `slot` as the formation
+/// screen does (`0x080371AC`). An L unit fills a column: it stands in its
+/// middle slot (1 or 4) and empties the other two. Another unit empties
+/// the slot first, or the middle of its column when an L unit fills it.
+pub fn join_formation(state: &mut [u8], slot: usize, character: u8) {
+    let (Some(unit), Ok(target)) = (character_unit(state, character), u8::try_from(slot)) else {
+        return;
+    };
+    if slot >= FORMATION_SLOTS {
+        return;
+    }
+    let emptied = if state.get(unit_at(unit) + UNIT_VARIANT) == Some(&LARGE) {
+        if slot == 1 { 0..3 } else { 3..6 }
+    } else {
+        let emptied = large_occupant(state, slot).unwrap_or(slot);
+        emptied..emptied + 1
+    };
+    for emptied in emptied {
+        if state[FORMATION + emptied * 4 + 1] != NO_UNIT {
+            unplace(state, emptied);
+        }
+    }
+    place(state, character, target);
+}
+
+/// Empties formation slot `slot` as the formation screen does
+/// (`0x08037258`), or the middle of its column when an L unit fills it.
+pub fn leave_formation(state: &mut [u8], slot: usize) {
+    if slot < FORMATION_SLOTS {
+        unplace(state, large_occupant(state, slot).unwrap_or(slot));
+    }
+}
+
+/// The middle slot of `slot`'s column when an L unit stands there
+/// (`0x0803727C`).
+fn large_occupant(state: &[u8], slot: usize) -> Option<usize> {
+    let middle = if slot < COLUMN { 1 } else { COLUMN + 1 };
+    let unit = *state.get(FORMATION + middle * 4)?;
+    (unit != NO_UNIT && state.get(unit_at(unit) + UNIT_VARIANT) == Some(&LARGE)).then_some(middle)
+}
+
+/// Empties formation slot `slot` (`0x08037B1C`): the unit and its pilot
+/// leave the formation. The game does not check that the slot holds
+/// anyone: for an empty one it clears the bits at the entries of unit and
+/// character `0xFF`, and the character's lies inside the block.
+fn unplace(state: &mut [u8], slot: usize) {
+    let at = FORMATION + slot * 4;
+    let (unit, character) = (state[at], state[at + 1]);
+    state[at] = NO_UNIT;
+    state[at + 1] = NO_UNIT;
+    clear_bits(state, unit_at(unit) + 2, IN_FORMATION);
+    clear_bits(
+        state,
+        CHARACTERS + usize::from(character) * CHARACTER_LEN,
+        CHARACTER_IN_FORMATION,
+    );
+}
+
+fn clear_bits(state: &mut [u8], at: usize, bits: u16) {
+    if at + 2 <= state.len() {
+        let value = half(state, at) & !bits;
+        set_half(state, at, value);
+    }
+}
+
 /// The entries of starting list `list` (ROM `0x67E380`): the character's
 /// flag bits, the character and its Zoid.
 fn starting_list(rom: &[u8], list: usize) -> Option<Vec<(u8, u16, u16)>> {
@@ -840,5 +915,65 @@ mod tests {
         let mut state = state();
         form_party(&rom, &mut state, 3).expect("party");
         assert_eq!(half(&state, UNITS + 6), SHIELD_LIGER);
+    }
+
+    /// Characters 0–3 pilot units 0–3; unit 2 is an L unit.
+    fn crew() -> Vec<u8> {
+        let mut state = vec![0; STATE_LEN];
+        for slot in 0..FORMATION_SLOTS {
+            state[FORMATION + slot * 4..FORMATION + slot * 4 + 2].fill(NO_UNIT);
+        }
+        for character in 0..4u8 {
+            let at = CHARACTERS + usize::from(character) * CHARACTER_LEN;
+            state[at + CHARACTER_UNIT] = character;
+            set_half(&mut state, unit_at(character) + 2, IN_USE);
+        }
+        state[unit_at(2) + UNIT_VARIANT] = LARGE;
+        state
+    }
+
+    fn slots(state: &[u8]) -> Vec<Option<u8>> {
+        formation(state)
+            .iter()
+            .map(|slot| slot.map(|(_, character)| character))
+            .collect()
+    }
+
+    #[test]
+    fn a_unit_joins_a_slot_and_takes_it_from_another() {
+        let mut state = crew();
+        join_formation(&mut state, 0, 0);
+        join_formation(&mut state, 0, 1);
+        assert_eq!(slots(&state), [Some(1), None, None, None, None, None]);
+        assert_eq!(formation_slot(&state, 1), Some(0));
+        assert_eq!(formation_slot(&state, 0), None);
+        assert_eq!(half(&state, CHARACTERS) & CHARACTER_IN_FORMATION, 0);
+        assert_eq!(half(&state, unit_at(0) + 2), IN_USE);
+        assert_eq!(half(&state, unit_at(1) + 2), IN_USE | IN_FORMATION);
+    }
+
+    #[test]
+    fn an_l_unit_fills_its_column_and_leaves_it_whole() {
+        let mut state = crew();
+        join_formation(&mut state, 0, 0);
+        join_formation(&mut state, 5, 1);
+        join_formation(&mut state, 4, 2);
+        assert_eq!(slots(&state), [Some(0), None, None, None, Some(2), None]);
+        join_formation(&mut state, 3, 3);
+        assert_eq!(slots(&state), [Some(0), None, None, Some(3), None, None]);
+        join_formation(&mut state, 1, 2);
+        assert_eq!(slots(&state), [None, Some(2), None, Some(3), None, None]);
+        leave_formation(&mut state, 2);
+        assert_eq!(slots(&state), [None, None, None, Some(3), None, None]);
+    }
+
+    #[test]
+    fn leaving_an_empty_slot_clears_the_bit_of_character_0xff() {
+        let mut state = crew();
+        let stray = CHARACTERS + usize::from(NO_UNIT) * CHARACTER_LEN;
+        set_half(&mut state, stray, 0x31);
+        leave_formation(&mut state, 5);
+        assert_eq!(half(&state, stray), 0x21);
+        assert_eq!(slots(&state), [None; FORMATION_SLOTS]);
     }
 }

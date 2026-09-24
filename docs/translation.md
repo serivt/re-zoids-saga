@@ -108,7 +108,10 @@ the screen's right edge, so its lines must stay within 168 pixels.
 Messages the game's own code prints into fixed columns are not fitted: the status
 screens place signs and values by cell, so their labels must stay within the pixels
 the Japanese label takes (a stat label ends at cell 11; the level window leaves six
-cells for the experience value). Item, weapon and Zi-data descriptions are printed by
+cells for the experience value). A value or a mark the code places in a column after
+a translated name still lands on its cell: where the name's letters leave the text
+between cells, the port moves it to the cell instead of padding with spaces (the
+formation list's sizes start at cell 10). Item, weapon and Zi-data descriptions are printed by
 code into windows the walker cannot see: keep weapon descriptions to one line of
 176 pixels, the two-line Zi-data texts to 216 pixels per line and the narrow
 variants to five lines of 104 pixels.

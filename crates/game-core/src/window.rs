@@ -19,6 +19,10 @@ const DIVIDER_BOTTOM: usize = 0x21;
 const PROMPT: usize = 0x1C;
 const MORE_ABOVE: usize = 0x32;
 const MORE_BELOW: usize = 0x34;
+/// The page marks' tiles (`0x08040BA8`): the left one's top half, then the
+/// right one's; each lower half is the next tile flipped vertically.
+const PAGE_LEFT: usize = 0x36;
+const PAGE_RIGHT: usize = 0x38;
 const LIGHT_TOP_LEFT: usize = 0x12;
 const LIGHT_TOP_RIGHT: usize = 0x13;
 const LIGHT_BOTTOM_LEFT: usize = 0x14;
@@ -150,10 +154,50 @@ impl WindowPainter {
         }
     }
 
+    /// Draws the marks a paged menu shows on its left and right borders,
+    /// two tiles high around the middle row `row`, when pages lie before or
+    /// after the shown one.
+    pub fn draw_page_marks(
+        &self,
+        frame: &mut Frame,
+        columns: (usize, usize),
+        row: usize,
+        (before, after): (bool, bool),
+    ) {
+        for (shown, column, tile) in [
+            (before, columns.0, PAGE_LEFT),
+            (after, columns.1, PAGE_RIGHT),
+        ] {
+            if shown {
+                self.draw_tile(frame, column, row - 1, tile);
+                self.draw_flipped_tile(frame, column, row, tile + 1);
+            }
+        }
+    }
+
     fn draw_tile(&self, frame: &mut Frame, column: usize, row: usize, tile: usize) {
         let Some(pixels) = self.tiles.tile(tile) else {
             return;
         };
+        self.draw_pixels(frame, column, row, pixels);
+    }
+
+    /// Draws a tile upside down.
+    fn draw_flipped_tile(&self, frame: &mut Frame, column: usize, row: usize, tile: usize) {
+        let Some(pixels) = self.tiles.tile(tile) else {
+            return;
+        };
+        let mut flipped = *pixels;
+        for (target, source) in flipped
+            .chunks_exact_mut(TILE_SIZE)
+            .zip(pixels.chunks_exact(TILE_SIZE).rev())
+        {
+            target.copy_from_slice(source);
+        }
+        self.draw_pixels(frame, column, row, &flipped);
+    }
+
+    fn draw_pixels(&self, frame: &mut Frame, column: usize, row: usize, pixels: &[u8]) {
         let image = IndexedImage {
             width: TILE_SIZE,
             height: TILE_SIZE,

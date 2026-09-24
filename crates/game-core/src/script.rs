@@ -40,14 +40,23 @@ const KEY_A: u16 = 1;
 const KEY_B: u16 = 2;
 const KEY_UP: u16 = 0x40;
 const KEY_DOWN: u16 = 0x80;
+const KEY_SELECT: u16 = 4;
+const KEY_START: u16 = 8;
+const KEY_RIGHT: u16 = 0x10;
+const KEY_LEFT: u16 = 0x20;
 const KEY_R: u16 = 0x100;
 const KEY_L: u16 = 0x200;
-/// What a move-reporting menu (`0x36`) leaves in var0 for a cursor moved
-/// up or down, and for L or R in the modes that take them.
+/// What a move-reporting menu (`0x36`, `0x3C`) leaves in var0 for a
+/// cursor moved up or down, and for the other keys the modes that take
+/// them report.
 const MOVED_UP: u16 = 0x20;
 const MOVED_DOWN: u16 = 0x40;
 const PAGE_LEFT: u16 = 2;
 const PAGE_RIGHT: u16 = 4;
+const MOVED_LEFT: u16 = 8;
+const MOVED_RIGHT: u16 = 0x10;
+const STARTED: u16 = 0x80;
+const SELECTED: u16 = 0;
 
 /// What the interpreter asks of the game: windows, text, sounds and flags.
 pub trait ScriptHost {
@@ -328,6 +337,10 @@ impl ScriptRunner {
             + u16::from(pressed(Button::B)) * KEY_B
             + u16::from(pressed(Button::Up)) * KEY_UP
             + u16::from(pressed(Button::Down)) * KEY_DOWN
+            + u16::from(pressed(Button::Left)) * KEY_LEFT
+            + u16::from(pressed(Button::Right)) * KEY_RIGHT
+            + u16::from(pressed(Button::Start)) * KEY_START
+            + u16::from(pressed(Button::Select)) * KEY_SELECT
             + u16::from(pressed(Button::R)) * KEY_R
             + u16::from(pressed(Button::L)) * KEY_L;
         self.previous = input;
@@ -494,12 +507,10 @@ impl ScriptRunner {
             self.wait = Wait::Frames(KEY_ACCEPT_FRAMES);
             return true;
         }
-        let page = match reports {
-            Some(2 | 3) if keys & KEY_L != 0 => Some(PAGE_LEFT),
-            Some(2 | 4) if keys & KEY_R != 0 => Some(PAGE_RIGHT),
-            _ => None,
-        };
-        if let Some(code) = page {
+        if let Some(code) = reports.and_then(|mode| reported_key(mode, keys)) {
+            if code == STARTED {
+                host.play_sound(MENU_CONFIRM_SOUND);
+            }
             self.vars[0] = code;
         } else if keys & KEY_A != 0 {
             self.vars[0] = 1;
@@ -806,6 +817,28 @@ impl ScriptRunner {
             Operand::Value(value) => value,
             Operand::Var(slot) => self.var(slot),
         }
+    }
+}
+
+/// What a move-reporting menu of `mode` ends with for a key besides A, B
+/// and the cursor's (the handlers' mode tables at `0x0803FA20` and
+/// `0x0803F5B4`); the game tests them in turn, so the last one wins.
+fn reported_key(mode: u8, keys: u16) -> Option<u16> {
+    let takes = |key: u16, modes: &[u8]| keys & key != 0 && modes.contains(&mode);
+    if takes(KEY_SELECT, &[6]) {
+        Some(SELECTED)
+    } else if takes(KEY_START, &[6]) {
+        Some(STARTED)
+    } else if takes(KEY_RIGHT, &[6]) {
+        Some(MOVED_RIGHT)
+    } else if takes(KEY_LEFT, &[5, 6]) {
+        Some(MOVED_LEFT)
+    } else if takes(KEY_R, &[2, 4, 5, 6]) {
+        Some(PAGE_RIGHT)
+    } else if takes(KEY_L, &[2, 3, 5, 6]) {
+        Some(PAGE_LEFT)
+    } else {
+        None
     }
 }
 
@@ -1162,6 +1195,33 @@ mod tests {
                 .unwrap();
             assert_eq!(runner.vars()[0], code);
         }
+    }
+
+    #[test]
+    fn the_widest_move_reporting_menu_reports_the_sides_and_start() {
+        let script = vec![0x01, 0, 0x21, 10, 10, 9, 8, 4, 0x3C, 0x16, 0x22];
+        let (bytes, offsets) = rom(&[script]);
+        let mut runner = ScriptRunner::new(offsets);
+        let mut host = Recorder::default();
+        for (button, code) in [
+            (Button::Left, MOVED_LEFT),
+            (Button::Right, MOVED_RIGHT),
+            (Button::Start, STARTED),
+            (Button::L, PAGE_LEFT),
+            (Button::A, 1),
+        ] {
+            runner.start(0).unwrap();
+            runner.update(&bytes, Input::default(), &mut host).unwrap();
+            runner.update(&bytes, Input::default(), &mut host).unwrap();
+            runner
+                .update(&bytes, Input::default().with(button), &mut host)
+                .unwrap();
+            assert_eq!(runner.vars()[0], code);
+        }
+        assert_eq!(
+            host.log.iter().filter(|line| *line == "sound 0x47").count(),
+            2
+        );
     }
 
     #[test]

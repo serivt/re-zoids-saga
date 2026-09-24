@@ -68,7 +68,7 @@ const NO_DOOR_SOUND: u16 = 0x44;
 const MENU_OPEN_FRAMES: u32 = 33;
 const MENU_OPEN_DELAY: u32 = 2;
 /// Black frames before the field brightens again after the menu.
-const MENU_RETURN_BLACK_FRAMES: u8 = 14;
+const MENU_RETURN_BLACK_FRAMES: u8 = 16;
 /// Where the actors' animations stand when the field returns.
 const MENU_RETURN_ANIMATION: u32 = 1;
 /// Frames the destination stays black once loaded, and frames the game
