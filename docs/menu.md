@@ -22,6 +22,8 @@ port's. Saving is described in [formats/save.md](formats/save.md). Implemented i
 `pause_wallpaper`), `crates/extraction/src/saga_party.rs` (`unit_parts`, `part`,
 `join_formation`, `leave_formation`) and `crates/extraction/src/saga_formation.rs`.
 
+The towns' shops are built from the same scripts and wallpaper; see [shop.md](shop.md).
+
 ## Scripts
 
 The menu is not one script but a table of 698 short ones at ROM `0x75B1BC` (the

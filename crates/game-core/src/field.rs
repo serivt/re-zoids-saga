@@ -976,7 +976,13 @@ impl Field {
         let player = &self.actors[0];
         let (dx, dy) = player.facing.delta();
         let (column, row) = player.footing();
-        let ahead = (column.checked_add_signed(dx)?, row.checked_add_signed(dy)?);
+        let mut ahead = (column.checked_add_signed(dx)?, row.checked_add_signed(dy)?);
+        while self.scene.counter(ahead.0, ahead.1) {
+            ahead = (
+                ahead.0.checked_add_signed(dx)?,
+                ahead.1.checked_add_signed(dy)?,
+            );
+        }
         let facing = player.facing;
         let index = (1..self.actors.len()).find(|&index| {
             let actor = &self.actors[index];
@@ -1670,6 +1676,24 @@ mod tests {
             field.update(Input::default());
         }
         assert_eq!(field.update(a), None);
+    }
+
+    #[test]
+    fn the_player_speaks_across_a_counter() {
+        let mut field = field(7, 5);
+        let columns = field.scene.attribute_columns();
+        field.scene.attributes[2 * columns + 4] = 0xA000;
+        field
+            .actors
+            .push(character(5, 1, Some(ObjectScript::Code(0x0800_90F0)), 0));
+        field.update(held(Direction::Right));
+        assert_eq!(
+            field.update(Input::default().with(Button::A)),
+            Some(FieldEvent::Talk {
+                actor: 1,
+                script: ObjectScript::Code(0x0800_90F0)
+            })
+        );
     }
 
     #[test]

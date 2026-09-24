@@ -7,6 +7,7 @@ pub mod saga_formation;
 pub mod saga_guide;
 pub mod saga_party;
 pub mod saga_save;
+pub mod saga_shop;
 pub mod string_table;
 
 pub use identify::{Identification, IdentifyError, KnownRelease, Title, identify};

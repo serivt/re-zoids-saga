@@ -35,7 +35,7 @@ use crate::event::{BLACK, EventHost, Events, HoldStep, MAP_TASK, Op};
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
 use crate::guide::{Cover, Guide, GuideError, GuideKind};
-use crate::menu::{MenuStep, Party, PauseMenu};
+use crate::menu::{MenuStep, Party, PauseMenu, Shop};
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptContext, ScriptError, ScriptRunner};
 use crate::story;
@@ -218,6 +218,8 @@ pub struct Game<'rom> {
     active_script: Option<usize>,
     last_runner: Option<usize>,
     battle: Option<Box<BattleStage>>,
+    /// The shop a keeper opened, while it is open.
+    shop: Option<Box<PauseMenu>>,
     field: Option<Field>,
     events: Events,
     screen: Screen,
@@ -335,6 +337,7 @@ impl<'rom> Game<'rom> {
             active_script: None,
             last_runner: None,
             battle: None,
+            shop: None,
             field: None,
             events: Events::new(),
             screen: Screen::Loading,
@@ -844,6 +847,7 @@ impl<'rom> Game<'rom> {
             active_script: &mut self.active_script,
             last_runner: &mut self.last_runner,
             battle: &mut self.battle,
+            shop: &mut self.shop,
             warped: &mut self.warped,
             chest: self.chest,
             party: &mut self.party,
@@ -884,6 +888,28 @@ impl<'rom> Game<'rom> {
         })
     }
 
+    /// A frame of the shop an event holds the game for; once it closes,
+    /// the party and the game state it changed are kept and the event goes
+    /// on.
+    fn update_shop(&mut self, input: Input) -> Result<(), GameError> {
+        let closed = match self.shop.as_mut() {
+            Some(shop) => {
+                shop.update(self.data.bytes(), input, &mut self.windows)? == MenuStep::Closed
+            }
+            None => true,
+        };
+        if closed {
+            if let Some(shop) = self.shop.take() {
+                self.party = shop.party();
+                self.state.clone_from_slice(shop.state());
+                Self::emit(&self.extensions, &Event::ShopClosed);
+            }
+        }
+        self.update_events(|events, host| {
+            events.update_hold(closed, host);
+        })
+    }
+
     /// A frame of the scripts an event holds the game for. A handler the
     /// game called directly runs its scripts one after another within the
     /// call, so the next one starts in the frame the last one ends.
@@ -913,6 +939,9 @@ impl<'rom> Game<'rom> {
         }
         if self.events.in_battle() {
             return self.update_battle(input);
+        }
+        if self.events.in_shop() {
+            return self.update_shop(input);
         }
         if self.events.in_dialogue() {
             if self.events.dialogue_in_task()
@@ -1141,6 +1170,11 @@ impl<'rom> Game<'rom> {
                 let level = frames.saturating_sub(NAME_HOLD_FRAMES);
                 darken(frame, u8::try_from(level).unwrap_or(BLACK));
             }
+            Screen::Field if self.shop.is_some() => {
+                if let Some(shop) = &self.shop {
+                    shop.draw(frame, &self.windows, &self.skin, &self.painter);
+                }
+            }
             Screen::Field if self.battle.is_some() => {
                 if let Some(stage) = &self.battle {
                     stage.draw(frame, &self.windows, &self.skin, &self.painter);
@@ -1204,6 +1238,7 @@ struct Host<'a, 'rom> {
     active_script: &'a mut Option<usize>,
     last_runner: &'a mut Option<usize>,
     battle: &'a mut Option<Box<BattleStage>>,
+    shop: &'a mut Option<Box<PauseMenu>>,
     warped: &'a mut Option<usize>,
     chest: Option<(usize, u16)>,
     party: &'a mut Party,
@@ -1253,6 +1288,21 @@ impl EventHost for Host<'_, '_> {
         match BattleStage::new(&self.data, scene) {
             Ok(stage) => *self.battle = Some(Box::new(stage)),
             Err(missing) => self.fail(GameError::Text(format!("no battle scene {}", missing.0))),
+        }
+    }
+
+    fn start_shop(&mut self, shop: Shop) {
+        let rom = self.data.bytes();
+        let menu = PauseMenu::new(&self.data, self.party.clone(), self.state.clone());
+        match menu {
+            Ok(mut menu) => match menu.open_shop(rom, shop, self.windows) {
+                Ok(()) => {
+                    *self.shop = Some(Box::new(menu));
+                    Game::emit(self.extensions, &Event::ShopOpened(shop));
+                }
+                Err(error) => self.fail(error),
+            },
+            Err(error) => self.fail(error),
         }
     }
 

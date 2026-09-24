@@ -25,13 +25,16 @@ use platform::{Frame, Input, Rgb};
 use crate::battle::draw_piece;
 use crate::guide::{Cover, Guide, GuideError, GuideKind};
 use crate::script::{ScriptError, ScriptRunner};
-use crate::translation::{NAME_TABLE, PART_TABLE, PAUSE_MENU_TABLE};
+use crate::translation::{ITEM_TABLE, NAME_TABLE, PART_TABLE, PAUSE_MENU_TABLE};
 use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
 mod equipment;
 mod formation;
 mod parts;
+mod shop;
+
+pub use shop::Shop;
 
 const SCRIPT_WAIT_KEY: usize = 37;
 const SCRIPT_MONEY_WINDOW: usize = 44;
@@ -150,6 +153,17 @@ const INTRO_STALL_FRAMES: u32 = 2;
 /// Frames from B on the main list until the field returns, the screen
 /// darkening a level a frame from the fourth.
 const CLOSE_FRAMES: u32 = 34;
+/// Frames from the building of a shop until its welcome shows: the fade
+/// task brightens it after eight frames and the task waits for it to end;
+/// a welcome that overruns its frame shows later (see
+/// `ShopSession::welcome_lag`).
+const SHOP_WELCOME_FRAME: u32 = 42;
+const SHOP_INTRO_STILL: u32 = 6;
+const SHOP_INTRO_HOLD: u32 = 9;
+/// Frames from B on a shop's choice until the field returns: the shop
+/// darkens as the menu does, then the map is loaded again in the dark.
+const SHOP_CLOSE_FRAMES: u32 = 50;
+const SHOP_CLOSE_DELAY: u32 = 3;
 const CLOSE_DELAY: u32 = 4;
 const GUIDE_FADE_TOP: u32 = 31;
 const GUIDE_FADE_HOLD: u32 = 12;
@@ -337,6 +351,8 @@ enum MenuState {
     /// Whether to throw away a part the stock has no room for.
     Discard,
     Notice(Return),
+    /// A shop's list, question or notice.
+    Shop(shop::ShopStep),
     /// Darkening after B on the main list, frames since.
     Closing(u32),
     Closed,
@@ -349,6 +365,7 @@ pub struct PauseMenu {
     runner: ScriptRunner,
     names: ScriptRunner,
     parts: ScriptRunner,
+    items: ScriptRunner,
     state: MenuState,
     scroll: i32,
     guide: Option<Box<Guide>>,
@@ -360,6 +377,10 @@ pub struct PauseMenu {
     returning: Option<u32>,
     /// Frames since the menu was built, while it brightens.
     intro: Option<u32>,
+    /// The shop the menu is, when a keeper opened it.
+    shop: Option<shop::ShopSession>,
+    /// Frames since the shop was built, until its welcome.
+    shop_intro: Option<u32>,
     /// Frames the original would still spend drawing what the port drew
     /// at once: its interpreter blocks the game on each window it opens,
     /// clears or presents, so the wallpaper and the blinking stand still
@@ -410,6 +431,11 @@ impl PauseMenu {
             .ok()
             .flatten()
             .unwrap_or_default();
+        let items = data
+            .script_offsets(ITEM_TABLE)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
         let mut zoid_sprites: Vec<(u16, SpriteSheet)> = Vec::new();
         for zoid in roster
             .members
@@ -431,6 +457,7 @@ impl PauseMenu {
             runner: ScriptRunner::named(PAUSE_MENU_TABLE, scripts),
             names: ScriptRunner::named(NAME_TABLE, names),
             parts: ScriptRunner::named(PART_TABLE, part_names),
+            items: ScriptRunner::named(ITEM_TABLE, items),
             state: MenuState::Closed,
             scroll: 0,
             guide: None,
@@ -439,6 +466,8 @@ impl PauseMenu {
             book_line: 0,
             returning: None,
             intro: None,
+            shop: None,
+            shop_intro: None,
             busy: 0,
             party,
             roster,
@@ -598,10 +627,18 @@ impl PauseMenu {
         }
         if self.busy > 0 {
             self.busy -= 1;
+            if let Some(session) = self.shop.as_mut() {
+                session.forget_keys(input);
+                self.scroll += 1;
+            }
             return Ok(MenuStep::Open);
         }
         self.scroll += 1;
         self.held = input;
+        if self.state == MenuState::Shop(shop::ShopStep::Quantity) {
+            self.shop_frame(rom, input, windows)?;
+            return Ok(MenuStep::Open);
+        }
         match self.state {
             MenuState::Closed => return Ok(MenuStep::Closed),
             MenuState::Saving => return Ok(MenuStep::Save),
@@ -664,6 +701,7 @@ impl PauseMenu {
             }
             MenuState::Stock => self.stock_choice(rom, code, choice, windows)?,
             MenuState::Notice(back) => self.return_to(rom, back, windows)?,
+            MenuState::Shop(step) => self.shop_choice(rom, step, code, choice, windows)?,
             MenuState::Saving | MenuState::Closing(_) | MenuState::Closed => {}
         }
         self.load_equip_image(rom);
@@ -684,13 +722,31 @@ impl PauseMenu {
     ) -> Result<Option<MenuStep>, GuideError> {
         if let MenuState::Closing(frames) = self.state {
             self.scroll += 1;
-            if frames + 1 < CLOSE_FRAMES {
+            let close = if self.shop.is_some() {
+                SHOP_CLOSE_FRAMES
+            } else {
+                CLOSE_FRAMES
+            };
+            if frames + 1 < close {
                 self.state = MenuState::Closing(frames + 1);
                 return Ok(Some(MenuStep::Open));
             }
             windows.close_window(None);
             self.state = MenuState::Closed;
             return Ok(Some(MenuStep::Closed));
+        }
+        if let Some(frames) = self.shop_intro {
+            let frames = frames + 1;
+            let lag = self.shop.as_ref().map_or(0, shop::ShopSession::welcome_lag);
+            self.scroll = shop_intro_scroll(frames, lag);
+            if frames < SHOP_WELCOME_FRAME + lag {
+                self.shop_intro = Some(frames);
+            } else {
+                self.shop_intro = None;
+                self.welcome(rom, windows)?;
+                self.busy = 0;
+            }
+            return Ok(Some(MenuStep::Open));
         }
         if let Some(frames) = self.intro {
             let frames = frames + 1;
@@ -1341,10 +1397,16 @@ impl PauseMenu {
         if let Some(frames) = self.intro {
             darken(frame, intro_darkness(frames));
         }
+        if let Some(frames) = self.shop_intro {
+            darken(frame, shop_intro_darkness(frames));
+        }
         if let MenuState::Closing(frames) = self.state {
-            let level = frames
-                .saturating_sub(CLOSE_DELAY)
-                .min(u32::from(FADE_STEPS));
+            let delay = if self.shop.is_some() {
+                SHOP_CLOSE_DELAY
+            } else {
+                CLOSE_DELAY
+            };
+            let level = frames.saturating_sub(delay).min(u32::from(FADE_STEPS));
             darken(frame, u8::try_from(level).unwrap_or(FADE_STEPS));
         }
     }
@@ -1515,6 +1577,20 @@ fn intro_darkness(frames: u32) -> u8 {
     };
     let level = GUIDE_FADE_TOP.saturating_sub(fallen);
     u8::try_from(level.min(u32::from(FADE_STEPS))).unwrap_or(FADE_STEPS)
+}
+
+/// The wallpaper's scroll `frames` after a shop was built: still for six
+/// frames, then a pixel a frame but for the frames the welcome overran.
+fn shop_intro_scroll(frames: u32, lag: u32) -> i32 {
+    let scroll = frames.saturating_sub(SHOP_INTRO_STILL);
+    let scroll = scroll - (frames + 1).saturating_sub(SHOP_WELCOME_FRAME).min(lag);
+    i32::try_from(scroll).unwrap_or(0)
+}
+
+/// How dark a shop is `frames` after it was built: the game's fade level
+/// holds at 31 for nine frames, then falls a level a frame.
+fn shop_intro_darkness(frames: u32) -> u8 {
+    shown_level(GUIDE_FADE_TOP.saturating_sub(frames.saturating_sub(SHOP_INTRO_HOLD)))
 }
 
 /// How dark the menu is `frames` after the guide closed: the game's fade

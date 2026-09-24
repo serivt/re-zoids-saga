@@ -141,7 +141,8 @@ A map load shows chests whose flag is set already open.
 | Map 24, Arcana | The first time (handler `0x0800E850`) the town reloads with the arrival's objects (ROM `0x0832AC54`: the prince, Regina, Ace, Jack, Roman and three soldiers), song 6 plays, and the arrival task (`0x0800E8B8`) starts: the party splits up (dialogue `0x49`; helper tasks `0x0800FBA0`, `0x0800FE14`, `0x08010088` walk Jack, Ace and Regina around town), the prince finds the bar (`0x4A`), the soldiers surround the party (`0x4B`), Roman comes out (`0x4C`, `0x4D`), the soldiers leave and everyone goes into the bar (`0x4E`) | `0x128` |
 | Map 29, above the bar | The same task loads the room with its own list (ROM `0x0832ACF4`): Roman's account (`0x4F`); the prince and Regina leave by the stairs, the camera pans 64 pixels left, Jack and Ace follow (`0x50`); the task warps to map 28, the bar, at (13, 12) facing left | |
 | Map 29, Roman | Teaches 包囲攻撃, deck command 26 | |
-| Map 26, armaments shop | The old man teaches 節電, deck command 22 | |
+| Map 25, item shop | The keeper behind the counter opens item shop 1 (`0x080090F0`, see [shop.md](shop.md)) | |
+| Map 26, armaments shop | The keeper opens armaments shop 1 (`0x080090FC`); the old man teaches 節電, deck command 22 | |
 | Map 27, Dr. T's lab | Dr. T (`0x0802AB08`) talks with Regina about rebuilding the Trinity Liger (dialogue `0x2C1`), later `0x2C2`; the assistant on the left teaches データ収集, deck command 0 | `0x13F` |
 
 The map record's byte `+8` names the map's song (11 for the castle, 22 for the
@@ -214,9 +215,10 @@ formation.
   into the bar. It also matches pixel for pixel on frames sampled every 100, and on
   every frame of a walk, of the fade into the bar and of the warp back down. Roman's
   lesson matches frame by frame.
-- The first room's opening matches pixel for pixel on 327 of 343 frames sampled every
-  7; before the drawing order and the frame of display delay were modeled, 64 did
-  (279 differed).
+- Arcana's shops: see [shop.md](shop.md).
+- The first room's opening matches pixel for pixel on 332 of 343 frames sampled every
+  7. Before the drawing order and the frame of display delay were modeled, 64 did (279
+  differed); before the prompt's blink was 21 frames, 327.
 - The drive to Arcana runs a frame late after dialogue `0x44` closes, and the town
   brightens a frame early.
 - The black after an exit's load depends on the scene. The port uses one length for
@@ -226,9 +228,8 @@ formation.
 ## Not modeled yet
 
 - The battle engine itself (see [battle.md](battle.md)).
-- Arcana's shops: the item shop (`0x080090A0`), the armaments shop (`0x080090B4`) and
-  Dr. T's Zoid construction shop (`0x080090C8`); speaking to their keepers does
-  nothing yet.
+- Dr. T's Zoid lab (`0x08009108`, kind 2 of the shops, `0x080090C8`) and the other
+  towns' shops: speaking to their keepers does nothing yet (see [shop.md](shop.md)).
 - Dr. T in the other areas: whether the party has the Zoids `0x90` or `0x8F`, and the
   game-state byte `+0x3320` (flags `0x140`, `0x141`).
 - The field's per-frame hooks (RAM `0x02000000`, `0x02000004`), which the world map's

@@ -6,6 +6,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::menu::Shop;
 use crate::translation::AlphabetPage;
 
 /// A window rectangle in tiles: x, y, width, height.
@@ -109,6 +110,10 @@ pub enum Event {
     MenuOpened,
     /// The pause menu closed.
     MenuClosed,
+    /// A keeper opened a shop.
+    ShopOpened(Shop),
+    /// The shop closed and the field is back.
+    ShopClosed,
     /// The player chose to save.
     SaveRequested,
     /// The player chose to continue a saved game.

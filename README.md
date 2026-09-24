@@ -24,7 +24,8 @@ and its conversations, the throne-room cutscene, the gate, the Zoid choice in th
 (which forms the party), the eastern labyrinth with its chests and the Trinity Liger
 event, the drive across the world map, and Arcana's arrival (the soldiers, Roman and the
 room above the bar), its townsfolk, Dr. T and the teachers of deck commands, with the
-original timing (see [docs/events.md](docs/events.md)); the town's shops are not
+original timing (see [docs/events.md](docs/events.md)). The town's item and armaments
+shops buy and sell (see [docs/shop.md](docs/shop.md)); Dr. T's Zoid lab is not
 implemented yet. The throne
 room's two battle scenes play as in the original, shots included (see
 [docs/battle.md](docs/battle.md)); the battle system itself is not implemented yet. The

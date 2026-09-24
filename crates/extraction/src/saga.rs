@@ -252,6 +252,7 @@ const BLOCKED: u16 = 0x8000;
 const EXIT_KIND_MASK: u16 = 0xC000;
 const EXIT_WALK: u16 = 0x4000;
 const EXIT_INDEX_MASK: u16 = 0x00FF;
+const COUNTER: u16 = 0x2000;
 
 /// A field scene: a scrolling map over a repeating backdrop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -306,6 +307,19 @@ impl Scene {
         self.attributes
             .get(row * self.attribute_columns() + column)
             .is_none_or(|attribute| attribute & BLOCKED != 0)
+    }
+
+    /// Whether metatile `(column, row)` is a counter the player speaks
+    /// across: bit 13 of its attribute (`0x080084D4` looks past such
+    /// cells for someone to talk to).
+    #[must_use]
+    pub fn counter(&self, column: usize, row: usize) -> bool {
+        if column >= self.attribute_columns() {
+            return false;
+        }
+        self.attributes
+            .get(row * self.attribute_columns() + column)
+            .is_some_and(|attribute| attribute & COUNTER != 0)
     }
 
     /// The exit index of metatile `(column, row)` when walking onto it

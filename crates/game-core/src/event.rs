@@ -17,6 +17,7 @@
 //! (see `docs/events.md`).
 
 use crate::field::{Actor, Command, Direction, Field, Walk};
+use crate::menu::Shop;
 
 /// Task slots, as in the game's kernel.
 pub const TASKS: usize = 8;
@@ -109,6 +110,9 @@ pub enum Op {
     /// `n` of the table at ROM `0x66429C`, run by the battle module),
     /// holding the game until it and the map's reload after it end.
     Battle(u8),
+    /// Opens a shop (`0x08008F58`), holding the game until it closes and
+    /// the map is loaded again behind it.
+    Shop(Shop),
     /// Scrolls the camera by `(dx, dy)` 16.16 fixed-point pixels
     /// (`0x08008324`, called once a frame for a pan).
     Pan(i32, i32),
@@ -140,6 +144,10 @@ pub enum Op {
     /// Darkens the screen a level a frame to black, holding the game
     /// (`0x08001524`).
     FadeOutHolding,
+    /// Darkens the screen as [`Op::FadeOutHolding`] does after `n` frames
+    /// at the level it has: a handler the talk dispatch calls (a frame
+    /// after the talk) whose `0x08001524` sets level 0 on its first frame.
+    FadeOutHoldingAfter(u8),
     /// Shows actor `actor` again.
     Show(usize),
     /// Puts actor `actor`'s sprite at map pixel `(x, y)`.
@@ -230,6 +238,8 @@ pub trait EventHost {
     fn start_dialogue(&mut self, index: u16);
     /// Starts battle scene `scene`; the game holds until it ends.
     fn start_battle(&mut self, scene: u8);
+    /// Opens `shop`; the game holds until it closes.
+    fn start_shop(&mut self, shop: Shop);
     /// Plays song `song` unless it is playing.
     fn play_music(&mut self, song: u16);
     /// Plays sound effect `sound`.
@@ -309,6 +319,8 @@ enum Hold {
     Dialogue(usize),
     /// A battle scene started by the task in this slot.
     Battle(usize),
+    /// A shop opened by the task in this slot.
+    Shop(usize),
     /// A fade to black holding the game after `delay` frames of waiting;
     /// once black, the task in `resume` goes on, or else the caller is told.
     FadeOut {
@@ -414,6 +426,12 @@ impl Events {
         matches!(self.hold, Some(Hold::Battle(_)))
     }
 
+    /// Whether a shop an event opened is open.
+    #[must_use]
+    pub fn in_shop(&self) -> bool {
+        matches!(self.hold, Some(Hold::Shop(_)))
+    }
+
     /// Whether any task runs.
     #[must_use]
     pub fn running(&self) -> bool {
@@ -475,7 +493,7 @@ impl Events {
     pub fn update_hold(&mut self, dialogue_done: bool, host: &mut impl EventHost) -> HoldStep {
         match self.hold {
             None => HoldStep::Free,
-            Some(Hold::Dialogue(slot) | Hold::Battle(slot)) => {
+            Some(Hold::Dialogue(slot) | Hold::Battle(slot) | Hold::Shop(slot)) => {
                 if dialogue_done {
                     self.hold = None;
                     self.run_task(slot, host);
@@ -623,6 +641,7 @@ impl Events {
             Op::Wait(_)
             | Op::Dialogue(_)
             | Op::Battle(_)
+            | Op::Shop(_)
             | Op::Script(..)
             | Op::AwaitArrival(_)
             | Op::AwaitAnimation(_)
@@ -630,6 +649,7 @@ impl Events {
             | Op::AwaitPlayer { .. }
             | Op::FadeInHolding
             | Op::FadeOutHolding
+            | Op::FadeOutHoldingAfter(_)
             | Op::LoadMap { .. }
             | Op::Warp { .. } => self.wait(slot, op, host),
             Op::IfFlags { .. }
@@ -707,6 +727,12 @@ impl Events {
                 self.hold = Some(Hold::Battle(slot));
                 return Flow::Yield;
             }
+            Op::Shop(shop) => {
+                self.advance(slot);
+                host.start_shop(shop);
+                self.hold = Some(Hold::Shop(slot));
+                return Flow::Yield;
+            }
             Op::FadeInHolding => {
                 self.advance(slot);
                 self.fade_in_holding();
@@ -716,6 +742,14 @@ impl Events {
                 self.advance(slot);
                 self.hold = Some(Hold::FadeOut {
                     delay: 0,
+                    resume: Some(slot),
+                });
+                return Flow::Yield;
+            }
+            Op::FadeOutHoldingAfter(delay) => {
+                self.advance(slot);
+                self.hold = Some(Hold::FadeOut {
+                    delay,
                     resume: Some(slot),
                 });
                 return Flow::Yield;
@@ -987,6 +1021,10 @@ mod tests {
             self.log.push(format!("battle {scene}"));
         }
 
+        fn start_shop(&mut self, shop: Shop) {
+            self.log.push(format!("shop {shop:?}"));
+        }
+
         fn play_music(&mut self, song: u16) {
             self.log.push(format!("music {song}"));
         }
@@ -1097,6 +1135,31 @@ mod tests {
         assert_eq!(host.log, ["dialogue 40", "music 3"]);
         assert!(!events.holding());
         assert_eq!(events.update_hold(false, &mut host), HoldStep::Free);
+    }
+
+    const SHOPPING: &[Op] = &[
+        Op::FadeOutHoldingAfter(2),
+        Op::Shop(Shop::Items(1)),
+        Op::Brightness(0),
+    ];
+
+    #[test]
+    fn a_shop_opens_once_black_and_the_field_shows_at_once_after_it() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.run_now(SHOPPING, &mut host);
+        assert_eq!(events.update_hold(false, &mut host), HoldStep::Held);
+        assert_eq!(events.update_hold(false, &mut host), HoldStep::Held);
+        assert_eq!(events.brightness(), 0);
+        while !events.in_shop() {
+            events.update_hold(false, &mut host);
+        }
+        assert_eq!(events.brightness(), BLACK);
+        assert_eq!(host.log, ["shop Items(1)"]);
+        assert_eq!(events.update_hold(false, &mut host), HoldStep::Held);
+        assert_eq!(events.update_hold(true, &mut host), HoldStep::Held);
+        assert!(!events.holding());
+        assert_eq!(events.brightness(), 0);
     }
 
     const CHOOSING: &[Op] = &[

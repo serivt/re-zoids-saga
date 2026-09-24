@@ -8,9 +8,10 @@
 //! showing a portrait, and each character of a typewriter window; closing a
 //! window costs two while another stays open (the others are redrawn) and
 //! resetting the text system three. The
-//! key wait polls once per frame and blinks the prompt 20 frames off, 20
-//! on; after the key that ends a key wait or a menu, the script goes on the
-//! next frame.
+//! key wait polls once per frame and turns the prompt on and off every 20
+//! polls, each turn flushing the display a frame, so it stays 21 frames off
+//! and 21 on; after the key that ends a key wait or a menu, the script goes
+//! on the next frame.
 //!
 //! One addition to the original: a message that would scroll its window
 //! (a translation longer than the Japanese text) stops before the line that
@@ -27,7 +28,7 @@ use platform::{Button, Input};
 
 const VARIABLES: usize = 8;
 const WINDOWS: u8 = 8;
-const PROMPT_HALF_PERIOD: u32 = 20;
+const PROMPT_HALF_PERIOD: u32 = 21;
 const CONFIRM_SOUND: u8 = 0x41;
 /// Frames the text system's reset takes to redraw the cleared screen.
 const RESET_FRAMES: u32 = 3;
@@ -1047,7 +1048,7 @@ mod tests {
         }
         assert_eq!(host.log.last().unwrap(), "break 1");
         assert!(runner.is_waiting_for_key());
-        for _ in 0..20 {
+        for _ in 0..21 {
             runner.update(&bytes, Input::default(), &mut host).unwrap();
         }
         assert_eq!(host.log.last().unwrap(), "prompt 1 true");
@@ -1090,13 +1091,13 @@ mod tests {
         assert!(!runner.is_waiting_for_key());
         runner.update(&bytes, Input::default(), &mut host).unwrap();
         assert!(runner.is_waiting_for_key());
-        for _ in 0..19 {
+        for _ in 0..20 {
             runner.update(&bytes, Input::default(), &mut host).unwrap();
         }
         assert_eq!(host.log.last().unwrap(), "prompt 1 false");
         runner.update(&bytes, Input::default(), &mut host).unwrap();
         assert_eq!(host.log.last().unwrap(), "prompt 1 true");
-        for _ in 0..20 {
+        for _ in 0..21 {
             runner.update(&bytes, Input::default(), &mut host).unwrap();
         }
         assert_eq!(host.log.last().unwrap(), "prompt 1 false");

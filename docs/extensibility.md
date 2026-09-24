@@ -147,8 +147,8 @@ first.
 - Events raised today: `Frame`, `TitleShown`, `NameConfirmed`, `RoomEntered`,
   `ExitTaken`, `Talk`, `ScriptStarted`, `ScriptEnded`, `MessageShown`,
   `WindowOpened`, `WindowClosed`, `SoundRequested`, `FlagChanged`, `MenuOpened`,
-  `MenuClosed`, `SaveRequested`, `LoadRequested`, `StorageFailed`. Not yet raised:
-  `MenuChoice`.
+  `MenuClosed`, `ShopOpened`, `ShopClosed`, `SaveRequested`, `LoadRequested`,
+  `StorageFailed`. Not yet raised: `MenuChoice`.
 - Hooks asked today: `translate_message`, `fit_window`, `music_for_map`,
   `alphabet_pages`, `name_entry_help`, `sound_for`. `resource` waits for mod packs.
 - The loaded translation is `TranslationExtension`, an ordinary extension installed

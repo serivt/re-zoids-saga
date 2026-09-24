@@ -10,6 +10,7 @@
 
 use crate::event::{MAP_TASK, Op};
 use crate::field::{Direction, PIXEL};
+use crate::menu::Shop;
 
 /// Set by the first room once the opening has played.
 pub const OPENING_SEEN: u16 = 0x11F;
@@ -1305,6 +1306,27 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
     }
 }
 
+/// A keeper's shop (`0x08008F58`), called a frame after the talk: the
+/// field darkens to black from the next frame (`0x08001524`), the shop
+/// opens, and once it closes the map is loaded again behind it with the
+/// objects where they stood, and shown at once.
+const fn shop(shop: Shop) -> [Op; 3] {
+    [
+        Op::FadeOutHoldingAfter(SHOP_FADE_DELAY),
+        Op::Shop(shop),
+        Op::Brightness(0),
+    ]
+}
+
+/// Frames from a keeper's talk until the field starts darkening.
+const SHOP_FADE_DELAY: u8 = 2;
+
+/// Arcana's item shop (`0x080090F0`).
+const ARCANA_ITEM_SHOP: &[Op] = &shop(Shop::Items(1));
+
+/// Arcana's armaments shop (`0x080090FC`).
+const ARCANA_ARMS_SHOP: &[Op] = &shop(Shop::Arms(1));
+
 /// What an object whose script is the code at `address` runs when spoken
 /// to, for the code this port has transcribed.
 #[must_use]
@@ -1323,6 +1345,8 @@ pub fn talk_handler(address: u32) -> Option<&'static [Op]> {
         0x0800_9480 => Some(LAB_ASSISTANT),
         0x0800_9588 => Some(OLD_MAN_IN_THE_SHOP),
         0x0800_95B8 => Some(ROMAN_TEACHES),
+        0x0800_90F0 => Some(ARCANA_ITEM_SHOP),
+        0x0800_90FC => Some(ARCANA_ARMS_SHOP),
         _ => None,
     }
 }

@@ -132,6 +132,11 @@ entity state 3 for the player and 1 for the character during the box, both back 
 when it closes. Objects whose script is code run the event the port transcribed for
 that address, and chests (behavior 4) open; both are described in [events.md](events.md).
 
+The metatile ahead is found by `0x080084D4`, which walks on past cells whose attribute
+has bit 13 (`0x2000`): the counters. The player speaks to whoever stands on the first
+cell after them, so a shopkeeper answers across a counter (Arcana's item shop has one,
+attribute `0xA000`, which also blocks walking).
+
 ## Exits
 
 When a step completes onto a footing whose attribute is `0x4000 | n`, the engine reports

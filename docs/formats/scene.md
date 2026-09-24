@@ -16,7 +16,7 @@ and `crates/gba-runtime/src/ppu/background.rs`.
 | 0 | Pointer to an LZ77 block of background palettes (480 bytes = palettes 0–14) |
 | 4 | Pointer to an LZ77 block of 4bpp tiles shared by the map and the backdrop |
 | 8 | Pointer to an LZ77 block with the map: `width × height` 16-bit tilemap entries |
-| 12 | Pointer to an LZ77 block of 16-bit attributes, one per metatile (`width/2 × height/2` for rooms); bit 15 blocks walking, bits 15–14 = `01` mark an exit |
+| 12 | Pointer to an LZ77 block of 16-bit attributes, one per metatile (`width/2 × height/2` for rooms); bit 15 blocks walking, bits 15–14 = `01` mark an exit, bit 13 a counter the player speaks across |
 | 16 | Pointer to the backdrop: a raw 32×32 tilemap (2048 bytes) shown on BG3 |
 | 20 | Map width in cells |
 | 22 | Map height in cells |
