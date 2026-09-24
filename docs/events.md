@@ -64,7 +64,7 @@ Flag `0x400` plays the animation once, and flag `0x4` marks that it ended.
 | `0x080019B4`, `0x080019EC` | Play a song, play a sound |
 | `0x08008324` | Pan the camera |
 | `0x08009938` | Flash the screen |
-| `0x08008E4C` | Start a battle scene (descriptors at ROM `0x0866429C`) |
+| `0x08008E4C` | Stage a battle scene (descriptors at ROM `0x0866429C`; see [battle.md](battle.md)) |
 | `0x080378F0` | Learn a deck command: byte `+0x347B + n` of the game state |
 | `0x08037858` | Meet the characters of a list at ROM `0x0866C8D0` |
 | `0x08037098` | See a Zoid: byte `+0x33E2 + id` |
@@ -158,7 +158,8 @@ formation.
 - The opening matches frame by frame. A known one-frame drift appears after dialogue 41.
 - The title, continuing and the notices match frame by frame.
 - Map exits match frame by frame.
-- The throne-room cutscene matches frame by frame until the first battle scene.
+- The throne-room cutscene matches frame by frame, its two battle scenes included but
+  for their shots (see [battle.md](battle.md)).
 - The later segments match as sequences of entity states: the throne room, the ground
   floor, the gate, the hangar, the choice, the departure, and the arrival in `mq0157`
   at pixel (128, 32).
@@ -166,8 +167,8 @@ formation.
 
 ## Not modeled yet
 
-- Battle scenes: the event skips them, while the original spends about 319 frames on
-  each.
+- The shots of the battle scenes, and the battle engine itself (see
+  [battle.md](battle.md)).
 - The CPU-time variance of script operations.
 - Doors taken with A (`0xC000` attributes).
 - The object-state overlay.

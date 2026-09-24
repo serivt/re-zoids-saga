@@ -106,9 +106,8 @@ pub enum Op {
     /// Runs `program` this many times.
     Repeat(u16, &'static [Op]),
     /// A battle the game stages for a cutscene (`0x08008E4C`: battle scene
-    /// `n` of the table at ROM `0x66429C`, run by the battle module). The
-    /// battle system is not reimplemented yet, so the cutscene goes on
-    /// without it.
+    /// `n` of the table at ROM `0x66429C`, run by the battle module),
+    /// holding the game until it and the map's reload after it end.
     Battle(u8),
     /// Scrolls the camera by `(dx, dy)` 16.16 fixed-point pixels
     /// (`0x08008324`, called once a frame for a pan).
@@ -209,6 +208,8 @@ pub trait EventHost {
     fn set_flag(&mut self, flag: u16, set: bool);
     /// Starts dialogue string `index`; the game holds until it ends.
     fn start_dialogue(&mut self, index: u16);
+    /// Starts battle scene `scene`; the game holds until it ends.
+    fn start_battle(&mut self, scene: u8);
     /// Plays song `song` unless it is playing.
     fn play_music(&mut self, song: u16);
     /// Plays sound effect `sound`.
@@ -282,6 +283,8 @@ impl Task {
 enum Hold {
     /// A dialogue started by the task in this slot.
     Dialogue(usize),
+    /// A battle scene started by the task in this slot.
+    Battle(usize),
     /// A fade to black holding the game after `delay` frames of waiting;
     /// once black, the task in `resume` goes on, or else the caller is told.
     FadeOut {
@@ -372,6 +375,12 @@ impl Events {
         matches!(self.hold, Some(Hold::Dialogue(_)))
     }
 
+    /// Whether a battle scene an event started is running.
+    #[must_use]
+    pub fn in_battle(&self) -> bool {
+        matches!(self.hold, Some(Hold::Battle(_)))
+    }
+
     /// Whether any task runs.
     #[must_use]
     pub fn running(&self) -> bool {
@@ -427,12 +436,13 @@ impl Events {
         });
     }
 
-    /// Advances a hold by one frame: a finished dialogue lets the task that
-    /// started it go on, then the tasks after it run; a fade moves a level.
+    /// Advances a hold by one frame: a finished dialogue or battle scene
+    /// (`dialogue_done`) lets the task that started it go on, then the
+    /// tasks after it run; a fade moves a level.
     pub fn update_hold(&mut self, dialogue_done: bool, host: &mut impl EventHost) -> HoldStep {
         match self.hold {
             None => HoldStep::Free,
-            Some(Hold::Dialogue(slot)) => {
+            Some(Hold::Dialogue(slot) | Hold::Battle(slot)) => {
                 if dialogue_done {
                     self.hold = None;
                     self.run_task(slot, host);
@@ -579,6 +589,7 @@ impl Events {
         match op {
             Op::Wait(_)
             | Op::Dialogue(_)
+            | Op::Battle(_)
             | Op::Script(..)
             | Op::AwaitArrival(_)
             | Op::AwaitAnimation(_)
@@ -653,6 +664,12 @@ impl Events {
                 self.advance(slot);
                 host.start_script(table, index);
                 self.hold = Some(Hold::Dialogue(slot));
+                return Flow::Yield;
+            }
+            Op::Battle(scene) => {
+                self.advance(slot);
+                host.start_battle(scene);
+                self.hold = Some(Hold::Battle(slot));
                 return Flow::Yield;
             }
             Op::FadeInHolding => {
@@ -914,6 +931,10 @@ mod tests {
 
         fn start_dialogue(&mut self, index: u16) {
             self.log.push(format!("dialogue {index}"));
+        }
+
+        fn start_battle(&mut self, scene: u8) {
+            self.log.push(format!("battle {scene}"));
         }
 
         fn play_music(&mut self, song: u16) {

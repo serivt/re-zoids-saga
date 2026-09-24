@@ -8,6 +8,7 @@ use extraction::saga::{
     PauseWallpaper, Portrait, PortraitError, Scene, SceneError, SpriteSheet, SpriteSheetError,
     TitleGraphics, Warp, WindowSkin, WindowSkinError,
 };
+use extraction::saga_battle::{self, BattleImage, BattleScene};
 use extraction::saga_guide::{
     self, CHARACTER_ENTRIES, CHARACTER_GUIDE_SCRIPTS, GuidePicture, SYSTEM_SCRIPTS,
     ZOID_GUIDE_SCRIPTS, ZoidPart,
@@ -21,7 +22,8 @@ use formats::font::{Glyph, GlyphIndex};
 use crate::extension::GameSound;
 use crate::menu::{Member, Roster, UNIT_SLOTS};
 use crate::translation::{
-    DIALOGUE_TABLE, ITEM_TABLE, NAME_ENTRY_TABLE, NAME_TABLE, PAUSE_MENU_TABLE, TITLE_TABLE,
+    BATTLE_TABLE, DIALOGUE_TABLE, ITEM_TABLE, NAME_ENTRY_TABLE, NAME_TABLE, PAUSE_MENU_TABLE,
+    TITLE_TABLE,
 };
 
 /// The game's data, keyed by identifier.
@@ -208,6 +210,24 @@ impl<'rom> GameData<'rom> {
         saga_save::meet_characters(self.rom, state, list)
     }
 
+    /// Battle scene `index` of the table cutscenes stage.
+    #[must_use]
+    pub fn battle_scene(&self, index: usize) -> Option<BattleScene> {
+        saga_battle::battle_scene(self.rom, index)
+    }
+
+    /// The battle scenery `scenery`.
+    #[must_use]
+    pub fn scenery_image(&self, scenery: u8) -> Option<BattleImage> {
+        saga_battle::scenery_image(self.rom, scenery)
+    }
+
+    /// Zoid `zoid`'s battle image.
+    #[must_use]
+    pub fn zoid_image(&self, zoid: u8) -> Option<BattleImage> {
+        saga_battle::zoid_image(self.rom, zoid)
+    }
+
     /// The picture the status screens show of Zoid `zoid`.
     ///
     /// # Errors
@@ -335,10 +355,12 @@ impl<'rom> GameData<'rom> {
             name if name == saga::BATTLE_TEXT_SCRIPTS.name => {
                 saga::BATTLE_TEXT_SCRIPTS.offsets(self.rom)?
             }
-            DIALOGUE_TABLE | ITEM_TABLE | NAME_TABLE => match saga::string_table(table) {
-                Some(table) => table.offsets(self.rom)?,
-                None => return Ok(None),
-            },
+            BATTLE_TABLE | DIALOGUE_TABLE | ITEM_TABLE | NAME_TABLE => {
+                match saga::string_table(table) {
+                    Some(table) => table.offsets(self.rom)?,
+                    None => return Ok(None),
+                }
+            }
             _ => return Ok(None),
         }))
     }

@@ -28,6 +28,7 @@ use gba_runtime::ppu::{FADE_STEPS, SCREEN_HEIGHT, SCREEN_WIDTH, darken};
 use platform::{Button, Frame, Input, Rgb, SaveStorage};
 use thiserror::Error;
 
+use crate::battle::BattleStage;
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::data::GameData;
 use crate::event::{BLACK, EventHost, Events, HoldStep, MAP_TASK, Op};
@@ -188,6 +189,7 @@ pub struct Game<'rom> {
     scripts: Vec<ScriptRunner>,
     active_script: Option<usize>,
     last_runner: Option<usize>,
+    battle: Option<Box<BattleStage>>,
     field: Option<Field>,
     events: Events,
     screen: Screen,
@@ -298,6 +300,7 @@ impl<'rom> Game<'rom> {
             scripts: Vec::new(),
             active_script: None,
             last_runner: None,
+            battle: None,
             field: None,
             events: Events::new(),
             screen: Screen::Loading,
@@ -770,6 +773,7 @@ impl<'rom> Game<'rom> {
             scripts: &mut self.scripts,
             active_script: &mut self.active_script,
             last_runner: &mut self.last_runner,
+            battle: &mut self.battle,
             warped: &mut self.warped,
             chest: self.chest,
             party: &mut self.party,
@@ -792,9 +796,30 @@ impl<'rom> Game<'rom> {
                 .is_some_and(|field| field.player().command == Command::Player)
     }
 
+    /// A frame of the battle scene an event holds the game for; its end
+    /// lets the event go on.
+    fn update_battle(&mut self, input: Input) -> Result<(), GameError> {
+        let done = match self.battle.as_mut() {
+            Some(stage) => {
+                stage.update(self.data.bytes(), input, &mut self.windows)?;
+                stage.is_done()
+            }
+            None => true,
+        };
+        if done {
+            self.battle = None;
+        }
+        self.update_events(|events, host| {
+            events.update_hold(done, host);
+        })
+    }
+
     fn update_field(&mut self, input: Input) -> Result<(), GameError> {
         if self.field.is_none() {
             return Ok(());
+        }
+        if self.events.in_battle() {
+            return self.update_battle(input);
         }
         if self.events.in_dialogue() {
             let runner = match self.active_script {
@@ -976,6 +1001,11 @@ impl<'rom> Game<'rom> {
                 let level = frames.saturating_sub(NAME_HOLD_FRAMES);
                 darken(frame, u8::try_from(level).unwrap_or(BLACK));
             }
+            Screen::Field if self.battle.is_some() => {
+                if let Some(stage) = &self.battle {
+                    stage.draw(frame, &self.windows, &self.skin, &self.painter);
+                }
+            }
             Screen::Field => {
                 if let Some(field) = &self.field {
                     field.draw(frame);
@@ -1025,6 +1055,7 @@ struct Host<'a, 'rom> {
     scripts: &'a mut Vec<ScriptRunner>,
     active_script: &'a mut Option<usize>,
     last_runner: &'a mut Option<usize>,
+    battle: &'a mut Option<Box<BattleStage>>,
     warped: &'a mut Option<usize>,
     chest: Option<(usize, u16)>,
     party: &'a mut Party,
@@ -1067,6 +1098,13 @@ impl EventHost for Host<'_, '_> {
             usize::from(index),
         ) {
             self.fail(error);
+        }
+    }
+
+    fn start_battle(&mut self, scene: u8) {
+        match BattleStage::new(&self.data, scene) {
+            Ok(stage) => *self.battle = Some(Box::new(stage)),
+            Err(missing) => self.fail(GameError::Text(format!("no battle scene {}", missing.0))),
         }
     }
 

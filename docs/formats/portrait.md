@@ -8,7 +8,7 @@ log) and of the script opcodes that precede each message. Implemented in
 
 ## Record table
 
-468 records of 16 bytes at ROM `0x6D0A64`:
+783 records of 16 bytes at ROM `0x6D0A64`:
 
 | Offset | Field |
 |---|---|
@@ -17,7 +17,10 @@ log) and of the script opcodes that precede each message. Implemented in
 | 8, 12 | Pointers to the shared sprite layout (`0x83ED3E8`, `0x83ED3DC`), identical in every record |
 
 Records are grouped **nine per character**, one per facial expression:
-`record = character × 9 + expression`. The 468 records cover 52 characters.
+`record = character × 9 + expression`. The 783 records cover the 87 characters of the
+character table; 186 of them have no images (a null first pointer), so those characters
+lack those expressions. The battle scenes show the same portraits, expression 0 of the
+enemy pilot, as four sprites at (0, 112) (see [../battle.md](../battle.md)).
 
 ## Which portrait a message shows
 

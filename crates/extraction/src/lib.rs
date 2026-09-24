@@ -2,6 +2,7 @@
 
 pub mod identify;
 pub mod saga;
+pub mod saga_battle;
 pub mod saga_guide;
 pub mod saga_party;
 pub mod saga_save;

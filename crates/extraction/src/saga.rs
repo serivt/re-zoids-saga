@@ -132,7 +132,7 @@ pub fn window_skin(rom: &[u8]) -> Result<WindowSkin, WindowSkinError> {
 
 const PORTRAIT_TABLE_OFFSET: usize = 0x006D_0A64;
 const PORTRAIT_RECORD_LEN: usize = 16;
-const PORTRAIT_COUNT: usize = 468;
+const PORTRAIT_COUNT: usize = 783;
 /// Portraits per character in the table: one per facial expression.
 pub const PORTRAIT_EXPRESSIONS: usize = 9;
 const PORTRAIT_PIECES: [TilePiece; 4] = [
@@ -216,6 +216,12 @@ pub fn portrait(
     let too_short = || PortraitError::TooShort { len: rom.len() };
     let offset = PORTRAIT_TABLE_OFFSET + record * PORTRAIT_RECORD_LEN;
     let entry = rom.get(offset..offset + 8).ok_or_else(too_short)?;
+    if entry[..4] == [0; 4] {
+        return Err(PortraitError::NoSuchPortrait {
+            character,
+            expression,
+        });
+    }
     let tiles_offset = rom_offset(&entry[..4]).ok_or_else(too_short)?;
     let palette_offset = rom_offset(&entry[4..8]).ok_or_else(too_short)?;
     let (tile_bytes, _) =

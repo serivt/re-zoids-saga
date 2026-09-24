@@ -22,8 +22,9 @@ portraits are extracted and drawn in an SDL3 window, with text wrapped the way t
 game does it. The opening chapter plays from the title to the world map: the castle and
 its conversations, the throne-room cutscene, the gate, the Zoid choice in the hangar
 (which forms the party), and the eastern labyrinth with its chests and the Trinity Liger
-event, with the original timing (see [docs/events.md](docs/events.md)). Battles are
-not implemented yet; cutscenes skip them.
+event, with the original timing (see [docs/events.md](docs/events.md)). The throne
+room's two battle scenes play as in the original but for their shots (see
+[docs/battle.md](docs/battle.md)); the battle system itself is not implemented yet.
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements

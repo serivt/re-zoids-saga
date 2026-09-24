@@ -35,6 +35,8 @@ pub const ITEM_TABLE: &str = "item";
 /// Table of the Zoids' and characters' names, which the status screens
 /// print.
 pub const NAME_TABLE: &str = "name";
+/// Table of the pilots' battle quotes.
+pub const BATTLE_TABLE: &str = "battle";
 /// Key prefix of the name entry's character pages: `name-entry/alphabet/N`.
 pub const ALPHABET_PREFIX: &str = "name-entry/alphabet/";
 /// Key of the name entry's help line.
