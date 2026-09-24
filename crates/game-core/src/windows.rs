@@ -72,6 +72,9 @@ pub struct Window {
     pub pending_break: bool,
     /// Order in which the window was opened; later windows cover earlier ones.
     pub opened: u64,
+    /// Scroll marks the game's code sets itself for a list it pages
+    /// through, in place of the ones the lines give.
+    pub marks: Option<(bool, bool)>,
 }
 
 impl Window {
@@ -234,6 +237,9 @@ impl Window {
     /// Whether lines are hidden above and below the shown ones.
     #[must_use]
     pub fn hidden_lines(&self) -> (bool, bool) {
+        if let Some(marks) = self.marks {
+            return marks;
+        }
         let filled = self
             .lines
             .iter()
@@ -323,6 +329,14 @@ impl<'rom> ScriptWindows<'rom> {
     pub fn pad_to(&mut self, id: u8, column: usize) {
         if let Some(window) = self.window_mut(id) {
             window.pad_to(column);
+        }
+    }
+
+    /// Sets the scroll marks of window `id`: whether more lines lie above
+    /// and below, as the game's code does for a list it pages through.
+    pub fn set_scroll_marks(&mut self, id: u8, marks: (bool, bool)) {
+        if let Some(window) = self.window_mut(id) {
+            window.marks = Some(marks);
         }
     }
 
@@ -507,6 +521,7 @@ impl ScriptHost for ScriptWindows<'_> {
                 top: 0,
                 pending_break: false,
                 opened,
+                marks: None,
             });
         }
     }
@@ -531,11 +546,24 @@ impl ScriptHost for ScriptWindows<'_> {
                     window.cursor = None;
                 }
             }
-            None => self.windows.iter_mut().flatten().for_each(|window| {
-                window.visible = true;
-                window.cursor = None;
-            }),
+            None => {
+                for window in self.windows.iter_mut().flatten() {
+                    self.opened += 1;
+                    window.opened = self.opened;
+                    window.visible = true;
+                    window.cursor = None;
+                }
+            }
         }
+    }
+
+    fn draw_window(&mut self, id: u8) {
+        self.opened += 1;
+        let opened = self.opened;
+        if let Some(window) = self.window_mut(id) {
+            window.opened = opened;
+        }
+        self.present(Some(id));
     }
 
     fn reveal(&mut self, id: u8) {

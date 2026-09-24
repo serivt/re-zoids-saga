@@ -37,6 +37,8 @@ pub const ITEM_TABLE: &str = "item";
 pub const NAME_TABLE: &str = "name";
 /// Table of the pilots' battle quotes.
 pub const BATTLE_TABLE: &str = "battle";
+/// Table of the parts' names.
+pub const PART_TABLE: &str = "part";
 /// Key prefix of the name entry's character pages: `name-entry/alphabet/N`.
 pub const ALPHABET_PREFIX: &str = "name-entry/alphabet/";
 /// Key of the name entry's help line.

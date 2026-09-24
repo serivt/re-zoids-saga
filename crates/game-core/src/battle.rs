@@ -499,7 +499,7 @@ impl BattleStage {
             }
             let palette = Palette::new(sprite.palette.map(Palette::from_bgr555));
             for piece in sprite.frames.get(frame_index).into_iter().flatten() {
-                draw_piece(&mut layer, sprite, &palette, piece, anchor);
+                draw_piece(&mut layer, sprite, &palette, piece, anchor, true);
             }
         }
         for (index, color) in layer.into_iter().enumerate() {
@@ -545,14 +545,16 @@ fn hidden((x, y): (i32, i32)) -> bool {
     (x + 0x38).rem_euclid(0x1_0000) > RIGHT || (y + 0x20).rem_euclid(0x1_0000) > BOTTOM
 }
 
-/// Rasterizes one piece of an effect, mirrored as the enemy's sprites are,
-/// into `layer`, where the first sprite at a pixel wins.
-fn draw_piece(
+/// Rasterizes one piece of a sprite into `layer` (the screen's pixels,
+/// row after row), where the first sprite at a pixel wins; `mirrored` as
+/// the enemy's sprites are (flag `0x100` for the drawer at `0x08000560`).
+pub(crate) fn draw_piece(
     layer: &mut [Option<Rgb>],
     sprite: &EffectSprite,
     palette: &Palette,
     piece: &EffectPiece,
     (anchor_x, anchor_y): (i32, i32),
+    mirrored: bool,
 ) {
     let (width, height) = (i32::from(piece.width), i32::from(piece.height));
     let affine = piece.affine != PLAIN_PIECE;
@@ -562,9 +564,13 @@ fn draw_piece(
     } else {
         (width, height)
     };
-    let left = anchor_x - i32::from(piece.x) - width - if double { width } else { 0 };
+    let left = if mirrored {
+        anchor_x - i32::from(piece.x) - width - if double { width } else { 0 }
+    } else {
+        anchor_x + i32::from(piece.x)
+    };
     let top = anchor_y + i32::from(piece.y);
-    let matrix = affine.then(|| piece_matrix(piece));
+    let matrix = affine.then(|| piece_matrix(piece, mirrored));
     for row in 0..box_height {
         for column in 0..box_width {
             let (x, y) = (left + column, top + row);
@@ -581,8 +587,8 @@ fn draw_piece(
                     ((pc * dx + pd * dy) >> 8) + height / 2,
                 )
             } else {
-                let mirrored = piece.attributes & FLIP_X == 0;
-                let tx = if mirrored { width - 1 - column } else { column };
+                let flipped = (piece.attributes & FLIP_X != 0) != mirrored;
+                let tx = if flipped { width - 1 - column } else { column };
                 let ty = if piece.attributes & FLIP_Y != 0 {
                     height - 1 - row
                 } else {
@@ -602,7 +608,7 @@ fn draw_piece(
 /// The affine matrix the drawer sets for a piece (`ObjAffineSet` with the
 /// reciprocal of each scale and the piece's rotation), in 8.8, with the
 /// first entry negated for the enemy's mirroring.
-fn piece_matrix(piece: &EffectPiece) -> (i32, i32, i32, i32) {
+fn piece_matrix(piece: &EffectPiece, mirrored: bool) -> (i32, i32, i32, i32) {
     let reciprocal = |scale: i16| 0x1_0000 / i32::from(scale.unsigned_abs()).max(1);
     let (sx, sy) = (reciprocal(piece.scale_x), reciprocal(piece.scale_y));
     let sy = if piece.scale_y < 0 { -sy } else { sy };
@@ -613,7 +619,9 @@ fn piece_matrix(piece: &EffectPiece) -> (i32, i32, i32, i32) {
     let pb = to_fixed(-f64::from(sx) * sin);
     let pc = to_fixed(f64::from(sy) * sin);
     let mut pd = to_fixed(f64::from(sy) * cos);
-    pa = -pa;
+    if mirrored {
+        pa = -pa;
+    }
     if piece.scale_x < 0 {
         pa = -pa;
     }
@@ -813,7 +821,7 @@ mod tests {
             scale_y: 0x100,
             affine: 0x300,
         };
-        assert_eq!(piece_matrix(&piece), (-128, 0, 0, 256));
+        assert_eq!(piece_matrix(&piece, true), (-128, 0, 0, 256));
         let sprite = effect(&[1]);
         assert_eq!(piece_pixel(&sprite, &piece, (15, 15)), Some(1));
         assert_eq!(piece_pixel(&sprite, &piece, (16, 0)), None);

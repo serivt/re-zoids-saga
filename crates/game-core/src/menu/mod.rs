@@ -4,24 +4,33 @@
 //! `extraction::saga::PAUSE_MENU_SCRIPTS`): script 46 opens the help line
 //! and the six-item list, 64 and 44 the party panel and the money box,
 //! whose values the game's code prints right-aligned, and 47 prints the
-//! help text and runs the menu. Choices open the status submenu (48, 49),
-//! the weapons screen (128, 129, 133), the message-speed setting (151–159)
+//! help text and runs the menu. Choices open the status submenu (48, 49)
+//! with the unit list, the character screen, each Zoid's status and parts
+//! pages (68–102, 164–218) and the stocked weapons (103–107), the
+//! equipment screen (128–150, in `equipment`), the message-speed setting
+//! (151–159)
 //! or the save question (160, 61, 161, 162), or print a notice. The
 //! screens this port does not have end in the table's "not done yet"
 //! notice (63). Behind the windows a logo map drifts one pixel per frame
 //! diagonally over a static texture.
 
 use extraction::saga::{BootError, PauseWallpaper, SpriteSheet};
-use extraction::saga_party::{self, UnitStatus};
+use extraction::saga_battle::{self, BattleImage, EffectSprite};
+use extraction::saga_party::{self, PART_SLOTS, PartSlot, UnitStatus};
 
 use crate::data::GameData;
-use gba_runtime::ppu::{FullPalette, draw_background_256};
+use gba_runtime::ppu::{FADE_STEPS, FullPalette, Palette, darken, draw_background_256};
 use platform::{Frame, Input, Rgb};
 
+use crate::battle::draw_piece;
+use crate::guide::{Cover, Guide, GuideError, GuideKind};
 use crate::script::{ScriptError, ScriptRunner};
-use crate::translation::{NAME_TABLE, PAUSE_MENU_TABLE};
+use crate::translation::{NAME_TABLE, PART_TABLE, PAUSE_MENU_TABLE};
 use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter, draw_sprite};
+
+mod equipment;
+mod parts;
 
 const SCRIPT_WAIT_KEY: usize = 37;
 const SCRIPT_MONEY_WINDOW: usize = 44;
@@ -49,10 +58,6 @@ const SCRIPT_EXP_LABEL: usize = 66;
 const SCRIPT_NEXT_LABEL: usize = 67;
 const SCRIPT_BOOK_WINDOW: usize = 115;
 const SCRIPT_BOOK_MENU: usize = 116;
-const SCRIPT_WEAPONS_WINDOWS: usize = 128;
-const SCRIPT_NO_ZOID: usize = 129;
-const SCRIPT_WEAPONS_HELP: usize = 133;
-const SCRIPT_NOT_BOARDED: usize = 134;
 const SCRIPT_SPEED_WINDOW: usize = 151;
 const SCRIPT_SPEED_LIST: usize = 152;
 const SCRIPT_SPEED_MENU: usize = 153;
@@ -103,8 +108,6 @@ const PANEL_WINDOW: u8 = 2;
 const STATUS_WINDOW: u8 = 4;
 const BOOK_WINDOW: u8 = 5;
 const SPEED_WINDOW: u8 = 5;
-const WEAPONS_ZOID_WINDOW: u8 = 1;
-const WEAPONS_LIST_WINDOW: u8 = 3;
 const PANEL_LABEL_CELLS: usize = 10;
 const PANEL_CELLS: usize = 17;
 const MONEY_CELLS: usize = 9;
@@ -134,7 +137,65 @@ const STATUS_ZI_DATA: u16 = 3;
 const STATUS_ZI_ITEMS: u16 = 4;
 const STATUS_BOOK: u16 = 5;
 const SPEED_CHOICES: u16 = 5;
-const MENU_CANCELABLE: bool = true;
+const EQUIP_IMAGE_PIXELS: usize = 128;
+const GUIDE_RETURN_FRAMES: u32 = 45;
+const GUIDE_FADE_TOP: u32 = 31;
+const GUIDE_FADE_HOLD: u32 = 12;
+const SCREEN_WIDTH: usize = 240;
+const SCREEN_HEIGHT: usize = 160;
+const EQUIP_IMAGE_TILES: usize = 16;
+const TILE_PIXELS: usize = 8;
+/// Window 4's pixels, where the original's window 0 hides sprites while
+/// the rack list is open (`WIN0H` `0x0897`, `WIN0V` `0x205F`).
+const RACK_SPRITE_MASK: (usize, usize, usize, usize) = (8, 32, 151, 95);
+const SCRIPT_CLOSE: usize = 8;
+const SCRIPT_PRESENT: usize = 16;
+const SCRIPT_RACK_PAGES: usize = 91;
+const SCRIPT_FIXED_PAGES: usize = 98;
+const SCRIPT_ARMS_HELP: usize = 101;
+const SCRIPT_ARMS_LAST_HELP: usize = 102;
+const SCRIPT_ATTACK: usize = 94;
+const SCRIPT_ACCURACY: usize = 95;
+const SCRIPT_COST: usize = 96;
+const SCRIPT_RANGE: usize = 97;
+const SCRIPT_RANGES: usize = 164;
+const SCRIPT_REACHES: usize = 170;
+const SCRIPT_SUPPORT: usize = 175;
+const SCRIPT_NO_EFFECT: usize = 207;
+const SCRIPT_EFFECTS: usize = 208;
+const SCRIPT_NO_RACK: usize = 212;
+const SCRIPT_NO_PART: usize = 213;
+const SCRIPT_RACK_KINDS: usize = 213;
+const SCRIPT_FIXED_KIND: usize = 218;
+const SCRIPT_COLON: usize = 41;
+const SCRIPT_SPACE: usize = 42;
+const SCRIPT_DOT: usize = 43;
+const RACKS: usize = 3;
+const LAST_ARMS_PAGE: usize = PART_SLOTS - 1;
+const EFFECT_BITS: [u32; 4] = [0x400, 0x800, 0x1000, 0x2000];
+const MOST_EFFECTS_FIRST_LINE: usize = 2;
+const WEAPON: u32 = 1;
+const MAX_SHOWN: i32 = 999;
+const COST_COLUMN: usize = 22;
+const NUMBER_DIGITS: usize = 7;
+const LEFT_ALIGNED: u8 = 1;
+const ZERO_PADDED: u8 = 2;
+const SIGNED: u8 = 4;
+const SCRIPT_STOCK_WINDOWS: usize = 103;
+const SCRIPT_STOCK_LABELS: usize = 104;
+const SCRIPT_TIMES: usize = 40;
+const SCRIPT_EFFECTS_LABEL: usize = 206;
+const SCRIPT_PART_TEXTS: usize = 422;
+const SCRIPT_CLEAR_STOCK: usize = 2;
+const SCRIPT_DRAW_STOCK: usize = 27;
+const STOCK_WINDOW: u8 = 1;
+const STOCK_LIST_WINDOW: u8 = 2;
+const STOCK_MASK: u32 = 0xF;
+const STOCK_PAGE: usize = 6;
+const STOCK_NAME_CELLS: usize = 8;
+const EMPTY_SOUND: u8 = 0x4F;
+const EMPTY_BACK_SOUND: u8 = 0x41;
+const SUPPORT_KINDS: u32 = 0xE;
 
 /// Stat bonuses a character shows, in the screen's order: 耐久, 攻撃,
 /// 防御, 反応, 命中.
@@ -176,6 +237,10 @@ pub struct Member {
     pub bonuses: [i32; CHARACTER_STATS],
     /// The unit the character pilots.
     pub unit: Option<UnitStatus>,
+    /// That unit's part slots.
+    pub parts: Option<[PartSlot; PART_SLOTS]>,
+    /// Whether the equipment screen refuses to change them.
+    pub keeps_equipment: bool,
 }
 
 /// Who is in the party and where they stand, as the game state holds it
@@ -195,6 +260,8 @@ impl Default for Roster {
                 character: 0,
                 bonuses: [0; CHARACTER_STATS],
                 unit: None,
+                parts: None,
+                keeps_equipment: false,
             }],
             formation: [None; UNIT_SLOTS],
         }
@@ -206,9 +273,13 @@ impl Default for Roster {
 enum Return {
     Main,
     Status,
+    /// The status list after a notice that its list is empty.
+    EmptyList,
+    /// The equipment screen's member list.
     Weapons,
+    /// The equipment screen's rack list.
+    Racks,
     Character,
-    Zoid,
 }
 
 /// What the menu needs after a frame.
@@ -236,6 +307,16 @@ enum MenuState {
     Unit,
     Character,
     Zoid,
+    /// A page of the Zoid's parts: the racks, then the fixed weapons.
+    Arms(usize),
+    /// The stocked weapons and support parts.
+    Stock,
+    /// The equipment screen's racks.
+    Racks,
+    /// The parts a rack can take.
+    Equip,
+    /// Whether to throw away a part the stock has no room for.
+    Discard,
     Notice(Return),
     Closed,
 }
@@ -246,10 +327,27 @@ pub struct PauseMenu {
     palette: FullPalette,
     runner: ScriptRunner,
     names: ScriptRunner,
+    parts: ScriptRunner,
     state: MenuState,
     scroll: i32,
+    guide: Option<Box<Guide>>,
+    book_line: usize,
+    returning: Option<u32>,
+    /// Frames the original would still spend drawing what the port drew
+    /// at once: its interpreter blocks the game on each window it opens,
+    /// clears or presents, so the wallpaper and the blinking stand still
+    /// and keys go unread.
+    busy: u32,
     party: Party,
     roster: Roster,
+    game_state: Vec<u8>,
+    stock: Vec<u16>,
+    stock_page: usize,
+    stock_shown: Option<usize>,
+    equipment: equipment::Equipment,
+    equip_image: Option<(u16, BattleImage)>,
+    weapon_sprites: Vec<((u16, usize), Option<EffectSprite>)>,
+    weapon_mounts: [(i32, i32); RACKS],
     member: usize,
     zoid_sprites: Vec<(u16, SpriteSheet)>,
     shown_zoid: Option<u16>,
@@ -265,7 +363,8 @@ impl PauseMenu {
     /// # Errors
     ///
     /// Returns [`BootError`] when a block cannot be read.
-    pub fn new(data: &GameData<'_>, party: Party, roster: Roster) -> Result<Self, BootError> {
+    pub fn new(data: &GameData<'_>, party: Party, state: Vec<u8>) -> Result<Self, BootError> {
+        let roster = data.roster(&state);
         let wallpaper = data.pause_wallpaper()?;
         let mut palette = FullPalette::from_bgr555(&[WALLPAPER_BACKDROP]);
         palette.write(WALLPAPER_PALETTE_START, &wallpaper.palette);
@@ -276,6 +375,11 @@ impl PauseMenu {
             .unwrap_or_default();
         let names = data
             .script_offsets(NAME_TABLE)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let part_names = data
+            .script_offsets(PART_TABLE)
             .ok()
             .flatten()
             .unwrap_or_default();
@@ -299,10 +403,23 @@ impl PauseMenu {
             palette,
             runner: ScriptRunner::named(PAUSE_MENU_TABLE, scripts),
             names: ScriptRunner::named(NAME_TABLE, names),
+            parts: ScriptRunner::named(PART_TABLE, part_names),
             state: MenuState::Closed,
             scroll: 0,
+            guide: None,
+            book_line: 0,
+            returning: None,
+            busy: 0,
             party,
             roster,
+            game_state: state,
+            stock: Vec::new(),
+            stock_page: 0,
+            stock_shown: None,
+            equipment: equipment::Equipment::default(),
+            equip_image: None,
+            weapon_sprites: Vec::new(),
+            weapon_mounts: [(0, 0); RACKS],
             member: 0,
             zoid_sprites,
             shown_zoid: None,
@@ -347,12 +464,23 @@ impl PauseMenu {
         self.party.clone()
     }
 
+    /// The game-state block as the menu leaves it: the equipment screen
+    /// changes the units' parts and the stock.
+    #[must_use]
+    pub fn state(&self) -> &[u8] {
+        &self.game_state
+    }
+
     /// Whether the menu has closed.
     #[must_use]
     pub fn is_closed(&self) -> bool {
         self.state == MenuState::Closed
     }
 
+    /// Runs `script` to its end at once, counting the frames the original
+    /// would spend on it (see [`PauseMenu::busy`]). None of the scripts run
+    /// this way waits for a key, but a translated label may not fit its
+    /// window and wait for the page to turn; its text then stops there.
     fn run_now(
         &mut self,
         rom: &[u8],
@@ -360,7 +488,12 @@ impl PauseMenu {
         windows: &mut ScriptWindows<'_>,
     ) -> Result<(), ScriptError> {
         self.runner.start(script)?;
-        while !self.runner.update(rom, self.held, windows)? {}
+        while !self.runner.update(rom, self.held, windows)? {
+            if self.runner.is_waiting_for_key() {
+                break;
+            }
+            self.busy += 1;
+        }
         Ok(())
     }
 
@@ -419,13 +552,38 @@ impl PauseMenu {
     ///
     /// # Errors
     ///
-    /// Returns [`ScriptError`] when a script cannot run.
+    /// Returns [`GuideError`] when a script, or the guide 図鑑 opens,
+    /// cannot run.
     pub fn update(
         &mut self,
         rom: &[u8],
         input: Input,
         windows: &mut ScriptWindows<'_>,
-    ) -> Result<MenuStep, ScriptError> {
+    ) -> Result<MenuStep, GuideError> {
+        if let Some(guide) = &mut self.guide {
+            guide.update(&GameData::new(rom), input, windows)?;
+            if guide.is_closed() {
+                self.guide = None;
+                self.return_from_guide(rom, windows)?;
+            }
+            return Ok(MenuStep::Open);
+        }
+        if let Some(frames) = self.returning {
+            self.scroll += 1;
+            if frames + 1 < GUIDE_RETURN_FRAMES {
+                self.returning = Some(frames + 1);
+                return Ok(MenuStep::Open);
+            }
+            self.returning = None;
+            windows.clear_window(HELP_WINDOW);
+            self.runner.start(SCRIPT_BOOK_MENU)?;
+            self.state = MenuState::Book;
+            return Ok(MenuStep::Open);
+        }
+        if self.busy > 0 {
+            self.busy -= 1;
+            return Ok(MenuStep::Open);
+        }
         self.scroll += 1;
         self.held = input;
         match self.state {
@@ -441,23 +599,27 @@ impl PauseMenu {
         match self.state {
             MenuState::Main => self.main_choice(rom, confirmed, choice, windows)?,
             MenuState::Status => self.status_choice(rom, confirmed, choice, windows)?,
+            MenuState::Book if confirmed => {
+                let kind = if choice == 0 {
+                    GuideKind::Zoids
+                } else {
+                    GuideKind::Characters
+                };
+                self.book_line = usize::from(choice);
+                let data = GameData::new(rom);
+                let state = self.game_state.clone();
+                self.guide = Some(Box::new(Guide::new(&data, kind, state, Cover::PauseMenu)?));
+            }
             MenuState::Book => {
                 windows.close_window(Some(BOOK_WINDOW));
-                if confirmed {
-                    self.placeholder(rom, Return::Status, windows)?;
-                } else {
-                    self.return_to(rom, Return::Status, windows)?;
-                }
+                self.return_to(rom, Return::Status, windows)?;
             }
             MenuState::Weapons => {
-                if confirmed {
-                    self.run_now(rom, SCRIPT_NOT_BOARDED, windows)?;
-                    self.notice(SCRIPT_WAIT_KEY, Return::Weapons)?;
-                } else {
-                    self.build(rom, windows)?;
-                    self.return_to(rom, Return::Main, windows)?;
-                }
+                self.equipment_member_choice(rom, code, choice, windows)?;
             }
+            MenuState::Racks => self.rack_choice(rom, code, choice, windows)?,
+            MenuState::Equip => self.rack_part_choice(rom, code, choice, windows)?,
+            MenuState::Discard => self.discard_choice(rom, code, choice, windows)?,
             MenuState::Speed => {
                 if confirmed && choice < SPEED_CHOICES {
                     self.party.message_speed = choice + 1;
@@ -475,11 +637,20 @@ impl PauseMenu {
             MenuState::Save => self.notice(SCRIPT_SAVE_CANCELED, Return::Main)?,
             MenuState::Unit => self.rebuild_status(rom, windows)?,
             MenuState::Character => self.member_choice(rom, code, choice, windows)?,
-            MenuState::Zoid if confirmed => self.placeholder(rom, Return::Zoid, windows)?,
-            MenuState::Zoid => self.return_to(rom, Return::Character, windows)?,
+            MenuState::Zoid if confirmed => self.show_arms(rom, 0, windows)?,
+            MenuState::Arms(page) if confirmed && page < LAST_ARMS_PAGE => {
+                self.show_arms(rom, page + 1, windows)?;
+            }
+            MenuState::Arms(_) if confirmed => self.return_to(rom, Return::Character, windows)?,
+            MenuState::Zoid | MenuState::Arms(_) => {
+                windows.play_sound(LEAVE_SOUND);
+                self.return_to(rom, Return::Character, windows)?;
+            }
+            MenuState::Stock => self.stock_choice(rom, code, choice, windows)?,
             MenuState::Notice(back) => self.return_to(rom, back, windows)?,
             MenuState::Saving | MenuState::Closed => {}
         }
+        self.load_equip_image(rom);
         Ok(if self.state == MenuState::Closed {
             MenuStep::Closed
         } else {
@@ -500,6 +671,28 @@ impl PauseMenu {
             SCRIPT_SAVE_CANCELED
         };
         self.notice(script, Return::Main)
+    }
+
+    /// Back from the guide (`0x08050090`): the main menu, the status list
+    /// and the guide choice rebuilt with the cursor on the guide left, in
+    /// the dark; they brighten from the 25th frame over 16 and the choice
+    /// runs again 45 frames after the guide closed.
+    fn return_from_guide(
+        &mut self,
+        rom: &[u8],
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        self.build(rom, windows)?;
+        self.run_now(rom, SCRIPT_STATUS_WINDOW, windows)?;
+        windows.set_cursor(STATUS_WINDOW, Some(self.status_line));
+        windows.set_cursor(STATUS_WINDOW, None);
+        self.run_now(rom, SCRIPT_BOOK_WINDOW, windows)?;
+        self.run_now(rom, SCRIPT_PRESENT_ALL, windows)?;
+        windows.set_cursor(BOOK_WINDOW, Some(self.book_line));
+        windows.set_cursor(BOOK_WINDOW, None);
+        self.busy = 0;
+        self.returning = Some(0);
+        Ok(())
     }
 
     /// Rebuilds the main menu and the status list under a screen that
@@ -804,7 +997,11 @@ impl PauseMenu {
     ) -> Result<(), ScriptError> {
         self.names.select_window(window);
         self.names.start(index)?;
-        while !self.names.update(rom, self.held, windows)? {}
+        while !self.names.update(rom, self.held, windows)? {
+            if self.names.is_waiting_for_key() {
+                break;
+            }
+        }
         Ok(())
     }
 
@@ -826,17 +1023,11 @@ impl PauseMenu {
                 self.run_now(rom, SCRIPT_STATUS_WINDOW, windows)?;
                 self.return_to(rom, Return::Status, windows)
             }
-            ITEM_ITEMS => self.notice(SCRIPT_NO_ITEMS, Return::Main),
-            ITEM_WEAPONS => {
-                self.run_now(rom, SCRIPT_WEAPONS_WINDOWS, windows)?;
-                self.runner.select_window(WEAPONS_ZOID_WINDOW);
-                self.run_now(rom, SCRIPT_NO_ZOID, windows)?;
-                for ch in windows.player_name().chars() {
-                    windows.put_char(WEAPONS_LIST_WINDOW, ch);
-                }
-                windows.present(None);
-                self.return_to(rom, Return::Weapons, windows)
+            ITEM_ITEMS => {
+                windows.play_sound(EMPTY_SOUND);
+                self.notice(SCRIPT_NO_ITEMS, Return::Main)
             }
+            ITEM_WEAPONS => self.open_equipment(rom, windows),
             ITEM_CONFIG => {
                 windows.clear_window(HELP_WINDOW);
                 self.run_now(rom, SCRIPT_SPEED_WINDOW, windows)?;
@@ -876,9 +1067,9 @@ impl PauseMenu {
         match choice {
             STATUS_UNIT => self.open_units(rom, windows),
             STATUS_CHARACTER => self.open_character(rom, windows),
-            STATUS_WEAPONS => self.notice(SCRIPT_NO_WEAPONS, Return::Status),
-            STATUS_ZI_DATA => self.notice(SCRIPT_NO_ZI_DATA, Return::Status),
-            STATUS_ZI_ITEMS => self.notice(SCRIPT_NO_ZI_ITEMS, Return::Status),
+            STATUS_WEAPONS => self.open_stock(rom, windows),
+            STATUS_ZI_DATA => self.empty_list(SCRIPT_NO_ZI_DATA, windows),
+            STATUS_ZI_ITEMS => self.empty_list(SCRIPT_NO_ZI_ITEMS, windows),
             STATUS_BOOK => {
                 self.run_now(rom, SCRIPT_BOOK_WINDOW, windows)?;
                 windows.clear_window(HELP_WINDOW);
@@ -923,20 +1114,111 @@ impl PauseMenu {
                 self.runner.start(SCRIPT_STATUS_MENU)?;
                 self.state = MenuState::Status;
             }
-            Return::Character => return self.reopen_character(rom, windows),
-            Return::Zoid => return self.show_zoid(rom, windows),
-            Return::Weapons => {
-                self.run_now(rom, SCRIPT_WEAPONS_HELP, windows)?;
-                self.runner
-                    .run_menu(WEAPONS_LIST_WINDOW, MENU_CANCELABLE, windows);
-                self.state = MenuState::Weapons;
+            Return::EmptyList => {
+                windows.play_sound(EMPTY_BACK_SOUND);
+                return self.return_to(rom, Return::Status, windows);
             }
+            Return::Character => return self.reopen_character(rom, windows),
+            Return::Weapons => return self.equipment_members_again(rom, windows),
+            Return::Racks => return self.racks_again(rom, windows),
         }
         Ok(())
     }
 
+    /// Loads the picture the rack's list shows, when it changed, and the
+    /// sprites of the weapons on it.
+    fn load_equip_image(&mut self, rom: &[u8]) {
+        for weapon in self.mounted_weapons() {
+            let key = (weapon.part, weapon.rack);
+            if self.weapon_sprites.iter().all(|(known, _)| *known != key) {
+                let sprite = saga_battle::weapon_sprite(rom, weapon.part, weapon.rack);
+                self.weapon_sprites.push((key, sprite));
+            }
+        }
+        let zoid = self.equipment_picture();
+        if zoid == self.equip_image.as_ref().map(|(zoid, _)| *zoid) {
+            return;
+        }
+        self.equip_image = zoid.and_then(|zoid| {
+            let image = GameData::new(rom).zoid_image(u8::try_from(zoid).ok()?)?;
+            Some((zoid, image))
+        });
+        if let Some(zoid) = zoid {
+            for (rack, mount) in self.weapon_mounts.iter_mut().enumerate() {
+                let (x, y) = saga_battle::weapon_mount(rom, zoid, rack).unwrap_or_default();
+                *mount = (i32::from(x), i32::from(y));
+            }
+        }
+    }
+
+    /// The rack list's picture and the weapons on it, as the layers the
+    /// original composes: sprites behind the Zoid (OBJ priorities 2 and
+    /// 3), BG1 with the Zoid and the weapons drawn into it, and sprites in
+    /// front (priority 1). Each weapon sits at its rack's mount in its
+    /// first frame.
+    fn equip_layers(&self, image: &BattleImage) -> EquipLayers {
+        let mut layers = EquipLayers {
+            back: vec![None; SCREEN_WIDTH * SCREEN_HEIGHT],
+            picture: picture_layer(image),
+            front: vec![None; SCREEN_WIDTH * SCREEN_HEIGHT],
+        };
+        for weapon in self.mounted_weapons().into_iter().filter(|w| w.visible) {
+            let Some((_, Some(sprite))) = self
+                .weapon_sprites
+                .iter()
+                .find(|(key, _)| *key == (weapon.part, weapon.rack))
+            else {
+                continue;
+            };
+            let mount = self.weapon_mounts[weapon.rack.min(RACKS - 1)];
+            let frame = sprite.animation.first().map_or(0, |step| step.frame);
+            let palette = Palette::new(sprite.palette.map(Palette::from_bgr555));
+            let mut drawn = vec![None; SCREEN_WIDTH * SCREEN_HEIGHT];
+            for piece in sprite.frames.get(frame).into_iter().flatten() {
+                draw_piece(&mut drawn, sprite, &palette, piece, mount, false);
+            }
+            if weapon.baked {
+                bake(&mut layers.picture, &drawn, weapon.rack == 0);
+            } else {
+                let layer = if weapon.rack == 0 {
+                    &mut layers.front
+                } else {
+                    &mut layers.back
+                };
+                for (target, color) in layer.iter_mut().zip(drawn) {
+                    if target.is_none() {
+                        *target = color;
+                    }
+                }
+            }
+        }
+        layers
+    }
+
     /// Draws the wallpaper and the windows.
     pub fn draw(
+        &self,
+        frame: &mut Frame,
+        windows: &ScriptWindows<'_>,
+        skin: &WindowPainter,
+        painter: &TextPainter,
+    ) {
+        if let Some(guide) = &self.guide {
+            if guide.covered() {
+                self.draw_menu(frame, windows, skin, painter);
+                darken(frame, guide.darkness());
+            } else {
+                guide.draw(frame, windows, skin, painter);
+            }
+            return;
+        }
+        self.draw_menu(frame, windows, skin, painter);
+        if let Some(frames) = self.returning {
+            darken(frame, return_darkness(frames));
+        }
+    }
+
+    fn draw_menu(
         &self,
         frame: &mut Frame,
         windows: &ScriptWindows<'_>,
@@ -963,6 +1245,25 @@ impl PauseMenu {
             (scroll_x, scroll_y),
             true,
         );
+        if let Some((_, image)) = &self.equip_image
+            && self.equipment_picture().is_some()
+        {
+            let layers = self.equip_layers(image);
+            composite(frame, &layers.back);
+            let blends = self.equipment_blends();
+            for (index, color) in layers.picture.iter().enumerate() {
+                let (x, y) = (index % SCREEN_WIDTH, index / SCREEN_WIDTH);
+                let Some(color) = *color else {
+                    continue;
+                };
+                let color = match frame.pixel(x, y) {
+                    Some(below) if blends => half_and_half(color, below),
+                    _ => color,
+                };
+                frame.set_pixel(x, y, color);
+            }
+            composite(frame, &layers.front);
+        }
         windows.draw(frame, skin, painter);
         let sheet = self
             .shown_zoid
@@ -970,6 +1271,13 @@ impl PauseMenu {
         if let Some((_, sheet)) = sheet
             && let (Some(sprite), Some(image)) = (sheet.frames.first(), sheet.frame_image(0))
         {
+            let masked = self.racks_mask_sprites().then(|| {
+                let (left, top, right, bottom) = RACK_SPRITE_MASK;
+                (top..bottom)
+                    .flat_map(|y| (left..right).map(move |x| (x, y)))
+                    .filter_map(|(x, y)| Some((x, y, frame.pixel(x, y)?)))
+                    .collect::<Vec<_>>()
+            });
             draw_sprite(
                 frame,
                 ZOID_ANCHOR.0 + i32::from(sprite.x),
@@ -978,8 +1286,85 @@ impl PauseMenu {
                 &sheet.palette,
                 sprite.mirrored,
             );
+            for (x, y, color) in masked.into_iter().flatten() {
+                frame.set_pixel(x, y, color);
+            }
         }
     }
+}
+
+/// Puts a sprite layer's pixels over `frame`.
+fn composite(frame: &mut Frame, layer: &[Option<Rgb>]) {
+    for (index, color) in layer.iter().enumerate() {
+        if let Some(color) = color {
+            frame.set_pixel(index % SCREEN_WIDTH, index / SCREEN_WIDTH, *color);
+        }
+    }
+}
+
+/// The layers of the rack list's picture.
+struct EquipLayers {
+    back: Vec<Option<Rgb>>,
+    picture: Vec<Option<Rgb>>,
+    front: Vec<Option<Rgb>>,
+}
+
+/// The rack list's Zoid picture as BG1 holds it: its 16×16 tiles in order
+/// from the top-left corner, index 0 clear. The third rack's list draws
+/// it half over what lies below (`BLDALPHA` `0x0808`).
+fn picture_layer(image: &BattleImage) -> Vec<Option<Rgb>> {
+    let palette = FullPalette::from_bgr555(&image.palette);
+    let mut layer = vec![None; SCREEN_WIDTH * SCREEN_HEIGHT];
+    for y in 0..EQUIP_IMAGE_PIXELS {
+        for x in 0..EQUIP_IMAGE_PIXELS {
+            let tile = (y / TILE_PIXELS) * EQUIP_IMAGE_TILES + x / TILE_PIXELS;
+            let index = image.tiles.get(tile).map_or(0, |pixels| {
+                pixels[(y % TILE_PIXELS) * TILE_PIXELS + x % TILE_PIXELS]
+            });
+            if index != 0 {
+                layer[y * SCREEN_WIDTH + x] = Some(palette.color(index));
+            }
+        }
+    }
+    layer
+}
+
+/// Draws a weapon into the picture's tiles as `0x08053204` does, within
+/// the picture's 128×128 pixels: over the Zoid for the first rack
+/// (priority 1), only where the Zoid leaves the picture clear otherwise.
+fn bake(picture: &mut [Option<Rgb>], weapon: &[Option<Rgb>], in_front: bool) {
+    for y in 0..EQUIP_IMAGE_PIXELS {
+        for x in 0..EQUIP_IMAGE_PIXELS {
+            let index = y * SCREEN_WIDTH + x;
+            if let Some(color) = weapon[index]
+                && (in_front || picture[index].is_none())
+            {
+                picture[index] = Some(color);
+            }
+        }
+    }
+}
+
+/// Half of each color, per 5-bit channel.
+fn half_and_half(top: Rgb, below: Rgb) -> Rgb {
+    let channel = |top: u8, bottom: u8| {
+        let mixed = ((u16::from(top >> 3) * 8 + u16::from(bottom >> 3) * 8) >> 4).min(31);
+        let five = u8::try_from(mixed).unwrap_or(31);
+        five << 3 | five >> 2
+    };
+    Rgb::new(
+        channel(top.r, below.r),
+        channel(top.g, below.g),
+        channel(top.b, below.b),
+    )
+}
+
+/// How dark the menu is `frames` after the guide closed: the game's fade
+/// level stays at 31 for 10 frames, then falls one a frame, and the
+/// screen shows it from 16 down.
+fn return_darkness(frames: u32) -> u8 {
+    let level = GUIDE_FADE_TOP.saturating_sub(frames.saturating_sub(GUIDE_FADE_HOLD));
+    u8::try_from(level.min(u32::from(FADE_STEPS))).unwrap_or(FADE_STEPS)
 }
 
 /// A half-word statistic as the screen prints it, never below zero.
@@ -1068,6 +1453,24 @@ mod tests {
         let (bytes, _) = ([0x20u8, 0x41, 0x83, 0x0D, 0x1D, 0x22], 0);
         assert_eq!(label_len(&bytes, 0), 1);
         assert_eq!(label_len(&[0x22], 0), 0);
+    }
+
+    #[test]
+    fn a_first_rack_weapon_covers_the_zoid_and_the_others_fill_its_gaps() {
+        let zoid = Rgb::new(1, 1, 1);
+        let gun = Rgb::new(9, 9, 9);
+        let mut picture = vec![None; SCREEN_WIDTH * SCREEN_HEIGHT];
+        picture[0] = Some(zoid);
+        let mut weapon = vec![None; SCREEN_WIDTH * SCREEN_HEIGHT];
+        weapon[0] = Some(gun);
+        weapon[1] = Some(gun);
+        weapon[EQUIP_IMAGE_PIXELS] = Some(gun);
+        let mut behind = picture.clone();
+        bake(&mut behind, &weapon, false);
+        assert_eq!(behind[..2], [Some(zoid), Some(gun)]);
+        bake(&mut picture, &weapon, true);
+        assert_eq!(picture[..2], [Some(gun), Some(gun)]);
+        assert_eq!(picture[EQUIP_IMAGE_PIXELS], None);
     }
 
     #[test]

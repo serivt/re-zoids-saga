@@ -58,9 +58,10 @@ The fields this port reads and writes; everything else is kept as the save had i
 | `+0xD28` | 4 | Money, capped at 9,999,999 |
 | `+0xD2C` | 173 × 56 | Units: 153 ordinary, then 20 special (see below) |
 | `+0x3304` | 1 | Ordinary units in use |
+| `+0x334C` | 150 | Parts in stock, one count per part id (at most 9); the equipment screen moves parts between the stock and the units |
 | `+0x33E2` | 1 each | Zoids seen, by picture id: the Zoid guide shows an entry whose byte is not zero |
 | `+0x347B` | 1 each | Deck commands learned, by command number |
-| `+0x34A4` | 87 × 4 | Character table: a flag half-word (bit `0x01`: set whenever the game adds the character, `0x02`: a party member the status screens list, `0x10`: in the formation, `0x20`: in the character guide), then the character's unit, `0xFF` when none |
+| `+0x34A4` | 87 × 4 | Character table: a flag half-word (bit `0x01`: set whenever the game adds the character, `0x02`: a party member the status screens list, `0x08`: the equipment screen refuses to change the character's parts, `0x10`: in the formation, `0x20`: in the character guide), then the character's unit, `0xFF` when none |
 | `+0x3600` | 6 × 4 | Formation slots: the unit, then its character, `0xFF` when empty |
 | `+0x3618` | 1 | Battle message speed − 1 |
 | `+0x3F0E` | 2 | Song playing when the pause menu opened |
@@ -130,7 +131,8 @@ The launcher keeps the save as a 32 KiB file next to the ROM with the extension 
 as emulators do, so the same file works in both. Saving writes the game-state block into
 both copies of the existing file, keeping its other blocks, or into a fresh image when
 there is none. The port models the position, flags, level, experience, money, message
-speed, name, song, chests, deck commands, Zoids seen and the party the hangar forms;
+speed, name, song, chests, deck commands, Zoids seen, the party the hangar forms and the
+parts and stock the equipment screen changes;
 the rest of the block is carried unchanged from the save that was loaded, or from the
 new-game block.
 

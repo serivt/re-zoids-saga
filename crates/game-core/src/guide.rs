@@ -1,5 +1,5 @@
-//! The Zoid and character guides the title's options open (see
-//! `docs/guide.md`).
+//! The Zoid and character guides the title's options and the pause
+//! menu's 図鑑 open (see `docs/guide.md`).
 //!
 //! Both follow the original's code: a menu script of the system table
 //! picks a row of up to 20 entries (an army's type, or a series' group),
@@ -42,6 +42,9 @@ use crate::{ScriptHost, TextPainter, WindowPainter};
 
 const OPENING_HOLD_FRAMES: u32 = 3;
 const OPENING_BLACK_FRAMES: u32 = 23;
+/// Black frames before the menu when the pause menu opened the guide: it
+/// starts 36 frames after the choice instead of 42.
+const PAUSE_OPENING_BLACK_FRAMES: u32 = 16;
 const SCRIPT_HOLD_FRAMES: u32 = 7;
 const POPUP_HOLD_FRAMES: u32 = 6;
 const KEY_HOLD_FRAMES: u32 = 6;
@@ -51,8 +54,13 @@ const FADE_IN_FRAMES: u32 = 8;
 /// stays black two frames, then brightens a level a frame from 31, visibly
 /// over the last 16.
 const MENU_FADE_IN_FRAMES: u32 = 33;
+/// The first menu after the pause menu opened the guide stays black
+/// five frames rather than two.
+const PAUSE_MENU_FADE_IN_FRAMES: u32 = 37;
 const MENU_BLACK_FRAMES: u32 = 22;
 const EXIT_BLACK_FRAMES: u32 = 44;
+/// Black frames after leaving when the pause menu opened the guide.
+const PAUSE_EXIT_BLACK_FRAMES: u32 = 18;
 const ZOID_FIRST_BLACK_FRAMES: u32 = 48;
 const ZOID_NEXT_BLACK_FRAMES: u32 = 33;
 const CHARACTER_FIRST_BLACK_FRAMES: u32 = 50;
@@ -154,6 +162,15 @@ struct ZoidView {
     parts: Vec<ZoidPart>,
 }
 
+/// What the guide opened over, which fades out before it and which it
+/// returns to.
+pub enum Cover {
+    /// The title's options; the guide draws the title while it fades.
+    Title(Box<TitleScreen>),
+    /// The pause menu's 図鑑, which draws itself while the guide fades.
+    PauseMenu,
+}
+
 /// A guide screen.
 pub struct Guide {
     kind: GuideKind,
@@ -162,6 +179,8 @@ pub struct Guide {
     state: Vec<u8>,
     characters: Vec<usize>,
     title: Option<TitleScreen>,
+    from_pause: bool,
+    menu_fade: u32,
     phase: Phase,
     row: usize,
     entry: usize,
@@ -172,7 +191,7 @@ pub struct Guide {
 }
 
 impl Guide {
-    /// Opens `kind` over `title`, which fades out first; `state` is the
+    /// Opens `kind` over `cover`, which fades out first; `state` is the
     /// game-state block that says what the player has seen.
     ///
     /// # Errors
@@ -182,7 +201,7 @@ impl Guide {
         data: &GameData<'_>,
         kind: GuideKind,
         state: Vec<u8>,
-        title: TitleScreen,
+        cover: Cover,
     ) -> Result<Self, GuideError> {
         let pages = match kind {
             GuideKind::Zoids => ZOID_GUIDE_SCRIPTS,
@@ -194,7 +213,16 @@ impl Guide {
             pages: ScriptRunner::named(pages.name, pages.offsets(data.bytes())?),
             characters: data.character_entries()?,
             state,
-            title: Some(title),
+            from_pause: matches!(cover, Cover::PauseMenu),
+            menu_fade: if matches!(cover, Cover::PauseMenu) {
+                PAUSE_MENU_FADE_IN_FRAMES
+            } else {
+                MENU_FADE_IN_FRAMES
+            },
+            title: match cover {
+                Cover::Title(title) => Some(*title),
+                Cover::PauseMenu => None,
+            },
             phase: Phase::Opening {
                 frames: 0,
                 black: false,
@@ -244,7 +272,7 @@ impl Guide {
                     self.choose(windows)
                 } else {
                     Phase::Menu {
-                        fading_in: (fading_in + 1).min(MENU_FADE_IN_FRAMES),
+                        fading_in: (fading_in + 1).min(self.menu_fade),
                     }
                 }
             }
@@ -305,7 +333,12 @@ impl Guide {
                 black: true,
             });
         }
-        if black && frames >= OPENING_BLACK_FRAMES {
+        let black_frames = if self.from_pause {
+            PAUSE_OPENING_BLACK_FRAMES
+        } else {
+            OPENING_BLACK_FRAMES
+        };
+        if black && frames >= black_frames {
             self.open_menu(windows)?;
             return Ok(Phase::Menu { fading_in: 0 });
         }
@@ -315,6 +348,7 @@ impl Guide {
     fn black_frames(&self, next: Next) -> u32 {
         match (self.kind, next) {
             (_, Next::Menu) => MENU_BLACK_FRAMES,
+            (_, Next::Exit) if self.from_pause => PAUSE_EXIT_BLACK_FRAMES,
             (_, Next::Exit) => EXIT_BLACK_FRAMES,
             (GuideKind::Zoids, Next::Entry { first: true }) => ZOID_FIRST_BLACK_FRAMES,
             (GuideKind::Zoids, Next::Entry { first: false }) => ZOID_NEXT_BLACK_FRAMES,
@@ -367,8 +401,13 @@ impl Guide {
         let vars = *self.menu.saved_vars();
         let (first, second) = (vars[7], vars[6]);
         if first == EXIT {
+            let frames = if self.from_pause {
+                SCRIPT_HOLD_FRAMES - 1
+            } else {
+                SCRIPT_HOLD_FRAMES
+            };
             return Phase::Holding {
-                frames: SCRIPT_HOLD_FRAMES,
+                frames,
                 next: Next::Exit,
             };
         }
@@ -412,6 +451,7 @@ impl Guide {
             Next::Menu => {
                 self.zoid = None;
                 self.sprite = None;
+                self.menu_fade = MENU_FADE_IN_FRAMES;
                 self.open_menu(windows)?;
                 Phase::Menu { fading_in: 0 }
             }
@@ -564,14 +604,23 @@ impl Guide {
             .position(|entry| *entry == offset)
     }
 
-    fn darkness(&self) -> u8 {
+    /// Whether what the guide opened over still shows, fading out.
+    #[must_use]
+    pub fn covered(&self) -> bool {
+        matches!(self.phase, Phase::Opening { black: false, .. })
+    }
+
+    /// Darkness of the current frame, 0 (full) to `FADE_STEPS` (black).
+    #[must_use]
+    pub fn darkness(&self) -> u8 {
         let level = match self.phase {
             Phase::Black { .. } | Phase::Opening { black: true, .. } => u32::from(FADE_STEPS),
             Phase::Opening { frames, .. } => {
                 frames.saturating_sub(OPENING_HOLD_FRAMES) * u32::from(FADE_STEPS) / FADE_OUT_FRAMES
             }
             Phase::FadingOut { frames, .. } => frames * u32::from(FADE_STEPS) / FADE_OUT_FRAMES,
-            Phase::Menu { fading_in } => MENU_FADE_IN_FRAMES
+            Phase::Menu { fading_in } => self
+                .menu_fade
                 .saturating_sub(fading_in)
                 .min(u32::from(FADE_STEPS)),
             Phase::FadingIn(frames) => fade_in_level(frames, FADE_IN_FRAMES),

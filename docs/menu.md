@@ -5,10 +5,17 @@ reference emulator while every item of the START menu was visited from the first
 (`research/build/mgba/menu/`) and, with the party formed, from the eastern labyrinth,
 a read of the status screens' routines named below, a watch on the interpreter's current-window pointer
 (RAM `0x02009118`) while the menu opened, and a read of the pause-menu script table
-and of the menu, present and message opcode handlers. Saving is described in
+and of the menu, present, draw and message opcode handlers. For the parts pages:
+breakpoints on the script runner, the rack and part printers and the sound call while
+every page of the four members' Zoids was shown, screenshots frame by frame, and a read
+of the printers named below. For the weapons list and the equipment screen: the same
+traces while the Shield Liger's laser was taken off, moved to another rack and listed,
+write watchpoints on the stock and the unit's parts, and dumps of VRAM, OAM, palettes
+and the display registers on the part lists. Saving is described in
 [formats/save.md](formats/save.md). Implemented in
 `crates/game-core/src/menu.rs`; data in `crates/extraction/src/saga.rs`
-(`PAUSE_MENU_SCRIPTS`, `pause_wallpaper`).
+(`PAUSE_MENU_SCRIPTS`, `PART_NAME_SCRIPTS`, `pause_wallpaper`) and
+`crates/extraction/src/saga_party.rs` (`unit_parts`, `part`).
 
 ## Scripts
 
@@ -28,9 +35,24 @@ after another, printing the numbers itself between them. The ones this port uses
 | 35 | The member list's menu: opcode `0x36` with `0x12` (see [formats/script-text.md](formats/script-text.md)), then store the variables |
 | 335 + n | Character `n`'s portrait in window 2 |
 | 80–90 | The Zoid status screen: the help line and window 1 at (0, 0) 30×14 (80), the labels ＨＰ／ＥＰ／ＳＰ／ＤＦ／訓練度 (81–85), ／ (86), 戦闘不能 (87) and the sizes ［Ｓサイズ］／［Ｍサイズ］／［Ｌサイズ］ (88–90) |
+| 91–93, 98–100 | The parts pages: windows 1–3 at (0, 0), (0, 3) and (0, 6), 30×8, opened with ウエポンラック１–３, or cleared and drawn again with 固定武装１–３： |
+| 94–97 | 攻撃：, 　命中：, 消費：, 　射程： |
+| 101, 102 | The pages' help: Ａボタン：次へ／Ｂボタン：キャラクター選択に戻る, and on the last page Ａボタン・Ｂボタン：キャラクター選択に戻る |
+| 164–174 | Ranges １－１, １－２, １－３, ２－２, ２－３, ３－３ and reaches 単, 貫, 広, ブ, 全 |
+| 175–205 | A support part's labels: 効果：, the effects (ＤＦ＋, 対レーザー＋ in a narrow and a wide form, 回避＋, ＳＰ＋, 命中＋, ＨＰ 回復, ダメージを無効化, 属性付加 with 水中 or 砂漠, 全能力＋５０％, ＨＰ上限＋, ＥＰ上限＋), 消費：, 目標： 味方／自分, 時間： with 戦闘終了まで, ターン, 一瞬 or 装備している間, and 制限：なし／制限：戦闘中１回のみ |
+| 207–218 | 特殊効果なし, the special effects ＤＦ無視, 命中率低下, キャラ無効化, マヒ, then ラックなし, 装備なし and the rack kinds ［攻　］, ［　防］, ［攻防］, ［固定］ |
+| 39, 41–43 | ％, ：, a full-width space and ・, which the game's code prints between its values |
 | 0–7, 24–32 | Clear window `n`; present every window (24); draw window `n − 25` |
 | 56, 57, 58, 60 | The notices for no items, weapons, Zi data or Zi-data items: clear the help line, print, present it, wait for a key, clear |
-| 128, 129, 133, 134 | The weapons screen: window 1 at (0, 0) 18×14 with 搭乗ゾイドなし and window 3 at (17, 0) 13×14 with the party's names as a menu; 133 asks whose Zoid to change, 134 answers that the character is not aboard |
+| 103–107, 206 | The weapons list: window 1 at (0, 0) 17×14 and window 2 at (16, 0) 14×14, the labels 　攻撃：／　命中：／　消費：／　射程： and 特殊効果： |
+| 422 + n | Part `n`'s description, which the weapons list shows in the help line |
+| 128–132 | The equipment screen: windows 1 and 3 as on the character screen, 搭乗ゾイドなし, and the indented ウエポンラック lines under the Zoid's name |
+| 133–135 | 誰が搭乗しているゾイドの武装を変更しますか？, the notice that the character is not aboard, and 「…は装備を変更されたくないようです」 after the character's name |
+| 136–139 | The rack list: window 4 at (1, 4) 18×8 and the numbers １–３ |
+| 140, 141 | ウエポンラックが無いので選べません and 固定武装なので取り外しできません, each with its key wait |
+| 142, 147 | The rack's parts: window 2 at (16, 4) 14×10 and window 1 at (16, 0) 14×4 with ウエポンラック, and 装備を外す |
+| 149, 150, 61 | 外そうとしている, 「…は」「これ以上ストックできません。捨てますか？」 and the はい/いいえ window |
+| 40, 217 | × before a stock count, and the blank kind of a slot without a rack |
 | 151, 152, 153, 154–158 | The message-speed setting: window 4 at (9, 0) 15×4 with 戦闘メッセージ速度 and the value, the help text, window 5 at (23, 0) 7×14 with １–５ and ボタン, the menu, then the value strings |
 | 160, 61, 161, 162 | セーブしますか？, the cancelable はい/いいえ window 7 at (11, 4) 8×6, セーブしました, セーブを中止しました |
 | 115, 116 | The encyclopedia choice, window 5 at (23, 0) 7×6 with ゾイド / キャラ |
@@ -81,11 +103,221 @@ The Zoid status screen (`0x08052724`) prints the Zoid's name and size class (the
 byte `+0x35`: script 88 + size), then hit and energy points (four cells each), SP (four
 cells), DF (three cells and ％) and training (three cells), and draws the Zoid's picture
 anchored at (40, 88) (see [formats/sprite.md](formats/sprite.md)). A key wait follows:
-B returns to the character screen.
+A shows the parts pages, B returns to the character screen (sound `0x3F`).
+
+## Parts pages
+
+A unit has six part slots: three weapon racks, then three fixed weapons. The pages show
+one slot each, and A turns to the next:
+
+- **First page:** the game closes the status window, prints the help (101) and opens
+  window 1.
+- **Racks:** windows 1–3 (91–93) open 3 tiles apart, so each covers all but the first
+  line of the one before.
+- **Fixed weapons:** windows 1–3 are cleared and drawn again over the others (98–100),
+  in the same places.
+- **Last page:** help 102, and A or B returns to the character screen. B returns from
+  any page, with sound `0x3F`.
+
+Each page's window is presented and a key wait prompts in it.
+
+A rack line (`0x0804E04C`) takes the rack's kind from the low two bits of the slot's
+half-word in the Zoid record (`+8 + slot × 4`):
+
+| Kind | Printed |
+|---|---|
+| 1 | ［攻　］ |
+| 2 | ［　防］ |
+| 3 | ［攻防］ |
+| 0 | ［固定］ |
+
+A kind-0 slot whose record has no part (`0xFFFF` at `+10 + slot × 4`) prints
+：ラックなし instead. After ： comes the part the unit carries: its id is the upper
+half of the unit's slot word (`+0x12 + slot × 4`).
+
+A part (`0x0804DFCC`) is 装備なし when the id is `0xFFFF`. Otherwise it prints the part's
+name, which is entry `id` of the part-name table: 594 script pointers at ROM `0x6664F0`,
+the table `part`. A line break and the description follow.
+
+### Part records
+
+Part records are 24 bytes at ROM `0x66C8F8`:
+
+| Offset | Content |
+|---|---|
+| `+0x00` | Flags: bit 0 a weapon; `0x400`, `0x800`, `0x1000`, `0x2000` its special effects; for support parts, see below |
+| `+0x04` | Price |
+| `+0x08` | Accuracy in percent, or a support part's second value |
+| `+0x0C` | A weapon's power in 16.16, or a support part's value |
+| `+0x10` | Cost in energy points |
+| `+0x12`, `+0x13` | A weapon's range (scripts 164 +) and reach (170 +) |
+| `+0x14` | Turns a support part lasts, 0 for the whole battle |
+
+`0x08036E74` copies the record for the pilot. A weapon's power gains the pilot's attack
+bonus (member field 10) in percent, and its accuracy the accuracy bonus (field 12),
+through `0x080346C0` as the unit statistics do.
+
+### Printing a weapon
+
+A weapon (`0x0804DE48`) prints:
+
+1. 攻撃： with the power rounded half up, then 命中： with the accuracy and ％. Both take
+   three cells and are capped at 999.
+2. Up to two special effects, a space after the first, or 特殊効果なし.
+3. A line break.
+4. 消費： with the cost in three cells.
+5. 射程： with the range and reach.
+6. Any further effect, each after a space.
+
+### Printing a support part
+
+A support part (`0x0804D940`, called with its layout: wide on these pages) prints 効果：
+and the first effect its flags name. The effect flags:
+
+| Flag | Effect |
+|---|---|
+| `0x4000`, `0x8000` | ＤＦ＋value％, then 対レーザー＋second value％ when there is one |
+| `0x10000` | 回避＋value |
+| `0x20000` | ＳＰ＋value |
+| `0x40000` | 命中＋value％ |
+| `0x80000` | ＨＰ value 回復 |
+| `0x100000` | ダメージを無効化 |
+| `0x200000` | 属性付加, after 水中 (value 4) or 砂漠 (8) |
+| `0x400000` | 全能力＋５０％／ＨＰ・ＥＰ全回復 |
+| `0x800000`, `0x1000000` | ＨＰ上限＋value, ＥＰ上限＋value |
+
+Then:
+
+1. 消費： with the cost, from cell 22.
+2. On the next line, 目標：, then 味方 (flag 2) or 自分 (flag 4).
+3. 時間：, then one of:
+   - 一瞬 with the HP recovery;
+   - 装備している間 with flag `0x20000000`;
+   - 戦闘終了まで for 0 turns;
+   - the turns and ターン.
+
+   Each is padded with spaces to nine cells (eight after the turns).
+4. 制限：戦闘中１回のみ when bit 31 is set, 制限：なし otherwise.
+
+The narrow layout, for windows half the screen wide, puts a space before 効果： and
+spreads the same over four lines. It uses each script's other form (177, 180, 191).
+
+Numbers go through `0x08001848`:
+
+- the last *n* digits of the value, up to seven, capped at 9999999;
+- a － for a negative value, or a ＋ when asked, before the digits;
+- leading zeros printed as spaces (right-aligned), left out (left-aligned) or as ０.
+
+The effect values are printed left-aligned.
+
+## Weapons list
+
+ステータス → 武器 lists the stocked weapons and support parts (`0x0804F7AC`). The game
+state keeps one stock byte per part at `+0x334C + id`, for the parts 0–149, at most 9.
+The list (`0x0804E24C` with mask 15) takes, in id order, every part whose count is not 0
+and whose record's flags share a bit with the mask.
+
+When the list is empty the game plays sound `0x4F`, shows notice 57, and plays `0x41`
+when the notice is dismissed. The Zi-data notices do the same, and アイテム plays `0x4F`
+before its notice.
+
+Otherwise the list shows six parts a page in window 2:
+
+- each line is the name, padded with spaces to eight cells, then × and the count in one
+  cell;
+- L and R turn the page (sound `0x40`), and the window's arrows show whether more lie
+  before or after;
+- A or B return to the status list, B with sound `0x3F`.
+
+The part under the cursor is described twice:
+
+- **Help line:** its text, script 422 + id.
+- **Window 1:** its name, then its record's values with no pilot's bonus (the power's
+  whole part, not rounded) and 特殊効果： over its effects, or the narrow form of a
+  support part's description.
+
+## Equipment screen
+
+武装 (states `0x3000`–`0x3200` and `0x3FFF` of the menu's state machine) changes the
+parts on a Zoid's racks.
+
+### Choosing the Zoid
+
+Window 3 lists the members six a page, with L and R turning the page. Window 1 shows the
+Zoid of the member under the cursor:
+
+- its name, then ウエポンラック and the three racks' parts, each ラックなし, 装備なし or a
+  part's name;
+- its status picture at (40, 88);
+- 搭乗ゾイドなし for a member without a Zoid.
+
+A on a member without a Zoid plays `0x4F` and shows notice 134. A on a member whose
+character flags have bit `0x08` shows 135 instead. After either, a key wait, then `0x41`.
+B returns to the main menu (sound `0x3F`).
+
+### Choosing the rack
+
+A on a member opens window 4 with its three racks. Each line (`0x0804E13C`) is the
+rack's number, its kind (as on the parts pages, or blank for a slot without a rack), ：
+and its part.
+
+The help line describes the part on the rack under the cursor, with its pilot's values.
+The game's window 0 hides sprites under window 4, so the status picture disappears there.
+
+A on a fixed slot plays `0x4F` and shows notice 141, or 140 when the Zoid has no rack
+there; `0x41` follows. B returns to the members.
+
+### Choosing the part
+
+A on a rack closes windows 4, 3 and 1:
+
+1. **The Zoid's picture.** The battle picture (`0x08044E98`) is drawn on BG1 from the
+   top-left corner. For the third rack BG1 is blended half over what lies below
+   (`BLDCNT` `0x1C42`, `BLDALPHA` `0x0808`).
+2. **The title.** Window 1 shows ウエポンラック, the rack's number and its kind.
+3. **The list.** Window 2 lists 装備を外す, then the stocked parts the rack takes: mask 1
+   for a rack of flags 1, `0xE` for 2, `0xF` for 3. The list shows four lines a page,
+   each laid out like the weapons list's.
+
+The help line describes the entry under the cursor with the member's values. For
+装備を外す it describes the rack's own part.
+
+The weapons show on the picture (`0x0804D768`). Each is the first frame of a sprite from
+ROM `0x6F77C4` for the second rack and `0x6F6E44` for the others, by part. It stands at
+the Zoid's mount for that rack: the 28-byte record at ROM `0x6E78EC` holds six x, a
+default x, six y and a default y, where `0xFFFF` takes the default. OBJ priorities:
+
+| Rack | Priority | Result |
+|---|---|---|
+| First | 1 | In front of the Zoid |
+| Second | 2 | Behind the Zoid |
+| Third | 3 | Behind the Zoid |
+
+- **The rack being changed:** shows the entry under the cursor. On 装備を外す its own part
+  blinks: task `0x0804D8F0` hides it for 16 frames, then shows it for 16.
+- **The other two first racks:** `0x08053204` draws their parts into BG1's tiles, with
+  their palettes copied to BG palettes 10–15. A priority-1 sprite covers the Zoid; the
+  others only fill the pixels the Zoid leaves clear.
+- **The third rack, when it is not the one being changed:** stays a sprite.
+
+### Changing the part
+
+A (`0x08051B26`):
+
+1. The rack's part goes back to stock. When that stock is already 9 and the choice is
+   another part, the game asks: 外そうとしている, the name, 150 and はい/いいえ. はい
+   throws the part away; anything else returns to the list (B with sound `0x3F`).
+2. The chosen part leaves the stock, or 装備を外す leaves the rack empty.
+3. The unit's statistics are computed again (`0x08036CB0`), and its current hit and
+   energy points are kept within the new maxima.
+4. Sound `0x4E`.
+
+A, or B (sound `0x3F`), then rebuilds the members' windows and returns to the rack
+list, with the cursor where it was.
 
 ## Windows and menus
 
-Three rules of the original, taken from its handlers, make the scripts work:
+Four rules of the original, taken from its handlers, make the scripts work:
 
 - The interpreter keeps one current window. Opening a window makes it current; a message
   starts in it, and `0x1C` inside the message only redirects that message's text. The
@@ -94,6 +326,9 @@ Three rules of the original, taken from its handlers, make the scripts work:
   window in id order and leaves the highest one current. That is how script 47 prints its
   help in window 0 yet runs its menu in window 3, and how a notice presented alone moves
   the key prompt to the help line.
+- The windows share one tile map, so the last window drawn covers the others. Drawing a
+  window (`0x0D`) or presenting it draws it again on top; presenting all of them draws
+  them in id order. The parts pages rely on this.
 - A window remembers the line its last menu ended on and the next menu starts there,
   so the cursor returns to the item that was chosen. The cursor tiles stay until the
   window is redrawn: a notice leaves them on the list, opening a submenu (which presents
@@ -120,10 +355,10 @@ The backdrop color is `0x7240`.
 ## Flows
 
 START on the field opens the menu; B on the main list closes it. ステータス opens the
-status list; its 武器, Ｚｉデータ and Ｚｉデータ用アイテム items print their notices and
-図鑑 asks ゾイド or キャラ; 部隊 shows the unit list, which A or B leaves, and キャラクター
-the character screen described above. 武装 shows the weapons screen; choosing the character prints
-that no Zoid is boarded. コンフィグ shows the message speed (3 on a new game) with the
+status list: 部隊 shows the unit list, which A or B leaves; キャラクター the character
+screen; 武器 the weapons list; Ｚｉデータ and Ｚｉデータ用アイテム print their notices;
+図鑑 asks ゾイド or キャラ and opens that guide (see [guide.md](guide.md)). 武装 shows the
+equipment screen. コンフィグ shows the message speed (3 on a new game) with the
 cursor on it; picking a number stores it in the party and returns to the main list
 with the cursor on コンフィグ, as the original does. セーブ asks; はい writes the save
 and answers セーブしました, or セーブを中止しました when it could not be written, and
@@ -131,7 +366,18 @@ and answers セーブしました, or セーブを中止しました when it cou
 
 ## Not modeled yet
 
-The weapon pages A opens on the Zoid status screen, the weapons screen with the party's
-Zoids, the encyclopedia itself, 部隊編成 (a separate screen with its own wallpaper) and
-the ボタン page of the config end in the まだできてません notice. The button and cursor sounds are requested but not played
-until the sound engine exists.
+部隊編成 (a separate screen with its own wallpaper) and
+the ボタン page of the config end in the まだできてません notice.
+
+The original spends a frame on each window it opens, clears or presents, and its game
+stands still meanwhile: the wallpaper and the blinking stop, and keys go unread. The
+port draws a screen at once, then counts the frames its scripts would have cost and
+holds the menu for that long. The key waits and the blinking then start within a frame
+of the original's.
+
+The menu's opening is not modeled. The original fades the field out and shows the menu
+about 33 frames after START, and its wallpaper starts to move 6 frames later; the port
+shows it at once, so the wallpaper's phase differs by a constant.
+
+The discard question and the characters that keep their equipment (flag `0x08`, which
+the game sets at runtime) follow the code but were not seen in the original.

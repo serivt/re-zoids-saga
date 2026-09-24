@@ -22,8 +22,8 @@ use formats::font::{Glyph, GlyphIndex};
 use crate::extension::GameSound;
 use crate::menu::{Member, Roster, UNIT_SLOTS};
 use crate::translation::{
-    BATTLE_TABLE, DIALOGUE_TABLE, ITEM_TABLE, NAME_ENTRY_TABLE, NAME_TABLE, PAUSE_MENU_TABLE,
-    TITLE_TABLE,
+    BATTLE_TABLE, DIALOGUE_TABLE, ITEM_TABLE, NAME_ENTRY_TABLE, NAME_TABLE, PART_TABLE,
+    PAUSE_MENU_TABLE, TITLE_TABLE,
 };
 
 /// The game's data, keyed by identifier.
@@ -256,6 +256,8 @@ impl<'rom> GameData<'rom> {
                 character,
                 bonuses: saga_party::pilot_bonuses(self.rom, state, character).unwrap_or_default(),
                 unit: unit(character),
+                parts: saga_party::unit_parts(self.rom, state, character),
+                keeps_equipment: saga_party::keeps_equipment(state, character),
             })
             .collect();
         let mut formation = [None; UNIT_SLOTS];
@@ -350,6 +352,7 @@ impl<'rom> GameData<'rom> {
             TITLE_TABLE => vec![saga::TITLE_MENU_SCRIPT_OFFSET],
             NAME_ENTRY_TABLE => saga::NAME_ENTRY_SCRIPTS.offsets(self.rom)?,
             PAUSE_MENU_TABLE => saga::PAUSE_MENU_SCRIPTS.offsets(self.rom)?,
+            PART_TABLE => saga::PART_NAME_SCRIPTS.offsets(self.rom)?,
             name if name == SYSTEM_SCRIPTS.name => SYSTEM_SCRIPTS.offsets(self.rom)?,
             name if name == ZOID_GUIDE_SCRIPTS.name => ZOID_GUIDE_SCRIPTS.offsets(self.rom)?,
             name if name == CHARACTER_GUIDE_SCRIPTS.name => {

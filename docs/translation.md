@@ -20,7 +20,8 @@ files translators produce are downloaded by each player and handed to the launch
 
    By default it covers the title menu, the name entry and dialogue strings 30–41 (the
    helpers every conversation shares and the opening). Any tables and ranges can be
-   named instead: `title`, `name-entry`, `pause-menu`, `dialogue` or `dialogue:30-41`,
+   named instead: `title`, `name-entry`, `pause-menu`, `part` (the parts' names),
+   `dialogue` or `dialogue:30-41`,
    and the guides' `system`, `zoid-guide` and `character-guide` (see [guide.md](guide.md)).
 2. The template is uploaded to Weblate as the source of a gettext component; every
    language is a PO file with the same keys.

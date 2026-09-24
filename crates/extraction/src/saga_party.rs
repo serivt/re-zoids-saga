@@ -5,8 +5,10 @@
 //! its initializer at `0x08036B2C`, the pilot assignment at `0x08036BE0`
 //! with the unit statistics at `0x08036CB0` and the percentage routine at
 //! `0x080346C0`, the starting units at `0x080374B8` / `0x080372D0`, the
-//! formation slots at `0x08037AB4`, the warriors' growth at `0x080368BC`
-//! and the member list the status screens build at `0x0804E34C`.
+//! formation slots at `0x08037AB4`, the warriors' growth at `0x080368BC`,
+//! the member list the status screens build at `0x0804E34C`, and the part
+//! slots the Zoid status screen describes (`0x0804E04C`, `0x0804DFCC`,
+//! with the part values at `0x08036E74`).
 //!
 //! Units are 0x38-byte records at `+0xD2C` of the game state, 0x99
 //! ordinary slots and 0x14 special ones after them, counted at `+0x3304`:
@@ -48,8 +50,20 @@ const UNIT_TRAINING: usize = 0x34;
 const UNIT_VARIANT: usize = 0x35;
 const PART_RECORDS: usize = 0x0066_C8F8;
 const PART_RECORD_LEN: usize = 24;
-const PART_SLOTS: usize = 6;
+/// Part slots of a unit.
+pub const PART_SLOTS: usize = 6;
 const NO_PART: u16 = 0xFFFF;
+const PART_WEAPON: u32 = 1;
+const PART_ACCURACY: usize = 8;
+const PART_COST: usize = 0x10;
+const PART_RANGE: usize = 0x12;
+const PART_TURNS: usize = 0x14;
+const RACK_KIND: u16 = 3;
+const STOCK: usize = 0x334C;
+/// Parts that can be kept in stock: ids below this.
+pub const STOCKED_PARTS: usize = 150;
+/// The most of one part the stock holds.
+pub const STOCK_LIMIT: u8 = 9;
 const PART_ACTIVE: u32 = 0x2000_0000;
 const PART_BONUSES: [(u32, usize); 6] = [
     (0x4000, 10),
@@ -64,6 +78,7 @@ const CHARACTERS: usize = 0x34A4;
 const CHARACTER_LEN: usize = 4;
 const CHARACTER_UNIT: usize = 2;
 const CHARACTER_IN_FORMATION: u16 = 0x10;
+const KEEPS_EQUIPMENT: u16 = 0x08;
 const NO_UNIT: u8 = 0xFF;
 const FORMATION: usize = 0x3600;
 const MEMBER_RECORDS: usize = 0xCD8;
@@ -147,6 +162,17 @@ pub fn members(state: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+/// Whether `character` keeps its equipment as it is: the equipment
+/// screen refuses to change it when the character's flags have bit
+/// `0x08`.
+#[must_use]
+pub fn keeps_equipment(state: &[u8], character: u8) -> bool {
+    let at = CHARACTERS + usize::from(character) * CHARACTER_LEN;
+    state
+        .get(at..at + 2)
+        .is_some_and(|entry| half(entry, 0) & KEEPS_EQUIPMENT != 0)
+}
+
 /// The unit `character` pilots, if any.
 #[must_use]
 pub fn character_unit(state: &[u8], character: u8) -> Option<u8> {
@@ -213,6 +239,175 @@ pub fn unit_status(state: &[u8], unit: u8) -> Option<UnitStatus> {
 pub fn pilot_bonuses(rom: &[u8], state: &[u8], character: u8) -> Option<[i32; PILOT_VALUES]> {
     let [durability, reaction, defense, attack, accuracy] = pilot(rom, state, character)?;
     Some([durability, attack, defense, reaction, accuracy])
+}
+
+/// A part as the screens describe it: its 24-byte record at ROM
+/// `0x66C8F8`, with a weapon's power and accuracy raised by its pilot's
+/// bonuses (`0x08036E74`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Part {
+    /// The part: its name is entry `id` of the part-name table.
+    pub id: u16,
+    /// What the part is and does: bit 0 a weapon; otherwise the kind of
+    /// support (see `docs/menu.md`).
+    pub flags: u32,
+    /// Accuracy in percent (a support part's second value).
+    pub accuracy: i16,
+    /// A weapon's power in 16.16, or a support part's value.
+    pub power: i32,
+    /// Energy points it costs.
+    pub cost: i16,
+    /// A weapon's range, and how many enemies it reaches.
+    pub range: (u8, u8),
+    /// Turns a support part's effect lasts; 0 until the battle ends.
+    pub turns: u8,
+}
+
+/// One of a unit's six part slots: three weapon racks, then three fixed
+/// weapons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartSlot {
+    /// The Zoid record's slot flags: the equipment screen offers the
+    /// stocked parts a rack of flags 1, 2 or 3 takes.
+    pub flags: u16,
+    /// The rack's kind, the low two bits of `flags`: 1 attack, 2 defense,
+    /// 3 both, 0 fixed.
+    pub rack: u8,
+    /// Whether the Zoid record fits the slot with a part of its own; a
+    /// fixed slot without one is no rack at all.
+    pub fitted: bool,
+    /// The part the unit carries.
+    pub part: Option<Part>,
+}
+
+/// Part `id` as its record gives it, which the stock list shows.
+#[must_use]
+pub fn part_record(rom: &[u8], id: u16) -> Option<Part> {
+    let at = PART_RECORDS + usize::from(id) * PART_RECORD_LEN;
+    let record = rom.get(at..at + PART_RECORD_LEN)?;
+    let signed = |at: usize| i16::from_ne_bytes(half(record, at).to_ne_bytes());
+    Some(Part {
+        id,
+        flags: word(record, 0),
+        accuracy: signed(PART_ACCURACY),
+        power: i32::from_ne_bytes(word(record, PART_BONUS).to_ne_bytes()),
+        cost: signed(PART_COST),
+        range: (record[PART_RANGE], record[PART_RANGE + 1]),
+        turns: record[PART_TURNS],
+    })
+}
+
+/// Part `id` as `character` would use it (`0x08036E74`): a weapon's power
+/// and accuracy gain the pilot's attack and accuracy bonuses in percent.
+#[must_use]
+pub fn part(rom: &[u8], state: &[u8], character: u8, id: u16) -> Option<Part> {
+    let mut part = part_record(rom, id)?;
+    if part.flags & PART_WEAPON != 0 {
+        let [_, _, _, attack, accuracy] = pilot(rom, state, character)?;
+        part.power = part.power.wrapping_add(percent(part.power, attack));
+        let raised = i32::from(part.accuracy) + percent(i32::from(part.accuracy), accuracy);
+        let [low, high, ..] = raised.to_le_bytes();
+        part.accuracy = i16::from_le_bytes([low, high]);
+    }
+    Some(part)
+}
+
+/// The part slots of the unit `character` pilots, as the Zoid status
+/// screen's pages show them (`0x0804E04C`, `0x0804DFCC`); `None` when the
+/// character has no unit.
+#[must_use]
+pub fn unit_parts(rom: &[u8], state: &[u8], character: u8) -> Option<[PartSlot; PART_SLOTS]> {
+    let at = unit_at(character_unit(state, character)?);
+    let unit = state.get(at..at + UNIT_LEN)?;
+    let record = zoid_record(rom, half(unit, 6))?;
+    let mut slots = [PartSlot {
+        flags: 0,
+        rack: 0,
+        fitted: false,
+        part: None,
+    }; PART_SLOTS];
+    for (index, slot) in slots.iter_mut().enumerate() {
+        let entry = ZOID_PARTS + index * 4;
+        slot.flags = half(record, entry);
+        slot.rack = u8::try_from(slot.flags & RACK_KIND).unwrap_or(0);
+        slot.fitted = half(record, entry + 2) != NO_PART;
+        let id = half(unit, UNIT_PARTS + index * 4 + 2);
+        if id != NO_PART {
+            slot.part = Some(part(rom, state, character, id)?);
+        }
+    }
+    Some(slots)
+}
+
+/// How many of part `id` the party keeps in stock, 0 for a part that
+/// cannot be stocked.
+#[must_use]
+pub fn stock(state: &[u8], id: u16) -> u8 {
+    if usize::from(id) >= STOCKED_PARTS {
+        return 0;
+    }
+    state.get(STOCK + usize::from(id)).copied().unwrap_or(0)
+}
+
+/// The stocked parts whose flags share a bit with `mask`, by id
+/// (`0x0804E24C`): the status screen's weapon list takes weapons and
+/// support parts (mask 15), the rack's list those that fit the rack.
+#[must_use]
+pub fn stocked_parts(rom: &[u8], state: &[u8], mask: u32) -> Vec<u16> {
+    (0..STOCKED_PARTS)
+        .filter_map(|id| u16::try_from(id).ok())
+        .filter(|&id| stock(state, id) > 0)
+        .filter(|&id| {
+            let at = PART_RECORDS + usize::from(id) * PART_RECORD_LEN;
+            rom.get(at..at + 4)
+                .is_some_and(|flags| word(flags, 0) & mask != 0)
+        })
+        .collect()
+}
+
+/// Puts `part` on slot `slot` of the unit `character` pilots, or takes
+/// the slot's part off when `part` is `None` (`0x08051B26`). The part it
+/// held goes back to stock unless `discard` (the game asks first when
+/// that stock is full), the new one leaves it, and the unit's statistics
+/// are computed again, its current hit and energy points kept within
+/// them. `None` when the character has no unit or a table is outside
+/// `rom`.
+pub fn equip(
+    rom: &[u8],
+    state: &mut [u8],
+    character: u8,
+    slot: usize,
+    part: Option<u16>,
+    discard: bool,
+) -> Option<()> {
+    let unit = character_unit(state, character)?;
+    let at = unit_at(unit);
+    let entry = at + UNIT_PARTS + slot.min(PART_SLOTS - 1) * 4 + 2;
+    let old = half(state, entry);
+    if old != NO_PART && !discard {
+        let count = STOCK + usize::from(old);
+        if usize::from(old) < STOCKED_PARTS {
+            state[count] = state[count].wrapping_add(1);
+        }
+    }
+    match part {
+        Some(id) => {
+            set_half(state, entry, id);
+            if usize::from(id) < STOCKED_PARTS {
+                let count = STOCK + usize::from(id);
+                state[count] = state[count].wrapping_sub(1);
+            }
+        }
+        None => set_half(state, entry, NO_PART),
+    }
+    compute_stats(rom, state, character, unit)?;
+    for (current, full) in [(8, UNIT_STATS), (12, UNIT_STATS + 4)] {
+        let full = word(state, at + full);
+        if word(state, at + current) > full {
+            set_word(state, at + current, full);
+        }
+    }
+    Some(())
 }
 
 fn half(bytes: &[u8], at: usize) -> u16 {
@@ -557,6 +752,79 @@ mod tests {
         assert_eq!(unit_status(&state, 9), None);
         assert_eq!(pilot_bonuses(&rom, &state, 1), Some([4, 6, 2, 10, 8]));
         assert_eq!(pilot_bonuses(&rom, &state, 0), Some([0; PILOT_VALUES]));
+    }
+
+    #[test]
+    fn a_weapon_gains_its_pilots_bonuses_and_a_support_part_does_not() {
+        let mut rom = rom();
+        let weapon = PART_RECORDS + 9 * PART_RECORD_LEN;
+        rom[weapon] = 0x21;
+        rom[weapon + PART_ACCURACY] = 110;
+        rom[weapon + PART_BONUS + 2] = 25;
+        rom[weapon + PART_RANGE..weapon + PART_TURNS].copy_from_slice(&[2, 1]);
+        let shield = PART_RECORDS + 0x13C * PART_RECORD_LEN;
+        rom[shield..shield + 2].copy_from_slice(&0x4004u16.to_le_bytes());
+        rom[shield + PART_ACCURACY] = 20;
+        rom[shield + PART_BONUS] = 20;
+        rom[shield + PART_COST] = 2;
+        rom[shield + PART_TURNS] = 3;
+        let liger = ZOID_RECORDS + 0x39 * ZOID_RECORD_LEN;
+        rom[liger + ZOID_PARTS + 4..liger + ZOID_PARTS + 8].copy_from_slice(&[3, 0, 9, 0]);
+        rom[liger + ZOID_PARTS + 16..liger + ZOID_PARTS + 20].copy_from_slice(&[0, 0, 0x3C, 1]);
+        let mut state = state();
+        state[PARTY_LEVEL] = 2;
+        mark_member(&mut state, 0);
+        form_party(&rom, &mut state, 0).expect("party");
+
+        let raised = part(&rom, &state, 1, 9).expect("part");
+        assert_eq!(raised.power, (25 << 16) + (25 << 16) / 100 * 6);
+        assert_eq!((raised.accuracy, raised.range), (119, (2, 1)));
+        let plain = part(&rom, &state, 0, 9).expect("part");
+        assert_eq!((plain.power, plain.accuracy), (25 << 16, 110));
+        let support = part(&rom, &state, 1, 0x13C).expect("part");
+        assert_eq!(
+            (support.power, support.accuracy, support.cost, support.turns),
+            (20, 20, 2, 3)
+        );
+
+        let slots = unit_parts(&rom, &state, 0).expect("slots");
+        assert_eq!((slots[1].rack, slots[1].fitted), (3, true));
+        assert_eq!(slots[1].part.map(|part| part.id), Some(9));
+        assert_eq!((slots[0].rack, slots[0].part), (0, None));
+        assert!(!slots[5].fitted);
+        assert_eq!(slots[4].part.map(|part| part.flags), Some(0x4004));
+        assert_eq!(unit_parts(&rom, &state, 5), None);
+    }
+
+    #[test]
+    fn a_part_taken_off_goes_to_stock_and_back() {
+        let mut rom = rom();
+        let laser = PART_RECORDS + 9 * PART_RECORD_LEN;
+        rom[laser] = 0x21;
+        let shield = PART_RECORDS + 12 * PART_RECORD_LEN;
+        rom[shield..shield + 4].copy_from_slice(&(PART_ACTIVE | 0x4004).to_le_bytes());
+        rom[shield + PART_BONUS] = 5;
+        let liger = ZOID_RECORDS + 0x39 * ZOID_RECORD_LEN;
+        rom[liger + ZOID_PARTS + 4..liger + ZOID_PARTS + 8].copy_from_slice(&[3, 0, 9, 0]);
+        let mut state = state();
+        mark_member(&mut state, 0);
+        form_party(&rom, &mut state, 0).expect("party");
+
+        equip(&rom, &mut state, 0, 1, None, false).expect("taken off");
+        assert_eq!(unit_parts(&rom, &state, 0).expect("slots")[1].part, None);
+        assert_eq!(stock(&state, 9), 1);
+        assert_eq!(stocked_parts(&rom, &state, 15), [9]);
+        assert_eq!(stocked_parts(&rom, &state, 2), []);
+
+        state[STOCK + 12] = 2;
+        equip(&rom, &mut state, 0, 1, Some(12), false).expect("fitted");
+        assert_eq!((stock(&state, 12), stock(&state, 9)), (1, 1));
+        let unit = unit_status(&state, 0).expect("unit");
+        assert_eq!(unit.df, 10 + 5);
+        equip(&rom, &mut state, 0, 1, Some(9), true).expect("replaced");
+        assert_eq!((stock(&state, 12), stock(&state, 9)), (1, 0));
+        assert_eq!(unit_status(&state, 0).expect("unit").df, 10);
+        assert_eq!(stock(&state, 200), 0);
     }
 
     fn mark_member(state: &mut [u8], character: usize) {

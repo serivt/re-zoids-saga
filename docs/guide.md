@@ -8,9 +8,10 @@ routines they call: the known checks (`0x080431AC`, `0x0804CD84`), the silhouett
 menu's flags (`0x0804CFFC`, `0x0804CF64`, `0x0804CE3C`). In a reference emulator:
 screenshots, VRAM, OAM and register dumps of both guides with a save and with one
 patched to have seen every Zoid, the BIOS decompressions logged while an entry loads,
-and every transition measured frame by frame. Implemented in
-`crates/extraction/src/saga_guide.rs` (tables, pictures, parts),
-`crates/game-core/src/guide.rs` (the screens) and `game.rs` (the title's options).
+and every transition measured frame by frame, from the title and from the pause
+menu. Implemented in `crates/extraction/src/saga_guide.rs` (tables, pictures, parts),
+`crates/game-core/src/guide.rs` (the screens), `game.rs` (the title's options) and
+`menu/mod.rs` (the pause menu's 図鑑).
 
 ## From the title
 
@@ -31,6 +32,22 @@ darkens a level a frame from the fourth frame (black from the 19th), the guide's
 script starts on the 42nd, and the screen stays black two more frames, then brightens a
 level a frame from 31 (visibly over the last 16). Leaving holds 10 frames, fades out over
 16 and stays black 45 frames before the title starts over.
+
+## From the pause menu
+
+ステータス → 図鑑 leaves ゾイド (0) or キャラ (1) in var1 and opens the same guides
+(`0x08050090`), reading what the player has seen from the game state as it stands. The
+game's fade level (IWRAM `0x03002356`, shown from 16 down) was traced per frame both
+ways.
+
+- **Opening,** counted from the frame the choice is accepted: the menu darkens a level a
+  frame from the fourth, and is black from the 19th. The guide's menu starts on the
+  36th and stays black five frames, where the title's stays two.
+- **Leaving:** the guide fades out as from the title, but a frame sooner, and stays black
+  only 18 frames. Then the game rebuilds the main menu, the status list and the guide
+  choice with the cursor on the guide just left. They stay black until the 28th frame
+  after the guide closed and brighten over 16. The choice's help and menu run again on
+  the 45th frame.
 
 ## Scripts
 

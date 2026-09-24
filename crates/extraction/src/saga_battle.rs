@@ -55,6 +55,12 @@ const ROM_BASE: u32 = 0x0800_0000;
 const EFFECTS: usize = 0x006F_77D4;
 const EFFECT_LEN: usize = 16;
 const EFFECT_COUNT: usize = 282;
+const WEAPON_SPRITES: usize = 0x006F_6E44;
+const BACK_WEAPON_SPRITES: usize = 0x006F_77C4;
+const WEAPON_MOUNTS: usize = 0x006E_78EC;
+const MOUNT_LEN: usize = 28;
+const MOUNTS: usize = 6;
+const MOUNT_Y: usize = 0xE;
 const PIECE_LEN: usize = 20;
 const PIECES_END: u16 = 0xFFFF;
 const PIECES_MAX: usize = 16;
@@ -125,7 +131,45 @@ pub fn effect_sprite(rom: &[u8], id: usize) -> Option<EffectSprite> {
     if id >= EFFECT_COUNT {
         return None;
     }
-    let record = rom.get(EFFECTS + id * EFFECT_LEN..EFFECTS + (id + 1) * EFFECT_LEN)?;
+    sprite_at(rom, EFFECTS + id * EFFECT_LEN)
+}
+
+/// The picture of weapon `part` mounted on rack `rack` of a Zoid, which
+/// the equipment screen draws over the Zoid (`0x0804D768`): the second
+/// rack's come from ROM `0x6F77C4`, the others' from `0x6F6E44`; `None`
+/// for a part without one.
+#[must_use]
+pub fn weapon_sprite(rom: &[u8], part: u16, rack: usize) -> Option<EffectSprite> {
+    let table = if rack == 1 {
+        BACK_WEAPON_SPRITES
+    } else {
+        WEAPON_SPRITES
+    };
+    sprite_at(rom, table + usize::from(part) * EFFECT_LEN)
+}
+
+/// Where rack `rack`'s weapon sits on Zoid `zoid`'s picture
+/// (`0x08045818`, `0x08045850`): the Zoid's 28-byte record at ROM
+/// `0x6E78EC` gives six x then six y, `0xFFFF` for a default after each
+/// six.
+#[must_use]
+pub fn weapon_mount(rom: &[u8], zoid: u16, rack: usize) -> Option<(i16, i16)> {
+    let at = WEAPON_MOUNTS + usize::from(zoid) * MOUNT_LEN;
+    let record = rom.get(at..at + MOUNT_LEN)?;
+    let value = |first: usize| {
+        let read = |index: usize| i16::from_le_bytes([record[index], record[index + 1]]);
+        let own = read(first + rack.min(MOUNTS - 1) * 2);
+        if own == -1 {
+            read(first + MOUNTS * 2)
+        } else {
+            own
+        }
+    };
+    Some((value(0), value(MOUNT_Y)))
+}
+
+fn sprite_at(rom: &[u8], at: usize) -> Option<EffectSprite> {
+    let record = rom.get(at..at + EFFECT_LEN)?;
     let pointer = |at: usize| rom_offset(&record[at..at + 4]);
     let (tile_bytes, _) = lz77::decompress(rom.get(pointer(0)?..)?).ok()?;
     let (palette_bytes, _) = lz77::decompress(rom.get(pointer(4)?..)?).ok()?;
@@ -239,6 +283,23 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
+
+    #[test]
+    fn a_rack_without_its_own_mount_takes_the_default() {
+        let mut rom = vec![0; WEAPON_MOUNTS + 3 * MOUNT_LEN];
+        let at = WEAPON_MOUNTS + 2 * MOUNT_LEN;
+        for (index, value) in [87i16, 64, -1, 13, 38, -1, 74, 80, 62, -1, 75, 72, -1, 73]
+            .iter()
+            .enumerate()
+        {
+            rom[at + index * 2..at + index * 2 + 2].copy_from_slice(&value.to_le_bytes());
+        }
+        assert_eq!(weapon_mount(&rom, 2, 0), Some((87, 80)));
+        assert_eq!(weapon_mount(&rom, 2, 1), Some((64, 62)));
+        assert_eq!(weapon_mount(&rom, 2, 2), Some((74, 73)));
+        assert_eq!(weapon_mount(&rom, 3, 0), None);
+        assert!(weapon_sprite(&rom, 9, 0).is_none());
+    }
 
     fn put_pointer(rom: &mut [u8], at: usize, target: usize) {
         let address = ROM_BASE + u32::try_from(target).expect("offset");

@@ -878,6 +878,14 @@ pub const BATTLE_TEXT_SCRIPTS: StringTable = StringTable {
     count: 134,
 };
 
+/// The parts' names, by part (`0x0804DFCC` prints entry `id` of it): 317
+/// weapons and support parts, then the Zi data and other items.
+pub const PART_NAME_SCRIPTS: StringTable = StringTable {
+    name: "part",
+    offset: 0x0066_64F0,
+    count: 594,
+};
+
 /// Where the deck commands' names start in the `item` table: command `n`
 /// is its string `77 + n` (the game reads them from ROM `0x676530`).
 pub const COMMAND_NAMES: usize = 77;

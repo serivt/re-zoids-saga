@@ -66,14 +66,14 @@ with the variables it saved, which is how the chest and deck-command messages pr
 | `0x02` | 1 | Reset the text system; mode 1 also clears the name buffer; modes below `0x10` zero the variables |
 | `0x03` | 1 | Close window `a0` (`0xFF` = all) and redraw the others |
 | `0x04` | 1 | Present window `a0`, which becomes the current window; `0xFF` presents every open window in id order and leaves the highest current |
-| `0x05` | 1 | Wait for a key, prompting in the current window: low nibble 0 accepts A (sets var0 = 1, plays sound `0x41`), `0x10` in the high nibble lets B end it with var0 = 0; the prompt blinks 20 frames off, 20 on |
+| `0x05` | 1 | Wait for a key, prompting in the current window, which it shows even when the script did not present it: low nibble 0 accepts A (sets var0 = 1, plays sound `0x41`), `0x10` in the high nibble lets B end it with var0 = 0; the prompt blinks 20 frames off, 20 on |
 | `0x06` | 1 | Menu on the current window, starting on the line its last menu ended on: up/down move the cursor (sound `0x40`); A sets var0 = 1 and var1 = the line (sound `0x47`); with `0x10` in the high nibble B ends it with var0 = 0; the cursor stays drawn until the window is presented again |
 | `0x07` | table | Switch: `a0 & 7` selects entry `n` of a table of signed 16-bit offsets; the table has no length field and ends where its nearest target begins |
 | `0x08` | 2 | Jump |
 | `0x09` | 3 | var[`a0 & 7`] = `a1 | a2 << 8` |
 | `0x0A` | 2 | var[`a0`] = var[`a1`] |
 | `0x0B`, `0x0C` | 0 | Save / restore the eight variables (RAM `0x02007574`) |
-| `0x0D` | 1 | Draw window `a0` |
+| `0x0D` | 1 | Draw window `a0` over the windows it overlaps; it becomes the current window. It calls the window's draw method as presenting does (`0x0803E950`), without the flush |
 | `0x0E` | 1 | Clear the text of window `a0` |
 | `0x0F` | 3 | Portrait of character `a1`, expression `a2` in window `a0` |
 | `0x10`–`0x12` | 5 | Jump when var[`a0`] ==, > or < `a1 | a2 << 8` |

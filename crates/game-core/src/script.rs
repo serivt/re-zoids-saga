@@ -57,6 +57,11 @@ pub trait ScriptHost {
     fn close_window(&mut self, id: Option<u8>);
     /// Redraws window `id` (or all of them) with its current contents.
     fn present(&mut self, id: Option<u8>);
+    /// Draws window `id` over the others (opcode `0x0D`): the original
+    /// writes its tiles again, so it covers whatever overlaps it.
+    fn draw_window(&mut self, id: u8) {
+        self.present(Some(id));
+    }
     /// Makes window `id` visible as its text is typed, without a redraw.
     fn reveal(&mut self, id: u8);
     /// Empties the text of window `id`.
@@ -612,12 +617,16 @@ impl ScriptRunner {
                     .unwrap_or(self.window);
                 self.wait = Wait::Frames(1);
             }
-            Instruction::Draw { id } => host.present(Some(id)),
+            Instruction::Draw { id } => {
+                host.draw_window(id);
+                self.window = id;
+            }
             Instruction::ClearWindow { id } => {
                 host.clear_window(id);
                 self.wait = Wait::Frames(1);
             }
             Instruction::WaitKey { mode, cancelable } => {
+                host.reveal(self.window);
                 self.wait = Wait::Key {
                     mode,
                     cancelable,

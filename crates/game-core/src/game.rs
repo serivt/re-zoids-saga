@@ -34,7 +34,7 @@ use crate::data::GameData;
 use crate::event::{BLACK, EventHost, Events, HoldStep, MAP_TASK, Op};
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
-use crate::guide::{Guide, GuideError, GuideKind};
+use crate::guide::{Cover, Guide, GuideError, GuideKind};
 use crate::menu::{MenuStep, Party, PauseMenu};
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptContext, ScriptError, ScriptRunner};
@@ -408,8 +408,8 @@ impl<'rom> Game<'rom> {
             Screen::Loading => {}
             Screen::Field => {
                 if start && self.player_in_control() {
-                    let roster = self.data.roster(&self.state);
-                    let mut menu = PauseMenu::new(&self.data, self.party.clone(), roster)?;
+                    let mut menu =
+                        PauseMenu::new(&self.data, self.party.clone(), self.state.clone())?;
                     menu.open(rom, &mut self.windows)?;
                     self.screen = Screen::Menu(Box::new(menu));
                     Self::emit(&self.extensions, &Event::MenuOpened);
@@ -421,6 +421,7 @@ impl<'rom> Game<'rom> {
                 MenuStep::Open => {}
                 MenuStep::Save => {
                     let party = menu.party();
+                    self.state.clone_from_slice(menu.state());
                     let written = self.write_save(&party);
                     if let Screen::Menu(menu) = &mut self.screen {
                         menu.finish_save(written)?;
@@ -428,6 +429,7 @@ impl<'rom> Game<'rom> {
                 }
                 MenuStep::Closed => {
                     self.party = menu.party();
+                    self.state.clone_from_slice(menu.state());
                     self.screen = Screen::Field;
                     Self::emit(&self.extensions, &Event::MenuClosed);
                 }
@@ -542,7 +544,12 @@ impl<'rom> Game<'rom> {
             return Ok(());
         };
         self.windows.close_window(None);
-        self.screen = Screen::Guide(Box::new(Guide::new(&self.data, kind, state, title)?));
+        self.screen = Screen::Guide(Box::new(Guide::new(
+            &self.data,
+            kind,
+            state,
+            Cover::Title(Box::new(title)),
+        )?));
         Ok(())
     }
 
