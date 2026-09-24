@@ -83,7 +83,7 @@ on a line, in Latin letters of average width:
 
 | Where | Pixels per line | Roughly | Lines |
 |---|---|---|---|
-| Story box (dialogue) | 224, or 176 beside a portrait | 40 or 30 letters | 3 beside a portrait; a longer message waits for A when full, then turns a page: the name row stays and two fresh lines follow |
+| Story box (dialogue) | 224, or 168 beside a portrait | 40 or 29 letters | 3 beside a portrait; a longer message waits for A when full, then turns a page: the name row stays and two fresh lines follow |
 | Title menu | 40 before enlarging | 7 letters | 3 |
 | Name-entry help | 160 | 28 letters | 1 |
 | Name-entry question | 224 | 40 letters | 2 |
@@ -94,11 +94,15 @@ strings it calls) to find the window every message lands in, and enlarges the wi
 whose translated lines do not fit: a window grows to the widest line plus its margins
 (and, for a menu, to the number of choices, unless the original menu already had more
 lines than rows and scrolls), keeping its center where it was and
-staying on screen. A window is not enlarged when the larger one would cover another
-window open at the same time that the original did not already cover. The launcher
+staying on screen. A window is not enlarged when the larger one would cover more of
+another window open at the same time that the original kept clear of or only bordered
+(the story box shares one column with the portrait beside it); a window the original
+already drew over, as a menu over the menu that opened it, may be covered further.
+Windows are fitted per string that opens them, so every conversation shares the story
+box of the helper strings: one message too wide for it would enlarge the box for all. The launcher
 prints one line per message that cannot fit even a screen-wide window or would cover
-another; those still wrap mid-word. The story box beside a portrait is already the
-full screen width, so its lines must stay within 176 pixels.
+another; those still wrap mid-word. The story box beside a portrait already reaches
+the screen's right edge, so its lines must stay within 168 pixels.
 
 Messages the game's own code prints into fixed columns are not fitted: the status
 screens place signs and values by cell, so their labels must stay within the pixels

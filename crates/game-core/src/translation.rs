@@ -153,13 +153,33 @@ struct Placement {
 }
 
 impl Opened {
-    /// Whether two windows share any cell.
-    fn overlaps(&self, other: &Self) -> bool {
-        self.x < other.x + other.width
-            && other.x < self.x + self.width
-            && self.y < other.y + other.height
-            && other.y < self.y + self.height
+    /// The columns and rows two windows share.
+    fn shared(&self, other: &Self) -> (usize, usize) {
+        let columns = (self.x + self.width)
+            .min(other.x + other.width)
+            .saturating_sub(self.x.max(other.x));
+        let rows = (self.y + self.height)
+            .min(other.y + other.height)
+            .saturating_sub(self.y.max(other.y));
+        (columns, rows)
     }
+
+    /// How many cells two windows share.
+    fn shared_cells(&self, other: &Self) -> usize {
+        let (columns, rows) = self.shared(other);
+        columns * rows
+    }
+}
+
+/// Whether `grown`, the enlarged `window`, would spread over `other`: a
+/// window the original kept clear of or only bordered (the story box shares
+/// one column with the portrait beside it) must not be covered any
+/// further; one the original already drew over, as a menu over the menu
+/// that opened it, may be.
+fn spreads_over(window: &Opened, grown: &Opened, other: &Opened) -> bool {
+    let (columns, rows) = window.shared(other);
+    let bordering = columns <= 1 || rows <= 1;
+    bordering && grown.shared_cells(other) > window.shared_cells(other)
 }
 
 /// The key of a message: table, string index and the message's offset from
@@ -296,8 +316,7 @@ impl Translation {
             if let Some(other) = placement
                 .others
                 .iter()
-                .filter(|other| !window.overlaps(other))
-                .find(|other| grown.overlaps(other))
+                .find(|other| spreads_over(&window, &grown, other))
             {
                 problems.push(format!(
                     "{context}: needs {pixels} pixels, but a larger window would cover the one at ({}, {})",
@@ -1011,6 +1030,39 @@ mod tests {
             translation.fit_window("title", 0, 0, 0x21, (10, 10, 9, 8)),
             (6, 10, 17, 8)
         );
+    }
+
+    #[test]
+    fn a_window_does_not_spread_over_one_it_only_bordered() {
+        let window = |x, y, width, height| Opened {
+            x,
+            y,
+            width,
+            height,
+            kind: 0,
+            opener: 0,
+        };
+        let portrait = window(0, 12, 8, 8);
+        let story = window(7, 12, 23, 8);
+        assert_eq!(story.shared_cells(&portrait), 8);
+        assert!(spreads_over(&story, &window(4, 12, 26, 8), &portrait));
+        assert!(!spreads_over(&story, &story, &portrait));
+        assert!(spreads_over(
+            &window(10, 4, 9, 8),
+            &window(10, 3, 9, 10),
+            &story
+        ));
+        assert!(!spreads_over(
+            &window(10, 0, 9, 8),
+            &window(8, 0, 11, 8),
+            &portrait
+        ));
+        let menu = window(10, 10, 9, 8);
+        assert!(!spreads_over(
+            &window(12, 12, 9, 6),
+            &window(9, 12, 15, 6),
+            &menu
+        ));
     }
 
     #[test]
