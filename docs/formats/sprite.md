@@ -27,6 +27,14 @@ The player's map sprite is id `0x98`, `ch00`: 32 images at `0x8202C5C`, palette 
 `0x8202C3C`. The chair beside the player in the first room is id `0xF6`, `ma07`, a furniture sprite;
 the two characters there are `0xD0` `ch56` and `0xD1` `ch57`.
 
+## Zoid pictures
+
+Each 76-byte Zoid record at ROM `0x670210` carries a sprite of its own for the status
+screens (`0x0804D6E8`): 64 tiles of 4bpp images at `+0x30`, a 16-color palette at
+`+0x34`, and an animation table and a frame table at `+0x38` and `+0x3C` in the formats
+below. The Shield Liger's has one animation of one 64×64 frame whose top-left sits 32
+pixels left of and 64 above its anchor; the Zoid status screen anchors it at (40, 88).
+
 ## Animations and frames
 
 An animation is a list of 4-byte steps, frame record index then ticks, ended by a step

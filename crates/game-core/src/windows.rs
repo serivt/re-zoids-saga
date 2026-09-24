@@ -178,6 +178,15 @@ impl Window {
         self.push(ch, CELL_WIDTH, 0);
     }
 
+    fn pad_to(&mut self, column: usize) {
+        self.apply_break();
+        self.ensure_line();
+        let used = self.lines.last().map_or(0, |line| line.chars().count());
+        for _ in used..column {
+            self.push(FULL_WIDTH_SPACE, CELL_WIDTH, 0);
+        }
+    }
+
     fn ensure_line(&mut self) {
         if self.lines.is_empty() {
             self.lines.push(String::new());
@@ -305,6 +314,15 @@ impl<'rom> ScriptWindows<'rom> {
     pub fn put_at(&mut self, id: u8, column: usize, ch: char) {
         if let Some(window) = self.window_mut(id) {
             window.put_at(column, ch);
+        }
+    }
+
+    /// Pads window `id`'s current line with full-width spaces up to cell
+    /// `column`, as the game's code moves the text position before a script
+    /// prints there.
+    pub fn pad_to(&mut self, id: u8, column: usize) {
+        if let Some(window) = self.window_mut(id) {
+            window.pad_to(column);
         }
     }
 
@@ -436,18 +454,24 @@ impl<'rom> ScriptWindows<'rom> {
         }
     }
 
+    /// Whether `window`'s left border lies on another window's right
+    /// border, where the story skin joins them with the divider tiles; a
+    /// light-framed window (the status screens') keeps its own border.
     fn shares_left_border(&self, index: usize, window: &Window) -> bool {
-        self.windows
-            .iter()
-            .enumerate()
-            .filter(|(other, _)| *other != index)
-            .filter_map(|(_, other)| other.as_ref())
-            .any(|other| {
-                other.visible
-                    && other.x + other.width == window.x + 1
-                    && other.y == window.y
-                    && other.height == window.height
-            })
+        window.frame_style() == FrameStyle::Standard
+            && self
+                .windows
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .filter_map(|(_, other)| other.as_ref())
+                .any(|other| {
+                    other.visible
+                        && other.frame_style() == FrameStyle::Standard
+                        && other.x + other.width == window.x + 1
+                        && other.y == window.y
+                        && other.height == window.height
+                })
     }
 
     fn window_mut(&mut self, id: u8) -> Option<&mut Window> {
@@ -796,6 +820,10 @@ mod tests {
         assert!(host.windows()[0].as_ref().unwrap().visible);
         assert!(host.shares_left_border(1, host.windows()[1].as_ref().unwrap()));
         assert!(!host.shares_left_border(0, host.windows()[0].as_ref().unwrap()));
+        host.open_window(2, 0x20, (0, 0, 18, 12), 4);
+        host.open_window(3, 0x21, (17, 0, 13, 12), 4);
+        host.present(None);
+        assert!(!host.shares_left_border(3, host.windows()[3].as_ref().unwrap()));
         host.put_char(1, 'x');
         host.prompt(1, true);
         host.clear_window(1);

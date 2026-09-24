@@ -134,7 +134,7 @@ enum Screen {
     Loading,
     LeavingNameEntry(Box<NameEntry>, u32),
     Field,
-    Menu(PauseMenu),
+    Menu(Box<PauseMenu>),
     Continuing(Continuing),
     Guide(Box<Guide>),
 }
@@ -405,9 +405,10 @@ impl<'rom> Game<'rom> {
             Screen::Loading => {}
             Screen::Field => {
                 if start && self.player_in_control() {
-                    let mut menu = PauseMenu::new(&self.data, self.party.clone())?;
+                    let roster = self.data.roster(&self.state);
+                    let mut menu = PauseMenu::new(&self.data, self.party.clone(), roster)?;
                     menu.open(rom, &mut self.windows)?;
-                    self.screen = Screen::Menu(menu);
+                    self.screen = Screen::Menu(Box::new(menu));
                     Self::emit(&self.extensions, &Event::MenuOpened);
                 } else {
                     self.update_field(input)?;
@@ -657,14 +658,12 @@ impl<'rom> Game<'rom> {
         self.player_name.clone_from(&saved.player_name);
         self.windows.set_player_name(&self.player_name);
         self.windows.set_flags(progress.set_flags());
-        let mut party = Party::default();
-        if let Some(leader) = party.members.first_mut() {
-            leader.level = u32::from(progress.level);
-            leader.experience = progress.experience;
-        }
-        party.money = progress.money;
-        party.message_speed = u16::from(progress.message_speed);
-        self.party = party;
+        self.party = Party {
+            level: u32::from(progress.level),
+            experience: progress.experience,
+            money: progress.money,
+            message_speed: u16::from(progress.message_speed),
+        };
         Some(progress)
     }
 
@@ -719,10 +718,8 @@ impl<'rom> Game<'rom> {
         for flag in self.windows.flags() {
             progress.set_flag(flag, true);
         }
-        if let Some(leader) = party.members.first() {
-            progress.level = u8::try_from(leader.level).unwrap_or(u8::MAX);
-            progress.experience = leader.experience;
-        }
+        progress.level = u8::try_from(party.level).unwrap_or(u8::MAX);
+        progress.experience = party.experience;
         progress.money = party.money;
         progress.message_speed = u8::try_from(party.message_speed).unwrap_or(u8::MAX);
         progress.name = encode_name(&self.player_name).0;

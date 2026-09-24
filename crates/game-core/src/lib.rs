@@ -27,7 +27,7 @@ pub use field::{
     frame_at,
 };
 pub use game::{Game, GameError, Stage};
-pub use menu::{Character, MenuStep, Party, PauseMenu, Unit};
+pub use menu::{Member, MenuStep, Party, PauseMenu, Roster};
 pub use rng::Rng;
 pub use save::{Found, SaveError, SaveFile, SavedGame};
 pub use script::{ScriptError, ScriptHost, ScriptRunner};

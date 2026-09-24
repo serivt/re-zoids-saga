@@ -32,6 +32,9 @@ pub const PAUSE_MENU_TABLE: &str = "pause-menu";
 pub const DIALOGUE_TABLE: &str = "dialogue";
 /// The table of item, part and deck command names and texts.
 pub const ITEM_TABLE: &str = "item";
+/// Table of the Zoids' and characters' names, which the status screens
+/// print.
+pub const NAME_TABLE: &str = "name";
 /// Key prefix of the name entry's character pages: `name-entry/alphabet/N`.
 pub const ALPHABET_PREFIX: &str = "name-entry/alphabet/";
 /// Key of the name entry's help line.

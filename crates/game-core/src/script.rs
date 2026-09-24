@@ -40,6 +40,14 @@ const KEY_A: u16 = 1;
 const KEY_B: u16 = 2;
 const KEY_UP: u16 = 0x40;
 const KEY_DOWN: u16 = 0x80;
+const KEY_R: u16 = 0x100;
+const KEY_L: u16 = 0x200;
+/// What a move-reporting menu (`0x36`) leaves in var0 for a cursor moved
+/// up or down, and for L or R in the modes that take them.
+const MOVED_UP: u16 = 0x20;
+const MOVED_DOWN: u16 = 0x40;
+const PAGE_LEFT: u16 = 2;
+const PAGE_RIGHT: u16 = 4;
 
 /// What the interpreter asks of the game: windows, text, sounds and flags.
 pub trait ScriptHost {
@@ -132,6 +140,7 @@ enum Wait {
     Menu {
         cancelable: bool,
         cursor: usize,
+        reports: Option<u8>,
     },
     Page {
         ch: char,
@@ -313,7 +322,9 @@ impl ScriptRunner {
         let keys = u16::from(pressed(Button::A)) * KEY_A
             + u16::from(pressed(Button::B)) * KEY_B
             + u16::from(pressed(Button::Up)) * KEY_UP
-            + u16::from(pressed(Button::Down)) * KEY_DOWN;
+            + u16::from(pressed(Button::Down)) * KEY_DOWN
+            + u16::from(pressed(Button::R)) * KEY_R
+            + u16::from(pressed(Button::L)) * KEY_L;
         self.previous = input;
         if let Some(index) = self.announce.take() {
             self.started = Some(index);
@@ -340,8 +351,12 @@ impl ScriptRunner {
                     return Ok(false);
                 }
             }
-            Wait::Menu { cancelable, cursor } => {
-                if !self.poll_menu(cancelable, cursor, keys, host) {
+            Wait::Menu {
+                cancelable,
+                cursor,
+                reports,
+            } => {
+                if !self.poll_menu(cancelable, cursor, reports, keys, host) {
                     return Ok(false);
                 }
             }
@@ -367,13 +382,17 @@ impl ScriptRunner {
 
     /// Starts a menu on the current window, which the original shows even
     /// when the script did not present it (the guides' popups).
-    fn begin_menu(&mut self, cancelable: bool, host: &mut impl ScriptHost) {
+    fn begin_menu(&mut self, cancelable: bool, reports: Option<u8>, host: &mut impl ScriptHost) {
         host.reveal(self.window);
         let cursor = host
             .menu_line(self.window)
             .min(host.menu_lines(self.window).saturating_sub(1));
         host.set_cursor(self.window, Some(cursor));
-        self.wait = Wait::Menu { cancelable, cursor };
+        self.wait = Wait::Menu {
+            cancelable,
+            cursor,
+            reports,
+        };
     }
 
     /// Makes window `id` the current one, as the game's code does before
@@ -389,7 +408,7 @@ impl ScriptRunner {
         self.frames.clear();
         self.pending.clear();
         self.window = id;
-        self.begin_menu(cancelable, host);
+        self.begin_menu(cancelable, None, host);
     }
 
     fn poll_key(
@@ -442,24 +461,42 @@ impl ScriptRunner {
         &mut self,
         cancelable: bool,
         cursor: usize,
+        reports: Option<u8>,
         keys: u16,
         host: &mut impl ScriptHost,
     ) -> bool {
         let lines = host.menu_lines(self.window).max(1);
         let moved = if keys & KEY_UP != 0 && cursor > 0 {
-            Some(cursor - 1)
+            Some((cursor - 1, MOVED_UP))
         } else if keys & KEY_DOWN != 0 && cursor + 1 < lines {
-            Some(cursor + 1)
+            Some((cursor + 1, MOVED_DOWN))
         } else {
             None
         };
-        if let Some(cursor) = moved {
+        if let Some((cursor, code)) = moved {
             host.play_sound(MENU_MOVE_SOUND);
             host.set_cursor(self.window, Some(cursor));
-            self.wait = Wait::Menu { cancelable, cursor };
-            return false;
+            if reports.is_none() {
+                self.wait = Wait::Menu {
+                    cancelable,
+                    cursor,
+                    reports,
+                };
+                return false;
+            }
+            self.vars[0] = code;
+            self.vars[1] = u16::try_from(cursor).unwrap_or(u16::MAX);
+            self.wait = Wait::Frames(KEY_ACCEPT_FRAMES);
+            return true;
         }
-        if keys & KEY_A != 0 {
+        let page = match reports {
+            Some(2 | 3) if keys & KEY_L != 0 => Some(PAGE_LEFT),
+            Some(2 | 4) if keys & KEY_R != 0 => Some(PAGE_RIGHT),
+            _ => None,
+        };
+        if let Some(code) = page {
+            self.vars[0] = code;
+        } else if keys & KEY_A != 0 {
             self.vars[0] = 1;
             host.play_sound(MENU_CONFIRM_SOUND);
         } else if cancelable && keys & KEY_B != 0 {
@@ -607,7 +644,10 @@ impl ScriptRunner {
             }
             Instruction::Sound(id) => host.play_sound(id),
             Instruction::Delay(frames) if frames > 0 => self.wait = Wait::Frames(u32::from(frames)),
-            Instruction::Menu { mode } => self.begin_menu(mode & 0xF0 == 0x10, host),
+            Instruction::Menu { mode } => self.begin_menu(mode & 0xF0 == 0x10, None, host),
+            Instruction::MoveMenu { mode, cancelable } => {
+                self.begin_menu(cancelable, Some(mode), host);
+            }
             _ => {}
         }
     }
@@ -1081,6 +1121,38 @@ mod tests {
         assert_eq!(runner.vars()[0], 0);
         assert_eq!(runner.saved_vars()[..2], [2, 6]);
         assert_eq!(runner.start(5), Err(ScriptError::NoSuchString { index: 5 }));
+    }
+
+    #[test]
+    fn a_move_reporting_menu_ends_on_each_move_and_page() {
+        let script = vec![0x01, 0, 0x21, 10, 10, 9, 8, 4, 0x36, 0x12, 0x22];
+        let (bytes, offsets) = rom(&[script]);
+        let mut runner = ScriptRunner::new(offsets);
+        let mut host = Recorder::default();
+        runner.start(0).unwrap();
+        assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
+        assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
+        let down = Input::default().with(Button::Down);
+        assert!(!runner.update(&bytes, down, &mut host).unwrap());
+        assert_eq!(runner.vars()[..2], [MOVED_DOWN, 1]);
+        assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
+        assert_eq!(
+            host.log[host.log.len() - 2..],
+            ["sound 0x40", "cursor 0 Some(1)"]
+        );
+        for (button, code) in [
+            (Button::L, PAGE_LEFT),
+            (Button::R, PAGE_RIGHT),
+            (Button::B, 0),
+        ] {
+            runner.start(0).unwrap();
+            runner.update(&bytes, Input::default(), &mut host).unwrap();
+            runner.update(&bytes, Input::default(), &mut host).unwrap();
+            runner
+                .update(&bytes, Input::default().with(button), &mut host)
+                .unwrap();
+            assert_eq!(runner.vars()[0], code);
+        }
     }
 
     #[test]

@@ -19,8 +19,9 @@ use formats::SaveLayout;
 use formats::font::{Glyph, GlyphIndex};
 
 use crate::extension::GameSound;
+use crate::menu::{Member, Roster, UNIT_SLOTS};
 use crate::translation::{
-    DIALOGUE_TABLE, ITEM_TABLE, NAME_ENTRY_TABLE, PAUSE_MENU_TABLE, TITLE_TABLE,
+    DIALOGUE_TABLE, ITEM_TABLE, NAME_ENTRY_TABLE, NAME_TABLE, PAUSE_MENU_TABLE, TITLE_TABLE,
 };
 
 /// The game's data, keyed by identifier.
@@ -207,6 +208,42 @@ impl<'rom> GameData<'rom> {
         saga_save::meet_characters(self.rom, state, list)
     }
 
+    /// The picture the status screens show of Zoid `zoid`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SpriteSheetError`] when it cannot be read.
+    pub fn zoid_status_sprite(&self, zoid: usize) -> Result<SpriteSheet, SpriteSheetError> {
+        saga::zoid_status_sprite(self.rom, zoid)
+    }
+
+    /// The party's members and formation as `state` holds them.
+    #[must_use]
+    pub fn roster(&self, state: &[u8]) -> Roster {
+        let unit = |character| {
+            saga_party::character_unit(state, character)
+                .and_then(|unit| saga_party::unit_status(state, unit))
+        };
+        let members: Vec<Member> = saga_party::members(state)
+            .into_iter()
+            .map(|character| Member {
+                character,
+                bonuses: saga_party::pilot_bonuses(self.rom, state, character).unwrap_or_default(),
+                unit: unit(character),
+            })
+            .collect();
+        let mut formation = [None; UNIT_SLOTS];
+        for (slot, entry) in formation.iter_mut().zip(saga_party::formation(state)) {
+            *slot = entry.and_then(|(unit, character)| {
+                saga_party::unit_status(state, unit).map(|status| (character, status))
+            });
+        }
+        if members.is_empty() {
+            return Roster::default();
+        }
+        Roster { members, formation }
+    }
+
     /// Forms the party in `state` around the Zoid picked in the hangar;
     /// `None` when a table cannot be read or no unit slot is free.
     pub fn form_party(&self, state: &mut [u8], choice: usize) -> Option<()> {
@@ -298,7 +335,7 @@ impl<'rom> GameData<'rom> {
             name if name == saga::BATTLE_TEXT_SCRIPTS.name => {
                 saga::BATTLE_TEXT_SCRIPTS.offsets(self.rom)?
             }
-            DIALOGUE_TABLE | ITEM_TABLE => match saga::string_table(table) {
+            DIALOGUE_TABLE | ITEM_TABLE | NAME_TABLE => match saga::string_table(table) {
                 Some(table) => table.offsets(self.rom)?,
                 None => return Ok(None),
             },

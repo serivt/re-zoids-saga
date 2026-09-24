@@ -133,7 +133,9 @@ After the choice in the hangar, the event runs three routines:
    `0x5C` for choice 2, `0x39` otherwise. It puts that unit in formation slot 1.
 2. `0x080374B8` goes through the first starting list, at the first pointer of ROM
    `0x0867E380`. The list gives characters 1–3 a unit each.
-3. `0x08037684` puts characters 1, 2 and 3 in formation slots 4, 0 and 2.
+3. `0x08037684` puts characters 1, 2 and 3 in formation slots 4, 0 and 2, then
+   `0x080368BC` sets the three warriors' pilot bonuses to the party level times their
+   growth (ROM `0x66BB38`, five half-words each), after their units' statistics.
 
 A unit's statistics (`0x08036CB0`) start from its Zoid's record. Each step adds:
 
@@ -148,7 +150,8 @@ The first statistic is capped at 9999, the second at 999, and the two half-words
 layout of units and formation slots is in [formats/save.md](formats/save.md).
 
 The port's party matched the original's game-state block byte for byte after the
-Shield Liger choice: 116 bytes of units, count, character table and formation.
+Shield Liger choice: 131 bytes of member records, units, count, character table and
+formation.
 
 ## Checked against the original
 

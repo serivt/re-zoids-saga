@@ -4,8 +4,9 @@
 //! choice routine at `0x08037644`, the unit allocator at `0x08036A30` and
 //! its initializer at `0x08036B2C`, the pilot assignment at `0x08036BE0`
 //! with the unit statistics at `0x08036CB0` and the percentage routine at
-//! `0x080346C0`, the starting units at `0x080374B8` / `0x080372D0` and the
-//! formation slots at `0x08037AB4`.
+//! `0x080346C0`, the starting units at `0x080374B8` / `0x080372D0`, the
+//! formation slots at `0x08037AB4`, the warriors' growth at `0x080368BC`
+//! and the member list the status screens build at `0x0804E34C`.
 //!
 //! Units are 0x38-byte records at `+0xD2C` of the game state, 0x99
 //! ordinary slots and 0x14 special ones after them, counted at `+0x3304`:
@@ -68,6 +69,15 @@ const FORMATION: usize = 0x3600;
 const MEMBER_RECORDS: usize = 0xCD8;
 const MEMBER_RECORD_LEN: usize = 16;
 const MEMBERS: usize = 4;
+const WARRIORS: usize = 3;
+const PILOT_VALUES: usize = 5;
+const PARTY_LEVEL: usize = 0xCD2;
+const GROWTH: usize = 0x0066_BB38;
+const GROWTH_LEN: usize = 10;
+const CHARACTER_COUNT: usize = 87;
+const PARTY_MEMBER: u16 = 2;
+/// Slots of the formation.
+pub const FORMATION_SLOTS: usize = 6;
 const PILOT_TABLE: usize = 0x0067_B35C;
 const PILOT_CHAPTERS: usize = 10;
 const AREA: usize = 2;
@@ -104,7 +114,105 @@ pub fn form_party(rom: &[u8], state: &mut [u8], choice: usize) -> Option<()> {
     for (character, slot) in WARRIOR_SLOTS {
         place(state, character, slot);
     }
+    grow_members(rom, state)
+}
+
+/// Sets the bonuses of the three warriors' member records to the party
+/// level times each one's growth from ROM `0x66BB38` (`0x080368BC`); the
+/// hangar does it after the units' statistics are computed.
+fn grow_members(rom: &[u8], state: &mut [u8]) -> Option<()> {
+    let level = u16::from(state[PARTY_LEVEL]);
+    for member in 0..WARRIORS {
+        let growth = rom.get(GROWTH + member * GROWTH_LEN..GROWTH + (member + 1) * GROWTH_LEN)?;
+        let record = MEMBER_RECORDS + (member + 1) * MEMBER_RECORD_LEN;
+        for value in 0..PILOT_VALUES {
+            let bonus = half(growth, value * 2).wrapping_mul(level);
+            set_half(state, record + 4 + value * 2, bonus);
+        }
+    }
     Some(())
+}
+
+/// The characters in the party, in the order the game lists them: every
+/// character whose flags have bit 2 (`0x0804E34C`).
+#[must_use]
+pub fn members(state: &[u8]) -> Vec<u8> {
+    (0..CHARACTER_COUNT)
+        .filter(|&character| {
+            state
+                .get(CHARACTERS + character * CHARACTER_LEN..)
+                .is_some_and(|entry| entry.len() >= 2 && half(entry, 0) & PARTY_MEMBER != 0)
+        })
+        .filter_map(|character| u8::try_from(character).ok())
+        .collect()
+}
+
+/// The unit `character` pilots, if any.
+#[must_use]
+pub fn character_unit(state: &[u8], character: u8) -> Option<u8> {
+    let unit = *state.get(CHARACTERS + usize::from(character) * CHARACTER_LEN + CHARACTER_UNIT)?;
+    (unit != NO_UNIT).then_some(unit)
+}
+
+/// The formation slots: the unit and its pilot, or `None` for an empty
+/// slot.
+#[must_use]
+pub fn formation(state: &[u8]) -> [Option<(u8, u8)>; FORMATION_SLOTS] {
+    std::array::from_fn(|slot| {
+        let at = FORMATION + slot * 4;
+        let (unit, character) = (*state.get(at)?, *state.get(at + 1)?);
+        (unit != NO_UNIT).then_some((unit, character))
+    })
+}
+
+/// What the status screens show of a unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnitStatus {
+    /// The Zoid record's first half-word; bit `0x800` hides the hit points.
+    pub flags: u16,
+    /// The Zoid.
+    pub zoid: u16,
+    /// Hit points, current and full.
+    pub hp: (u32, u32),
+    /// Energy points, current and full.
+    pub ep: (u32, u32),
+    /// The two half-word statistics (SP and DF).
+    pub sp: i16,
+    /// See [`UnitStatus::sp`].
+    pub df: i16,
+    /// Training level.
+    pub training: u8,
+    /// Size class the Zoid record gives: 0 S, 1 M, 2 L.
+    pub size: u8,
+}
+
+/// Unit `unit`'s record, when it is in use.
+#[must_use]
+pub fn unit_status(state: &[u8], unit: u8) -> Option<UnitStatus> {
+    let at = unit_at(unit);
+    let record = state.get(at..at + UNIT_LEN)?;
+    if half(record, 2) & IN_USE == 0 {
+        return None;
+    }
+    let signed = |at: usize| i16::from_ne_bytes(half(record, at).to_ne_bytes());
+    Some(UnitStatus {
+        flags: half(record, 0),
+        zoid: half(record, 6),
+        hp: (word(record, 8), word(record, UNIT_STATS)),
+        ep: (word(record, 12), word(record, UNIT_STATS + 4)),
+        sp: signed(UNIT_STATS + 8),
+        df: signed(UNIT_STATS + 10),
+        training: record[UNIT_TRAINING],
+        size: record[UNIT_VARIANT],
+    })
+}
+
+/// A pilot's bonuses in percent in the character screen's order: 耐久,
+/// 攻撃, 防御, 反応, 命中 (record fields 4, 10, 8, 6, 12).
+#[must_use]
+pub fn pilot_bonuses(rom: &[u8], state: &[u8], character: u8) -> Option<[i32; PILOT_VALUES]> {
+    let [durability, reaction, defense, attack, accuracy] = pilot(rom, state, character)?;
+    Some([durability, attack, defense, reaction, accuracy])
 }
 
 fn half(bytes: &[u8], at: usize) -> u16 {
@@ -273,10 +381,11 @@ fn percent(value: i32, percent: i32) -> i32 {
     }
 }
 
-/// The pilot's bonuses in percent to the first statistic and the two
-/// half-words: the member records for the first four characters, the
+/// The pilot's bonuses in percent, in the record's order: to the first
+/// statistic, the two half-words, then two the statistics routine does not
+/// use: the member records for the first four characters, the
 /// table at ROM `0x67B35C` by chapter for the others (`0x080334F8`).
-fn pilot(rom: &[u8], state: &[u8], character: u8) -> Option<[i32; 3]> {
+fn pilot(rom: &[u8], state: &[u8], character: u8) -> Option<[i32; PILOT_VALUES]> {
     let character = usize::from(character);
     let record = if character < MEMBERS {
         let at = MEMBER_RECORDS + character * MEMBER_RECORD_LEN;
@@ -290,7 +399,7 @@ fn pilot(rom: &[u8], state: &[u8], character: u8) -> Option<[i32; 3]> {
         rom.get(start..start + MEMBER_RECORD_LEN)?.to_vec()
     };
     let signed = |at: usize| i32::from(i16::from_ne_bytes(half(&record, at).to_ne_bytes()));
-    Some([signed(4), signed(6), signed(8)])
+    Some([signed(4), signed(6), signed(8), signed(10), signed(12)])
 }
 
 /// Puts `character`'s unit in formation slot `slot` (`0x08037AB4`).
@@ -390,11 +499,15 @@ mod tests {
         rom[STARTING_LISTS..STARTING_LISTS + 4].copy_from_slice(&(ROM_BASE + list).to_le_bytes());
         let list = list as usize;
         rom[list..list + 8].copy_from_slice(&[2, 0, 1, 0x46, 0, 0, 0xFF, 0xFF]);
+        rom[GROWTH..GROWTH + GROWTH_LEN].copy_from_slice(&[2, 0, 5, 0, 1, 0, 3, 0, 4, 0]);
         rom
     }
 
     fn state() -> Vec<u8> {
         let mut state = vec![0; STATE_LEN];
+        for slot in 0..FORMATION_SLOTS {
+            state[FORMATION + slot * 4..FORMATION + slot * 4 + 2].fill(NO_UNIT);
+        }
         for character in 0..87 {
             state[CHARACTERS + character * CHARACTER_LEN + CHARACTER_UNIT] = NO_UNIT;
         }
@@ -419,6 +532,37 @@ mod tests {
         assert_eq!(state[CHARACTERS + CHARACTER_LEN + CHARACTER_UNIT], 1);
         assert_eq!(state[FORMATION + 16..FORMATION + 18], [1, 1]);
         assert_eq!(half(&state, CHARACTERS + CHARACTER_LEN) & 0x13, 0x13);
+    }
+
+    #[test]
+    fn the_status_screens_read_the_party_the_hangar_formed() {
+        let rom = rom();
+        let mut state = state();
+        state[PARTY_LEVEL] = 2;
+        mark_member(&mut state, 0);
+        form_party(&rom, &mut state, 0).expect("party");
+        assert_eq!(members(&state), [0, 1]);
+        assert_eq!(character_unit(&state, 1), Some(1));
+        assert_eq!(character_unit(&state, 5), None);
+        let slots = formation(&state);
+        assert_eq!(slots[1], Some((0, 0)));
+        assert_eq!(slots[4], Some((1, 1)));
+        assert_eq!(slots[0], None);
+        let unit = unit_status(&state, 0).expect("unit");
+        assert_eq!((unit.zoid, unit.hp, unit.ep), (0x39, (100, 100), (20, 20)));
+        assert_eq!(
+            (unit.sp, unit.df, unit.training, unit.size),
+            (250, 10, 0, 7)
+        );
+        assert_eq!(unit_status(&state, 9), None);
+        assert_eq!(pilot_bonuses(&rom, &state, 1), Some([4, 6, 2, 10, 8]));
+        assert_eq!(pilot_bonuses(&rom, &state, 0), Some([0; PILOT_VALUES]));
+    }
+
+    fn mark_member(state: &mut [u8], character: usize) {
+        let entry = CHARACTERS + character * CHARACTER_LEN;
+        let flags = half(state, entry) | PARTY_MEMBER;
+        set_half(state, entry, flags);
     }
 
     #[test]

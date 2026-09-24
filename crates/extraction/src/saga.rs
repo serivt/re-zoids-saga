@@ -1179,6 +1179,65 @@ fn read_frame(rom: &[u8], pointer: usize) -> Option<SpriteFrame> {
     })
 }
 
+/// The picture the status screens show of Zoid `zoid` (`0x0804D6E8`):
+/// its record at ROM `0x670210` (76 bytes each) carries a sprite of its
+/// own, the images at `+0x30` (64 tiles), the palette at `+0x34`, and the
+/// animation and frame tables at `+0x38` and `+0x3C`.
+///
+/// # Errors
+///
+/// Returns [`SpriteSheetError`] when the record or its data is outside the
+/// ROM.
+pub fn zoid_status_sprite(rom: &[u8], zoid: usize) -> Result<SpriteSheet, SpriteSheetError> {
+    let too_short = || SpriteSheetError::TooShort {
+        len: rom.len(),
+        id: zoid,
+    };
+    let offset = ZOID_RECORDS + zoid * ZOID_RECORD_LEN;
+    let record = rom
+        .get(offset..offset + ZOID_RECORD_LEN)
+        .ok_or_else(too_short)?;
+    let pointer = |at: usize| rom_offset(&record[at..at + 4]).ok_or_else(too_short);
+    let palette = rom
+        .get(pointer(ZOID_SPRITE_PALETTE)?..pointer(ZOID_SPRITE_PALETTE)? + PALETTE_LEN)
+        .and_then(parse_palette)
+        .ok_or_else(too_short)?;
+    let images = pointer(ZOID_SPRITE_IMAGES)?;
+    let tile_bytes = rom
+        .get(images..images + ZOID_SPRITE_TILES * TILE_LEN)
+        .ok_or_else(too_short)?;
+    let animations =
+        read_animations(rom, pointer(ZOID_SPRITE_ANIMATIONS)?).ok_or_else(too_short)?;
+    let frame_count = animations
+        .iter()
+        .flatten()
+        .map(|step| step.frame + 1)
+        .max()
+        .unwrap_or(0);
+    let frames = (0..frame_count)
+        .map(|index| {
+            read_frame(rom, pointer(ZOID_SPRITE_FRAMES)? + index * 4).ok_or_else(too_short)
+        })
+        .collect::<Result<_, _>>()?;
+    Ok(SpriteSheet {
+        tag: String::new(),
+        images: 1,
+        tiles_per_image: ZOID_SPRITE_TILES,
+        palette,
+        tiles: Tileset::from_4bpp(tile_bytes),
+        frames,
+        animations,
+    })
+}
+
+const ZOID_RECORDS: usize = 0x0067_0210;
+const ZOID_RECORD_LEN: usize = 0x4C;
+const ZOID_SPRITE_IMAGES: usize = 0x30;
+const ZOID_SPRITE_PALETTE: usize = 0x34;
+const ZOID_SPRITE_ANIMATIONS: usize = 0x38;
+const ZOID_SPRITE_FRAMES: usize = 0x3C;
+const ZOID_SPRITE_TILES: usize = 64;
+
 /// Reads the first sprite carrying `tag`.
 ///
 /// # Errors
@@ -1548,6 +1607,49 @@ mod tests {
         assert!(matches!(
             sprite_sheet(&rom, 3),
             Err(SpriteSheetError::TooShort { id: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn reads_the_picture_a_zoid_record_carries() {
+        let data = ZOID_RECORDS + 0x40 * ZOID_RECORD_LEN;
+        let (palette, tiles, frame, frames, animations, steps) = (
+            data,
+            data + 32,
+            data + 2100,
+            data + 2130,
+            data + 2140,
+            data + 2150,
+        );
+        let mut rom = vec![0; data + 2200];
+        let record = ZOID_RECORDS + 3 * ZOID_RECORD_LEN;
+        put(&mut rom, record + ZOID_SPRITE_IMAGES, &pointer(tiles));
+        put(&mut rom, record + ZOID_SPRITE_PALETTE, &pointer(palette));
+        put(
+            &mut rom,
+            record + ZOID_SPRITE_ANIMATIONS,
+            &pointer(animations),
+        );
+        put(&mut rom, record + ZOID_SPRITE_FRAMES, &pointer(frames));
+        rom[palette + 2] = 0x1F;
+        rom[tiles + 63 * TILE_LEN] = 0x03;
+        put(&mut rom, frames, &pointer(frame));
+        for (i, half) in [0u16, 0, 0xFFE0, 0xFFC0, 64, 64].iter().enumerate() {
+            put(&mut rom, frame + 2 * i, &half.to_le_bytes());
+        }
+        put(&mut rom, animations, &pointer(steps));
+        for (i, half) in [0u16, 1, 0xFFFF, 0].iter().enumerate() {
+            put(&mut rom, steps + 2 * i, &half.to_le_bytes());
+        }
+        let sheet = zoid_status_sprite(&rom, 3).unwrap();
+        assert_eq!(sheet.palette[1], 0x1F);
+        assert_eq!((sheet.frames[0].x, sheet.frames[0].y), (-32, -64));
+        let image = sheet.frame_image(0).unwrap();
+        assert_eq!((image.width, image.height), (64, 64));
+        assert_eq!(image.indices[56 * 64 + 56], 3);
+        assert!(matches!(
+            zoid_status_sprite(&rom, 4),
+            Err(SpriteSheetError::TooShort { id: 4, .. })
         ));
     }
 

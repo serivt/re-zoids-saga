@@ -75,6 +75,16 @@ pub enum Instruction {
         /// Mode byte as stored.
         mode: u8,
     },
+    /// `0x36`: the menu the game's own screens drive: like `0x06`, but a
+    /// cursor move also ends it, with var0 = `0x20` (up) or `0x40` (down)
+    /// and the new line in var1, so the caller can redraw; `mode` 2 also
+    /// ends it on L (var0 = 2) or R (var0 = 4), 3 on L only and 4 on R only.
+    MoveMenu {
+        /// Key set.
+        mode: u8,
+        /// Whether B also ends it, with var0 = 0.
+        cancelable: bool,
+    },
     /// `0x07`: jump by the entry the variable selects, relative to the opcode.
     /// The table has no length: it ends where its nearest target begins or
     /// at the first value that does not point past it, which is code (the
@@ -305,7 +315,7 @@ pub fn decode_instruction(bytes: &[u8], at: usize) -> Result<(Instruction, usize
     let instruction = match code {
         0x22 => Instruction::End,
         0x00 => Instruction::Nop,
-        0x01..=0x06 | 0x0D..=0x0F | 0x37 | 0x3A | 0x3B | 0x3D => {
+        0x01..=0x06 | 0x0D..=0x0F | 0x36 | 0x37 | 0x3A | 0x3B | 0x3D => {
             window_instruction(code, &mut cursor)?
         }
         0x07 | 0x08 | 0x10..=0x14 => control_flow(code, &mut cursor, at)?,
@@ -356,6 +366,13 @@ fn window_instruction(code: u8, cursor: &mut Cursor<'_>) -> Result<Instruction, 
         0x06 => Instruction::Menu {
             mode: cursor.byte()?,
         },
+        0x36 => {
+            let arg = cursor.byte()?;
+            Instruction::MoveMenu {
+                mode: arg & 0x0F,
+                cancelable: arg & 0xF0 == 0x10,
+            }
+        }
         0x0D => Instruction::Draw { id: cursor.byte()? },
         0x0E => Instruction::ClearWindow { id: cursor.byte()? },
         0x0F => {
@@ -775,11 +792,11 @@ mod tests {
             )
         );
         assert_eq!(
-            decode(&[0x36, 9]),
+            decode(&[0x36, 0x12]),
             (
-                Instruction::Unknown {
-                    code: 0x36,
-                    args: vec![9]
+                Instruction::MoveMenu {
+                    mode: 2,
+                    cancelable: true
                 },
                 2
             )

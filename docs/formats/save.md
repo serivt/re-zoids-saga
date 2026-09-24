@@ -53,14 +53,14 @@ The fields this port reads and writes; everything else is kept as the save had i
 | `+0x50` | 16 each | Object states of the current area, ended by `0xFFFF` (not modeled) |
 | `+0xCD2` | 1 | Party level (99 at most) |
 | `+0xCD4` | 4 | Party experience |
-| `+0xCD8` | 4 × 16 | Member records, copied from ROM `0x67AC4C` by a new game |
+| `+0xCD8` | 4 × 16 | Member records, copied from ROM `0x67AC4C` by a new game: the pilot bonuses in percent at `+4`, `+6`, `+8`, `+10`, `+12` (耐久, 反応, 防御, 攻撃, 命中); the hangar sets the three warriors' to the party level times their growth at ROM `0x66BB38` (`0x080368BC`) |
 | `+0xD18` | 8 × 2 | The player's name: one Shift-JIS code per character, zero after the last |
 | `+0xD28` | 4 | Money, capped at 9,999,999 |
 | `+0xD2C` | 173 × 56 | Units: 153 ordinary, then 20 special (see below) |
 | `+0x3304` | 1 | Ordinary units in use |
 | `+0x33E2` | 1 each | Zoids seen, by picture id: the Zoid guide shows an entry whose byte is not zero |
 | `+0x347B` | 1 each | Deck commands learned, by command number |
-| `+0x34A4` | 87 × 4 | Character table: a flag half-word (bit `0x01`: in the party, `0x10`: in the formation, `0x20`: in the character guide), then the character's unit, `0xFF` when none |
+| `+0x34A4` | 87 × 4 | Character table: a flag half-word (bit `0x01`: set whenever the game adds the character, `0x02`: a party member the status screens list, `0x10`: in the formation, `0x20`: in the character guide), then the character's unit, `0xFF` when none |
 | `+0x3600` | 6 × 4 | Formation slots: the unit, then its character, `0xFF` when empty |
 | `+0x3618` | 1 | Battle message speed − 1 |
 | `+0x3F0E` | 2 | Song playing when the pause menu opened |
@@ -91,7 +91,7 @@ fills them.
 | `+0x10` | 6 × 4 | Parts, the part id in the upper half-word (`0xFFFF` none) |
 | `+0x28` | 12 | Statistics: two words and two half-words |
 | `+0x34` | 1 | Training level (100 for special units) |
-| `+0x35` | 1 | The Zoid record's byte 4 |
+| `+0x35` | 1 | The Zoid record's byte 4: its size class, 0 S, 1 M, 2 L |
 
 ## New game
 

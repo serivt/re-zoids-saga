@@ -88,7 +88,8 @@ with the variables it saved, which is how the chest and deck-command messages pr
 | `0x33` | 3 | Clear or set game flag `a0 | a1 << 8` |
 | `0x34` | 2 | var[`a0`] = game flag var[`a1`] |
 | `0x35` | 3 | var[`a0`] = game flag `a1 | a2 << 8` |
-| `0x36`, `0x38`, `0x3C` | 1, 2, 1 | Not modeled |
+| `0x36` | 1 | Menu that also ends on a cursor move: var0 = `0x20` (up) or `0x40` (down) and var1 = the new line, so the game's code can redraw; mode 2 also ends on L (var0 = 2) or R (var0 = 4), 3 on L, 4 on R; A sets var0 = 1, and `0x10` in the high nibble lets B end it with var0 = 0. Moves play sound `0x40`, A `0x47` (handler `0x0803F86C`) |
+| `0x38`, `0x3C` | 2, 1 | Not modeled |
 | `0x37` | 3 | Portrait of character var[`a1`], expression var[`a2`] in window `a0` |
 | `0x39` | 3 | var[`a0`] = `a1` |
 | `0x3A` | 1 | Play sound effect `0x3C + a0` |

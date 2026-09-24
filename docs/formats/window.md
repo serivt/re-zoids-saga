@@ -67,7 +67,8 @@ also shows its window when the script did not present it. Implemented in
 Shared string 30 opens window 0 at (0, 12) 8×8 tiles for the portrait and window 1 at
 (7, 12) 23×8 tiles for the text, so the text window's left border sits on the portrait
 window's right border; the game draws the junction tiles there, which is the divider at
-column 7. The speaker's name is drawn at pixel (64, 104), the text lines from (64, 120),
+column 7. Light-framed windows (kind `0x2x`, the status screens') that meet the same way
+keep their own borders, the later one drawn over the earlier. The speaker's name is drawn at pixel (64, 104), the text lines from (64, 120),
 21 cells per line and three lines before scrolling.
 
 ## Character talk layout

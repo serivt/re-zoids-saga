@@ -2,7 +2,8 @@
 
 Source of knowledge: screenshots and RAM dumps of Zoids Saga (Japan, Rev 1) in a
 reference emulator while every item of the START menu was visited from the first room
-(`research/build/mgba/menu/`), a watch on the interpreter's current-window pointer
+(`research/build/mgba/menu/`) and, with the party formed, from the eastern labyrinth,
+a read of the status screens' routines named below, a watch on the interpreter's current-window pointer
 (RAM `0x02009118`) while the menu opened, and a read of the pause-menu script table
 and of the menu, present and message opcode handlers. Saving is described in
 [formats/save.md](formats/save.md). Implemented in
@@ -24,6 +25,10 @@ after another, printing the numbers itself between them. The ones this port uses
 | 48, 49 | The status list, window 4 at (9, 0) 14×14: 部隊 / キャラクター / 武器 / Ｚｉデータ / Ｚｉデータ用アイテム / 図鑑, then the question and its menu |
 | 68, 69 | The unit list: the help line, window 1 at (0, 0) 30×16 with the ゾイドＨＰ／ゾイドＥＰ header, then 配置なし per empty slot (six slots) |
 | 70–78 | The character screen: window 1 at (0, 0) 18×14, the portrait window 2 at (1, 4) 8×8 and the member list window 3 at (17, 0) 13×14; the labels 耐久／攻撃／防御／反応／命中, the help for a boarded Zoid (76, 77) or for leaving (78) |
+| 35 | The member list's menu: opcode `0x36` with `0x12` (see [formats/script-text.md](formats/script-text.md)), then store the variables |
+| 335 + n | Character `n`'s portrait in window 2 |
+| 80–90 | The Zoid status screen: the help line and window 1 at (0, 0) 30×14 (80), the labels ＨＰ／ＥＰ／ＳＰ／ＤＦ／訓練度 (81–85), ／ (86), 戦闘不能 (87) and the sizes ［Ｓサイズ］／［Ｍサイズ］／［Ｌサイズ］ (88–90) |
+| 0–7, 24–32 | Clear window `n`; present every window (24); draw window `n − 25` |
 | 56, 57, 58, 60 | The notices for no items, weapons, Zi data or Zi-data items: clear the help line, print, present it, wait for a key, clear |
 | 128, 129, 133, 134 | The weapons screen: window 1 at (0, 0) 18×14 with 搭乗ゾイドなし and window 3 at (17, 0) 13×14 with the party's names as a menu; 133 asks whose Zoid to change, 134 answers that the character is not aboard |
 | 151, 152, 153, 154–158 | The message-speed setting: window 4 at (9, 0) 15×4 with 戦闘メッセージ速度 and the value, the help text, window 5 at (23, 0) 7×14 with １–５ and ボタン, the menu, then the value strings |
@@ -40,21 +45,43 @@ right-aligns the amount before Ｇ. The experience to the next level comes from 
 ## Party data
 
 The game keeps its state in a block at RAM `0x02000B5C`, the one its save holds (see
-[formats/save.md](formats/save.md)); the panel prints the party's level (`+0xCD2`),
-experience (`+0xCD4`) and money (`+0xD28`), the player's name is at `+0xD18`, and the
-character screen reads fields up to `+0xD61`. The port keeps the same
-facts in `Party`: members (name, portrait, level, experience, five stat bonuses in
-percent, the Zoid piloted) and six unit slots. A new game has the player alone at
-level 1 with every bonus at 0 and no Zoid, and empty slots. What the original's block
-holds beyond that, and how characters and Zoids are defined in the ROM, is not read
-yet.
+[formats/save.md](formats/save.md)). The panel prints the party's level (`+0xCD2`),
+experience (`+0xCD4`) and money (`+0xD28`), and the player's name is at `+0xD18`; the port
+keeps these in `Party`. The status screens read the rest from the block when the menu
+opens (`Roster`, built by `crates/extraction/src/saga_party.rs`):
 
-The character screen writes the name on the first line, then each stat as its label
-(eight spaces and the name, from script 71–75), the sign at cell 11, the value
-right-aligned to cell 14 and ％ at cell 15, placing values by cell the way the game's
-code does rather than through the text wrapping. The unit screen's rows keep a line
-break pending until the next character, so the last row's break does not scroll the
-header away; the port's windows do the same for every trailing break.
+- the members are the characters whose flag word has bit `0x02`, in character order
+  (`0x0804E34C`);
+- each member's bonuses are fields 4, 10, 8, 6 and 12 of its pilot record, shown as
+  耐久, 攻撃, 防御, 反応 and 命中 (`0x080334F8`);
+- the unit list follows the six formation slots at `+0x3600`, each the unit and its
+  pilot.
+
+Names come from the `name` table: character `n` other than the player is entry
+`154 + n` (`0x08032818`), Zoid `z` is entry `1 + z` (`0x08032800`). The port runs them
+as scripts of that table, so a translation covers them.
+
+## Status screens
+
+The unit list (`0x0804EC2C`) prints, per formation slot, the pilot's name, then from
+cell 11 the unit's current hit points in four cells (or 戦闘不能 when the Zoid record's
+first half-word has bit `0x800`), ／, the full value in four cells, a space, and the
+energy points the same way in three cells.
+
+The character screen (`0x0804ED5C`) shows the member under the cursor: name, the five
+bonuses (sign at cell 11, the value right-aligned to cell 14, ％), portrait, and in the
+help line the Zoid it pilots (76, the Zoid's name, 77) or 78 when it has none. The
+member list shows six names a page. Its menu, script 35, ends on every cursor move with
+the new line, and the game redraws the left side for that member; L and R turn the page
+(sound `0x40`), A on a member with a Zoid opens the Zoid status screen, B leaves (sound
+`0x3F`). Before either screen the game closes windows 4 to 1 and clears the help line
+(`0x0804EBDC`).
+
+The Zoid status screen (`0x08052724`) prints the Zoid's name and size class (the unit's
+byte `+0x35`: script 88 + size), then hit and energy points (four cells each), SP (four
+cells), DF (three cells and ％) and training (three cells), and draws the Zoid's picture
+anchored at (40, 88) (see [formats/sprite.md](formats/sprite.md)). A key wait follows:
+B returns to the character screen.
 
 ## Windows and menus
 
@@ -94,8 +121,8 @@ The backdrop color is `0x7240`.
 
 START on the field opens the menu; B on the main list closes it. ステータス opens the
 status list; its 武器, Ｚｉデータ and Ｚｉデータ用アイテム items print their notices and
-図鑑 asks ゾイド or キャラ; 部隊 shows the unit list and キャラクター the character screen,
-which A or B leaves. 武装 shows the weapons screen; choosing the character prints
+図鑑 asks ゾイド or キャラ; 部隊 shows the unit list, which A or B leaves, and キャラクター
+the character screen described above. 武装 shows the weapons screen; choosing the character prints
 that no Zoid is boarded. コンフィグ shows the message speed (3 on a new game) with the
 cursor on it; picking a number stores it in the party and returns to the main list
 with the cursor on コンフィグ, as the original does. セーブ asks; はい writes the save
@@ -104,7 +131,7 @@ and answers セーブしました, or セーブを中止しました when it cou
 
 ## Not modeled yet
 
-The Zoid status screen behind a boarded Zoid, the encyclopedia itself, 部隊編成 (a separate
-screen with its own wallpaper) and the ボタン page of the config end in the
-まだできてません notice. The button and cursor sounds are requested but not played
+The weapon pages A opens on the Zoid status screen, the weapons screen with the party's
+Zoids, the encyclopedia itself, 部隊編成 (a separate screen with its own wallpaper) and
+the ボタン page of the config end in the まだできてません notice. The button and cursor sounds are requested but not played
 until the sound engine exists.
