@@ -827,6 +827,46 @@ const TUNNEL_EXIT: &[Op] = &[Op::IfFlags {
     otherwise: &[],
 }];
 
+/// Set the first time the Gustav comes out onto the world map.
+pub const WORLD_REACHED: u16 = 0x11E;
+/// Frames between the end of a map's fade in and the port's first run of
+/// the tasks its handler spawned.
+const ARRIVAL_TASK_LAG: u32 = 2;
+/// The door of アーカナの町 on the world map.
+const ARCANA_GATE: (usize, usize) = (14, 7);
+
+/// Out of the labyrinth (task at `0x080103B4`): Regina proposes the
+/// nearby town of Arcana and the Gustav drives off toward it. The last walk
+/// ends against the town's door, which the Gustav takes; the task ends a
+/// second after starting it, while the Gustav still drives. The original
+/// counts the task's first second from the frame the fade in ends, two
+/// frames before the port lets the tasks run.
+const TO_ARCANA: &[Op] = &[
+    Op::Wait(60 - ARRIVAL_TASK_LAG),
+    Op::Dialogue(0x44),
+    stride(PLAYER, (11, 6)),
+    Op::AwaitArrival(PLAYER),
+    stride(PLAYER, (11, 7)),
+    Op::AwaitArrival(PLAYER),
+    stride(PLAYER, ARCANA_GATE),
+    Op::Wait(60),
+    Op::End,
+];
+
+/// The world map's handler (`0x08010358`): the first time, the Gustav
+/// faces right, stands still and the drive to Arcana starts.
+const WORLD_MAP: &[Op] = &[Op::IfFlags {
+    all: &[],
+    none: &[WORLD_REACHED],
+    then: &[
+        Op::Flag(WORLD_REACHED, true),
+        Op::Face(PLAYER, Direction::Right),
+        Op::Spawn(MAP_TASK, TO_ARCANA),
+        Op::Control(false),
+    ],
+    otherwise: &[],
+}];
+
 /// Searching a chest (entity command 21 at `0x0800B938` and the reward
 /// routine at `0x080376A8`): it opens, half a second later it counts as
 /// opened, and money is announced in the message box.
@@ -852,6 +892,7 @@ pub const CHEST: &[Op] = &[
 #[must_use]
 pub fn map_handler(map: usize) -> Option<&'static [Op]> {
     match map {
+        1 => Some(WORLD_MAP),
         2 => Some(GROUND_FLOOR),
         4 => Some(FIRST_ROOM),
         10 => Some(LONG_TUNNEL),

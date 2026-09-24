@@ -15,6 +15,7 @@ screenshots every other frame compared with the port's. Implemented in
 |---|---|
 | Grid | The player stands on a 16×16 metatile; a direction press starts a step onto the next metatile, and a started step always completes even if the button is released (a 3-frame tap moves 16 pixels) |
 | Speed | 1 pixel per frame; a held direction chains steps without a pause |
+| Running | B held when a step starts (`0x0800B282`, the player's keys at entity `+0x56`) doubles the speed, halves the step's frames and shifts the walk animation's ticks by 2 instead of 1: 8 frames a step on foot, 16 for the Gustav's 32-pixel cells. Traced in the castle and in the labyrinth: the steps start on the original's frames |
 | Sprite | 32×32 from sprite `ch00` (id `0x98`, the player on the map), top-left at `(16 × column − 8, 16 × row)` for the standing metatile |
 | Footing | The metatile below the standing one holds the bottom-center 16×16 of the sprite; steps are blocked by the attribute of the footing's neighbour, so the sprite stopped at x = 24 against the two-metatile left wall and at y = 16 against the two-metatile top wall |
 | Camera | Follows so the sprite stays at screen (104, 64), clamped to the map (768×320 pixels for the first room) |
@@ -115,6 +116,11 @@ Traced on the door of map 30 (`mq0200`) at (14, 8), leading to map 34 at (12, 20
 - **The warp:** loads the map on frame 33.
 - **The fade in:** the new map brightens a level a frame from frame 65, 15 black frames
   later than a room's exit, since this load takes longer.
+
+A walk an event gives the player takes a door the same way: when a step ends and the
+next one runs into a door, the door is taken in that frame. The world map's drive to
+Arcana ends so (see [events.md](events.md)); traced there, the sound comes two frames
+after the Gustav reaches the cell before the door.
 
 ## Pause menu
 

@@ -49,6 +49,10 @@ pub const WANDER_SPEED: i32 = PIXEL / 2;
 const ANCHOR_FROM_ORIGIN: (isize, isize) = (16, 16);
 const CAMERA_ANCHOR: (isize, isize) = (120, 80);
 const PLAYER_ANIMATION_SHIFT: i8 = 1;
+/// A step with B held (`0x0800B282`): twice the speed, so half the frames,
+/// and the walk animation's ticks shifted once more.
+const RUN_SPEED_FACTOR: i32 = 2;
+const RUN_ANIMATION_SHIFT: i8 = 2;
 const CHARACTER_BEHAVIOR: u16 = 0;
 const TURNING_BEHAVIORS: u16 = 2;
 const PASSABLE_BEHAVIOR: u16 = 3;
@@ -700,6 +704,9 @@ impl Field {
                 let (column, row) = actor.footing();
                 return self.scene.exit(column, row).map(FieldEvent::Exit);
             }
+            if let (true, 0, Command::WalkTo(walk)) = (finished, index, actor.command) {
+                return self.walk_door(walk);
+            }
             return None;
         }
         let event = match actor.command {
@@ -709,10 +716,7 @@ impl Field {
                 self.wander(index);
                 None
             }
-            Command::WalkTo(walk) => {
-                self.walk(index, walk);
-                None
-            }
+            Command::WalkTo(walk) => self.walk(index, walk),
         };
         let actor = &mut self.actors[index];
         if actor.step.is_none() {
@@ -735,7 +739,17 @@ impl Field {
             player.face(direction);
         }
         if self.free(0, direction, false) {
-            self.actors[0].start_step(direction, PLAYER_SPEED);
+            let running = input.is_held(Button::B);
+            let speed = if running {
+                PLAYER_SPEED * RUN_SPEED_FACTOR
+            } else {
+                PLAYER_SPEED
+            };
+            let player = &mut self.actors[0];
+            player.start_step(direction, speed);
+            if running {
+                player.animation_shift = RUN_ANIMATION_SHIFT;
+            }
             return None;
         }
         let (dx, dy) = direction.delta();
@@ -762,20 +776,48 @@ impl Field {
         }
     }
 
-    fn walk(&mut self, index: usize, walk: Walk) {
+    /// The door the player's walk to a cell runs into at the end of a step,
+    /// which the original takes in that frame.
+    fn walk_door(&self, walk: Walk) -> Option<FieldEvent> {
+        let player = &self.actors[0];
+        let direction = toward((player.column, player.row), (walk.column, walk.row))?;
+        if walk.through || self.free(0, direction, false) {
+            return None;
+        }
+        let (dx, dy) = direction.delta();
+        let (column, row) = player.footing();
+        let column = column.checked_add_signed(dx)?;
+        let row = row.checked_add_signed(dy)?;
+        self.scene.door(column, row).map(FieldEvent::Door)
+    }
+
+    /// A step of a walk to a cell. The player walking against a door
+    /// takes it, as pushing against it does (`0x0800AE7C`): the world
+    /// map's drive to Arcana ends in the town this way.
+    fn walk(&mut self, index: usize, walk: Walk) -> Option<FieldEvent> {
         let actor = &self.actors[index];
         let Some(direction) = toward((actor.column, actor.row), (walk.column, walk.row)) else {
             self.actors[index].command = Command::Idle;
-            return;
+            return None;
         };
         let free = walk.through || self.free(index, direction, false);
         let actor = &mut self.actors[index];
         if free {
             actor.start_step(direction, walk.speed);
             actor.animation_shift = walk.animation_shift;
-        } else if actor.facing != direction {
+            return None;
+        }
+        if actor.facing != direction {
             actor.face(direction);
         }
+        if index != 0 {
+            return None;
+        }
+        let (dx, dy) = direction.delta();
+        let (column, row) = actor.footing();
+        let column = column.checked_add_signed(dx)?;
+        let row = row.checked_add_signed(dy)?;
+        self.scene.door(column, row).map(FieldEvent::Door)
     }
 
     /// Whether actor `index` may step toward `direction`: the footing ahead
@@ -1103,6 +1145,37 @@ mod tests {
         assert_eq!((field.player().column, field.player().row), (3, 1));
         assert!(!field.player().walking());
         assert_eq!(field.player().facing, Direction::Right);
+    }
+
+    #[test]
+    fn a_walk_against_a_door_takes_it_as_its_step_ends() {
+        let mut field = field(7, 5);
+        field.scene.attributes[2 * 7 + 5] = 0xC001;
+        field.player_mut().command = Command::WalkTo(Walk {
+            column: 5,
+            row: 1,
+            speed: PIXEL,
+            animation_shift: 1,
+            through: false,
+        });
+        let events: Vec<_> = (0..16).map(|_| field.update(Input::default())).collect();
+        assert_eq!(events[..15], [None; 15]);
+        assert_eq!(events[15], Some(FieldEvent::Door(1)));
+        assert_eq!((field.player().column, field.player().row), (4, 1));
+    }
+
+    #[test]
+    fn b_held_runs_a_step_in_half_the_frames() {
+        let mut field = field(6, 5);
+        let running = held(Direction::Right).with(Button::B);
+        field.update(running);
+        assert_eq!(field.player().position(), (42, 16));
+        assert_eq!(field.player().animation_shift, RUN_ANIMATION_SHIFT);
+        for _ in 0..7 {
+            field.update(Input::default());
+        }
+        assert_eq!(field.player().position(), (56, 16));
+        assert!(!field.player().walking());
     }
 
     #[test]

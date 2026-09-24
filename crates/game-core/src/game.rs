@@ -74,6 +74,12 @@ const MENU_RETURN_ANIMATION: u32 = 1;
 /// Frames the destination stays black once loaded, and frames the game
 /// stays held once it is bright again.
 const WARP_BLACK_FRAMES: u8 = 10;
+/// The world map, whose load takes the original longer than a room's.
+const WORLD_MAP: usize = 1;
+/// The frames the original's load of the world map takes beyond a room's,
+/// measured on the labyrinth's exit (the level falls from 31 seven frames
+/// later); its scene is the largest and it has seven objects.
+const WORLD_MAP_LOAD_FRAMES: u8 = 7;
 const WARP_SETTLE_FRAMES: u8 = 1;
 /// Once the name entry's script ends the entry stays this many frames,
 /// then darkens a level a frame (visibly for 16, on to 31), and the first
@@ -1004,6 +1010,11 @@ impl<'rom> Game<'rom> {
             },
         );
         self.play_map_music(arrived)?;
+        let black = if arrived == WORLD_MAP {
+            black + WORLD_MAP_LOAD_FRAMES
+        } else {
+            black
+        };
         self.events.fade_in_after(black, WARP_SETTLE_FRAMES);
         self.events.end(MAP_TASK);
         self.run_handler(story::map_handler(arrived))

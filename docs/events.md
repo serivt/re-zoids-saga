@@ -80,6 +80,7 @@ frames.
 | Entering a map | Held at 31 for a frame, then one level less each frame; the world runs in the frame the level reaches 0 |
 | Taking an exit, arrival at frame R | Level 1 at R+2 … level 31 and the load at R+32; black until R+42; level 30 at R+43 … 0 at R+73; the world runs at R+74 |
 | Cutscene load, event warp | 6 frames plus one per object |
+| Exit onto the world map (map 1) | Level 30 seven frames later than a room's: the load takes longer |
 | Input | The game acts on the buttons of the frame before |
 
 Script operations cost frames too (see [formats/script-text.md](formats/script-text.md)).
@@ -120,6 +121,7 @@ A map load shows chests whose flag is set already open.
 | Map 10, the long tunnel | Stepping on column 23 plays dialogue `0x43` | `0x126` |
 | Labyrinth chests | Chest 0: 4200 G (map `mq0158`, cell (18, 5)). Chest 1: 1400 G (`mq0159`, (4, 5)) | `0x1E`, `0x1F` |
 | Map 11, the exit | Reaching column 2 on row 2 or 3 walks the Gustav to (1, 3), plays dialogue `0x2C0` and sees the Trinity Liger (Zoid `0x8F`) | `0x127` |
+| Map 1, the world map | The first time (handler `0x08010358`) the Gustav faces right and stands still; its task (`0x080103B4`) waits 60 frames from the end of the fade in, plays dialogue `0x44` (Regina: to the nearby town of Arcana), walks the Gustav at a pixel a frame to (11, 6), then (11, 7), then toward (14, 7), and ends 60 frames after starting that walk. The Gustav runs into the town's door at (14, 7) and takes it into map 24 at (23, 29) | `0x11E` |
 
 The map record's byte `+8` names the map's song (11 for the castle, 22 for the
 labyrinth). On maps with 32-pixel cells (the Zoid maps) the player is the carrier `mz10`
@@ -168,6 +170,13 @@ formation.
 ## Not modeled yet
 
 - The battle engine itself (see [battle.md](battle.md)).
+- Arcana's arrival event (map 24): the town loads for a cutscene, the prince walks up
+  and the party meets; the port stands the prince at the gate instead.
+- The world map's handler also swaps the field's per-frame hooks (RAM `0x02000000`,
+  `0x02000004`) for empty ones during the drive and leaves the second one empty; what
+  those hooks run (random battles, most likely) is not modeled.
+- The port runs the tasks a map handler spawns two frames after its fade in ends,
+  where the original runs them in that frame; the drive to Arcana makes up for it.
 - The CPU-time variance of script operations.
 - The object-state overlay.
 - A one-frame drift of the backdrop.
