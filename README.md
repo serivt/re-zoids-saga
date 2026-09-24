@@ -28,7 +28,10 @@ original timing (see [docs/events.md](docs/events.md)). The town's item and arma
 shops buy and sell (see [docs/shop.md](docs/shop.md)); Dr. T's Zoid lab is not
 implemented yet. The throne
 room's two battle scenes play as in the original, shots included (see
-[docs/battle.md](docs/battle.md)); the battle system itself is not implemented yet. The
+[docs/battle.md](docs/battle.md)). The world map's enemies roam and chase the party;
+meeting one opens the battle screen with its messages and menu, from which the party
+can retreat (see [docs/combat.md](docs/combat.md)); the fighting itself is not
+implemented yet. The
 pause menu shows the party, each Zoid's status and parts, the stocked weapons, and
 changes the parts on a Zoid's racks and who stands in the formation (see
 [docs/menu.md](docs/menu.md)).

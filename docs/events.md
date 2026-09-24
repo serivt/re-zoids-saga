@@ -227,16 +227,20 @@ formation.
 
 ## Not modeled yet
 
-- The battle engine itself (see [battle.md](battle.md)).
+- The fighting in battles, and the story battles (`0x08008D28`); the roaming enemies,
+  meeting them, the battle screen's opening, its menu and retreating are described in
+  [combat.md](combat.md).
 - Dr. T's Zoid lab (`0x08009108`, kind 2 of the shops, `0x080090C8`) and the other
   towns' shops: speaking to their keepers does nothing yet (see [shop.md](shop.md)).
 - Dr. T in the other areas: whether the party has the Zoids `0x90` or `0x8F`, and the
   game-state byte `+0x3320` (flags `0x140`, `0x141`).
 - The field's per-frame hooks (RAM `0x02000000`, `0x02000004`), which the world map's
-  and Arcana's handlers set; what they run (random battles, most likely) is not
-  modeled. The world map's handler swaps them for empty ones during the drive and
-  leaves the second one empty. Arcana's arrival sets its own and puts the field's back
-  when it ends; after it, Arcana's handler (`0x0800BEE4`) only sets them.
+  and Arcana's handlers set. The ones seen so far (`0x08008024`, `0x08008028`,
+  `0x0800C4D0`, `0x0800C708`) return at once; the world map's battles come from its
+  roaming enemies instead (see [combat.md](combat.md)). The world map's handler swaps
+  them for empty ones during the drive and leaves the second one empty. Arcana's
+  arrival sets its own and puts the field's back when it ends; after it, Arcana's
+  handler (`0x0800BEE4`) only sets them.
 - The port runs the tasks a map handler spawns two frames after its fade in ends,
   where the original runs them in that frame; the drive to Arcana makes up for it.
 - The CPU-time variance of script operations.

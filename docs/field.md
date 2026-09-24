@@ -82,9 +82,14 @@ step's frames down at `+0x4C` and, when the count reaches the halfway mark at `+
 new one. In Arcana a soldier waiting behind the captain steps into the metatile the
 captain is leaving eight frames into the captain's step, as in the original.
 
-The step end also writes the character's metatile into the saved object state at RAM
-`0x02000B5C + 0x50 + index × 16` (`+2` x, `+3` y), which the loader reads back for maps
-whose record id has bit 15; that persistence is not modeled yet.
+Halfway through each step the stepping command also writes the character's metatile
+into its object state at RAM `0x02000B5C + 0x50 + index × 16` (`+2` x, `+3` y). For maps
+whose record id has bit 15 the loader builds the objects from those states instead of
+the map's list (`0x08007188`): the sprite, the cell, the command and the parameter come
+from the state, and an object whose state lost bit 15 is not loaded. See
+[formats/save.md](formats/save.md) and [combat.md](combat.md) for how the states are
+built. The port writes an actor's cell back every frame, from the cell that stops
+blocking halfway, which is the same value.
 
 ### Shy townsfolk
 
@@ -102,6 +107,16 @@ player stands within three metatiles along both axes:
 Farther away it wanders. The trace showed a townsperson three metatiles to the right of
 the player trying to step left into a wall every frame until a random draw moved it.
 The RNG's calls differ between the original and the port (below), so the paths differ.
+
+### Roaming enemies
+
+Source: command 4 (`0x0800AA98`) and the step check (`0x0800AE7C`). The enemies of the
+Zoid maps are objects of behavior 1 and command 4. They run the same flight routine
+toward the player within two metatiles along both axes and wander farther away. When
+an enemy steps into the player's carrier, or the carrier into an enemy, the two meet
+in battle: both must be map Zoids (behavior 1) on the same level (attribute bit
+`0x1000`), and the player must be in control. An enemy does not reach a player standing
+on an exit's cell. Meeting and the battle are described in [combat.md](combat.md).
 
 ## Random numbers
 
@@ -180,6 +195,5 @@ START opens the menu described in [menu.md](menu.md); the field waits underneath
 ## Not modeled yet
 
 The black after a door for loads other than the one measured, the code-driven scripts of characters
-beyond the opening chapter, the saved-state overlay of object lists, objects that show
-the party's Zoid, and the diagonal input priority of the original (this engine takes the
+beyond the opening chapter, objects that show the party's Zoid, and the diagonal input priority of the original (this engine takes the
 first held direction in the order up, down, left, right).

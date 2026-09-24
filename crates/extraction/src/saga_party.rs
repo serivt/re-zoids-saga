@@ -480,6 +480,13 @@ fn add_unit(rom: &[u8], state: &mut [u8], zoid: u16, special: bool) -> Option<u8
     Some(unit)
 }
 
+/// Computes again the statistics of `unit`, piloted by `character`, from
+/// its Zoid, training, parts and pilot (`0x08036CB0`), as a battle does
+/// for each unit of the formation when it starts (`0x0802B5D0`).
+pub fn refresh_stats(rom: &[u8], state: &mut [u8], character: u8, unit: u8) -> Option<()> {
+    compute_stats(rom, state, character, unit)
+}
+
 /// Makes `character` the pilot of `unit` and computes the unit's
 /// statistics (`0x08036BE0`).
 fn assign(rom: &[u8], state: &mut [u8], character: u8, unit: u8) -> Option<()> {

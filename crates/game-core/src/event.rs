@@ -36,6 +36,9 @@ const LOAD_FRAMES: u32 = 6;
 pub enum Op {
     /// Yields for this many frames (`0x0805EF90`).
     Wait(u32),
+    /// Holds the whole game for this many frames, the field included, as
+    /// code the field's own task calls does.
+    Freeze(u32),
     /// Runs a string of the `dialogue` table, holding the game until it
     /// ends (`0x08008B58`).
     Dialogue(u16),
@@ -113,6 +116,9 @@ pub enum Op {
     /// Opens a shop (`0x08008F58`), holding the game until it closes and
     /// the map is loaded again behind it.
     Shop(Shop),
+    /// Fights the roaming enemy the player met (`0x0800B9CC`), holding the
+    /// game until the battle hands back.
+    Combat,
     /// Scrolls the camera by `(dx, dy)` 16.16 fixed-point pixels
     /// (`0x08008324`, called once a frame for a pan).
     Pan(i32, i32),
@@ -240,6 +246,9 @@ pub trait EventHost {
     fn start_battle(&mut self, scene: u8);
     /// Opens `shop`; the game holds until it closes.
     fn start_shop(&mut self, shop: Shop);
+    /// Starts the battle against the enemy the player met; the game holds
+    /// until it hands back.
+    fn start_combat(&mut self);
     /// Plays song `song` unless it is playing.
     fn play_music(&mut self, song: u16);
     /// Plays sound effect `sound`.
@@ -321,6 +330,8 @@ enum Hold {
     Battle(usize),
     /// A shop opened by the task in this slot.
     Shop(usize),
+    /// A battle started by the task in this slot.
+    Combat(usize),
     /// A fade to black holding the game after `delay` frames of waiting;
     /// once black, the task in `resume` goes on, or else the caller is told.
     FadeOut {
@@ -432,6 +443,12 @@ impl Events {
         matches!(self.hold, Some(Hold::Shop(_)))
     }
 
+    /// Whether a battle an event started is running.
+    #[must_use]
+    pub fn in_combat(&self) -> bool {
+        matches!(self.hold, Some(Hold::Combat(_)))
+    }
+
     /// Whether any task runs.
     #[must_use]
     pub fn running(&self) -> bool {
@@ -493,7 +510,9 @@ impl Events {
     pub fn update_hold(&mut self, dialogue_done: bool, host: &mut impl EventHost) -> HoldStep {
         match self.hold {
             None => HoldStep::Free,
-            Some(Hold::Dialogue(slot) | Hold::Battle(slot) | Hold::Shop(slot)) => {
+            Some(
+                Hold::Dialogue(slot) | Hold::Battle(slot) | Hold::Shop(slot) | Hold::Combat(slot),
+            ) => {
                 if dialogue_done {
                     self.hold = None;
                     self.run_task(slot, host);
@@ -642,6 +661,8 @@ impl Events {
             | Op::Dialogue(_)
             | Op::Battle(_)
             | Op::Shop(_)
+            | Op::Combat
+            | Op::Freeze(_)
             | Op::Script(..)
             | Op::AwaitArrival(_)
             | Op::AwaitAnimation(_)
@@ -709,28 +730,17 @@ impl Events {
                 }
                 return Flow::Yield;
             }
-            Op::Dialogue(index) => {
+            Op::Dialogue(_) | Op::Script(..) | Op::Battle(_) | Op::Shop(_) | Op::Combat => {
                 self.advance(slot);
-                host.start_dialogue(index);
-                self.hold = Some(Hold::Dialogue(slot));
+                self.hold = Some(start_hold(slot, op, host));
                 return Flow::Yield;
             }
-            Op::Script(table, index) => {
+            Op::Freeze(frames) => {
                 self.advance(slot);
-                host.start_script(table, index);
-                self.hold = Some(Hold::Dialogue(slot));
-                return Flow::Yield;
-            }
-            Op::Battle(scene) => {
-                self.advance(slot);
-                host.start_battle(scene);
-                self.hold = Some(Hold::Battle(slot));
-                return Flow::Yield;
-            }
-            Op::Shop(shop) => {
-                self.advance(slot);
-                host.start_shop(shop);
-                self.hold = Some(Hold::Shop(slot));
+                if frames == 0 {
+                    return Flow::Continue;
+                }
+                self.hold = Some(Hold::Loading { frames, slot });
                 return Flow::Yield;
             }
             Op::FadeInHolding => {
@@ -987,6 +997,34 @@ fn command_actor(field: &mut Field, op: Op) {
     }
 }
 
+/// Starts what `op` holds the game for, for the task in `slot`: a
+/// dialogue or another table's script, a battle scene, a shop or a battle.
+fn start_hold(slot: usize, op: Op, host: &mut impl EventHost) -> Hold {
+    match op {
+        Op::Script(table, index) => {
+            host.start_script(table, index);
+            Hold::Dialogue(slot)
+        }
+        Op::Battle(scene) => {
+            host.start_battle(scene);
+            Hold::Battle(slot)
+        }
+        Op::Shop(shop) => {
+            host.start_shop(shop);
+            Hold::Shop(slot)
+        }
+        Op::Combat => {
+            host.start_combat();
+            Hold::Combat(slot)
+        }
+        Op::Dialogue(index) => {
+            host.start_dialogue(index);
+            Hold::Dialogue(slot)
+        }
+        _ => Hold::Dialogue(slot),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1023,6 +1061,10 @@ mod tests {
 
         fn start_shop(&mut self, shop: Shop) {
             self.log.push(format!("shop {shop:?}"));
+        }
+
+        fn start_combat(&mut self) {
+            self.log.push("combat".to_owned());
         }
 
         fn play_music(&mut self, song: u16) {
@@ -1160,6 +1202,37 @@ mod tests {
         assert_eq!(events.update_hold(true, &mut host), HoldStep::Held);
         assert!(!events.holding());
         assert_eq!(events.brightness(), 0);
+    }
+
+    const MEETING: &[Op] = &[
+        Op::Freeze(1),
+        Op::Sound(0x52),
+        Op::FadeOutHoldingAfter(1),
+        Op::Combat,
+        Op::Freeze(2),
+        Op::Sound(1),
+    ];
+
+    #[test]
+    fn a_battle_holds_the_game_and_the_field_stays_frozen_after_it() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.run_now(MEETING, &mut host);
+        assert!(host.log.is_empty());
+        events.update_hold(false, &mut host);
+        assert_eq!(host.log, ["sound 82"]);
+        while !events.in_combat() {
+            assert!(events.holding());
+            events.update_hold(false, &mut host);
+        }
+        assert_eq!(events.brightness(), BLACK);
+        assert_eq!(host.log, ["sound 82", "combat"]);
+        events.update_hold(true, &mut host);
+        assert!(events.holding());
+        events.update_hold(false, &mut host);
+        assert!(events.holding());
+        events.update_hold(false, &mut host);
+        assert_eq!(host.log.last().map(String::as_str), Some("sound 1"));
     }
 
     const CHOOSING: &[Op] = &[

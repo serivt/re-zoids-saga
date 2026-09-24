@@ -30,6 +30,7 @@ use extraction::saga::{
     MapError, MapObject, ObjectScript, PLAYER_SPRITE, Scene, SceneError, SpriteSheet,
     SpriteSheetError, WALK_ANIMATION_BASE, Warp,
 };
+use formats::progress::ObjectState;
 use gba_runtime::ppu::{PaletteBank, SCREEN_HEIGHT, SCREEN_WIDTH, draw_background};
 use platform::{Button, Frame, Input};
 use thiserror::Error;
@@ -63,6 +64,22 @@ const SILENT_BEHAVIOR: u16 = 5;
 const PLAYER_KIND: u16 = 0;
 const WANDER_KIND: u16 = 2;
 const SHY_KIND: u16 = 3;
+const CHASE_KIND: u16 = 4;
+/// A sprite field with this bit names its sheet through a lookup the port
+/// keeps from the object's own list.
+const SPRITE_LOOKUP: u16 = 0x8000;
+/// Objects of this behavior are map Zoids: the player's carrier and the
+/// enemies that roam the Zoid maps meet in battle.
+const ZOID_BEHAVIOR: u16 = 1;
+/// How near, in cells along each axis, a roaming enemy heads for the
+/// player (`0x0800AA98`).
+const CHASE_RADIUS: usize = 2;
+/// The attribute bit that sets a cell on another level; Zoids on different
+/// levels pass without meeting (`0x0800AE7C`).
+const LEVEL_BIT: u16 = 0x1000;
+/// The attribute bit of an exit's cell; an enemy does not reach the player
+/// standing on one.
+const EXIT_BIT: u16 = 0x4000;
 const IDLE_TIMER_MASK: u16 = 0x7F;
 /// A sprite off the screen by more than this (its top-left 56 pixels left
 /// or 32 above) or whose top-left is past the span from there is skipped
@@ -151,6 +168,11 @@ pub enum FieldEvent {
     Exit(usize),
     /// The player pushed against this door (a `0xC000` exit).
     Door(usize),
+    /// The player and a roaming enemy ran into each other.
+    Encounter {
+        /// Index into the field's actors of the enemy.
+        enemy: usize,
+    },
     /// The player faced chest `chest` (actor `actor`) and pressed A.
     Chest {
         /// Index into the field's actors.
@@ -195,6 +217,9 @@ pub enum Command {
     /// Walks around at random, and steps away from the player while B is
     /// held within three cells (command 3).
     Shy,
+    /// Walks around at random, and heads for the player within two cells
+    /// (command 4): the enemies that roam the Zoid maps.
+    Chase,
     /// Heads for a metatile, the longer axis first, horizontally on ties.
     WalkTo(Walk),
 }
@@ -248,6 +273,14 @@ pub struct Actor {
     pub once: bool,
     /// A step of the animation shown without animating.
     pub pose: Option<usize>,
+    /// The object state it was built from, on a map whose objects the
+    /// game-state block keeps.
+    pub slot: Option<usize>,
+    /// For a roaming enemy, its formation among the area's.
+    pub group: u16,
+    /// Frames it stands still before its command runs again, as an enemy
+    /// does after the party retreated from it.
+    pub pause: u16,
 }
 
 impl Actor {
@@ -280,6 +313,9 @@ impl Actor {
             chest: None,
             once: false,
             pose: None,
+            slot: None,
+            group: 0,
+            pause: 0,
         }
     }
 
@@ -290,12 +326,7 @@ impl Actor {
         actor.script = object.script_kind();
         actor.chest = object.chest();
         actor.behavior = object.behavior;
-        actor.command = match object.kind {
-            PLAYER_KIND => Command::Player,
-            WANDER_KIND => Command::Wander,
-            SHY_KIND => Command::Shy,
-            _ => Command::Idle,
-        };
+        actor.command = command_for(object.kind);
         actor
     }
 
@@ -458,6 +489,17 @@ impl Actor {
             self.animation,
             self.animation_shift,
         )
+    }
+}
+
+/// What an object of command `kind` does.
+fn command_for(kind: u16) -> Command {
+    match kind {
+        PLAYER_KIND => Command::Player,
+        WANDER_KIND => Command::Wander,
+        SHY_KIND => Command::Shy,
+        CHASE_KIND => Command::Chase,
+        _ => Command::Idle,
     }
 }
 
@@ -673,6 +715,57 @@ impl Field {
         Ok(field)
     }
 
+    /// Builds the objects of a map whose record id has bit 15 from the
+    /// game-state block's object states, as the map loader does
+    /// (`0x08007188`): object `n` (from 1) takes state `first + n − 1`,
+    /// its sprite, cell, command and parameter; an object whose state is
+    /// gone is not loaded. `first` is `None` when the table has no state
+    /// for the map, which loads none of its objects.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError`] when a sprite cannot be read.
+    pub fn apply_object_states(
+        &mut self,
+        data: &GameData<'_>,
+        states: &[ObjectState],
+        first: Option<usize>,
+    ) -> Result<(), FieldError> {
+        let size = cell_pixels(&self.scene);
+        for index in 1..self.actors.len() {
+            let slot = first.map(|first| first + index - 1);
+            let state = slot
+                .and_then(|slot| states.get(slot))
+                .filter(|state| state.present);
+            let actor = &mut self.actors[index];
+            let Some(state) = state else {
+                actor.visible = false;
+                actor.slot = None;
+                continue;
+            };
+            if state.sprite & SPRITE_LOOKUP == 0 {
+                actor.sheet = Some(data.sprite_sheet(usize::from(state.sprite))?);
+            }
+            actor.command = command_for(u16::from(state.command));
+            actor.slot = slot;
+            actor.group = state.group;
+            actor.set_cell_size(size);
+            actor.place((usize::from(state.column), usize::from(state.row)));
+        }
+        self.sort_actors();
+        Ok(())
+    }
+
+    /// The cells the actors built from object states stand on, by state:
+    /// what the stepping command writes back halfway through each step
+    /// (`0x0800B764`).
+    pub fn object_cells(&self) -> impl Iterator<Item = (usize, (usize, usize))> + '_ {
+        self.actors
+            .iter()
+            .filter(|actor| actor.visible)
+            .filter_map(|actor| actor.slot.map(|slot| (slot, actor.previous)))
+    }
+
     /// The map record being walked.
     #[must_use]
     pub fn map(&self) -> usize {
@@ -771,7 +864,12 @@ impl Field {
         let actor = &mut self.actors[index];
         if actor.step.is_some() {
             let finished = actor.advance_step();
-            if finished && matches!(actor.command, Command::Wander | Command::Shy) {
+            if finished
+                && matches!(
+                    actor.command,
+                    Command::Wander | Command::Shy | Command::Chase
+                )
+            {
                 actor.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
             }
             if finished && index == 0 && actor.command == Command::Player {
@@ -783,6 +881,10 @@ impl Field {
             }
             return None;
         }
+        if actor.pause > 0 {
+            actor.pause -= 1;
+            return None;
+        }
         let event = match actor.command {
             Command::Player => self.update_player(input, pressed_a),
             Command::Idle => None,
@@ -792,12 +894,13 @@ impl Field {
             }
             Command::Shy => {
                 if input.is_held(Button::B) {
-                    self.shy(index);
+                    self.pursue(index, SHY_RADIUS, true)
                 } else {
                     self.wander(index);
+                    None
                 }
-                None
             }
+            Command::Chase => self.pursue(index, CHASE_RADIUS, false),
             Command::WalkTo(walk) => self.walk(index, walk),
         };
         let actor = &mut self.actors[index];
@@ -834,11 +937,54 @@ impl Field {
             }
             return None;
         }
+        if let Some(enemy) = self.meeting(0, direction) {
+            self.actors[enemy].face(direction.opposite());
+            return Some(FieldEvent::Encounter { enemy });
+        }
         let (dx, dy) = direction.delta();
         let (column, row) = self.actors[0].footing();
         let column = column.checked_add_signed(dx)?;
         let row = row.checked_add_signed(dy)?;
         self.scene.door(column, row).map(FieldEvent::Door)
+    }
+
+    /// The Zoid actor `index`, stepping toward `direction`, runs into, when
+    /// the two meet in battle (`0x0800AE7C`): the player's carrier and a
+    /// roaming enemy, on the same level, the player in control; an enemy
+    /// does not reach a player on an exit's cell.
+    fn meeting(&self, index: usize, direction: Direction) -> Option<usize> {
+        let (dx, dy) = direction.delta();
+        let (column, row) = self.actors[index].footing();
+        let ahead = (column.checked_add_signed(dx)?, row.checked_add_signed(dy)?);
+        let other = (0..self.actors.len()).find(|&other| {
+            let actor = &self.actors[other];
+            other != index
+                && actor.visible
+                && (actor.footing() == ahead || actor.previous_footing() == ahead)
+        })?;
+        let (enemy, player) = if index == 0 {
+            (other, 0)
+        } else {
+            (index, other)
+        };
+        if player != 0 || self.actors[0].command != Command::Player {
+            return None;
+        }
+        let level = |actor: &Actor| {
+            let (column, row) = actor.footing();
+            self.scene.attribute(column, row).unwrap_or(0) & LEVEL_BIT
+        };
+        let (carrier, zoid) = (&self.actors[0], &self.actors[enemy]);
+        let exit_cell = {
+            let (column, row) = carrier.footing();
+            self.scene.attribute(column, row).unwrap_or(0) & EXIT_BIT != 0
+        };
+        let meets = carrier.behavior == ZOID_BEHAVIOR
+            && zoid.behavior == ZOID_BEHAVIOR
+            && zoid.command == Command::Chase
+            && level(carrier) == level(zoid)
+            && (index == 0 || !exit_cell);
+        meets.then_some(enemy)
     }
 
     fn wander(&mut self, index: usize) {
@@ -858,25 +1004,29 @@ impl Field {
         }
     }
 
-    /// A shy character with B held (`0x0800A5E4` fleeing the player within
-    /// three cells): mostly a step away along the axis the player is
-    /// farther on, a random draw picking the axis on ties, and one draw in
-    /// sixteen a random way; at a pixel a frame, and every frame it can.
-    /// Farther away it wanders.
-    fn shy(&mut self, index: usize) {
+    /// The flight routine (`0x0800A5E4`) for actor `index` within `radius`
+    /// cells of the player along both axes: a shy character with B held
+    /// steps away (`away`), a roaming enemy toward. Mostly along the axis
+    /// the player is farther on, a random draw picking the axis on ties,
+    /// and one draw in sixteen a random way; at a pixel a frame, and every
+    /// frame it can. Farther away it wanders. An enemy stepping into the
+    /// player meets it.
+    fn pursue(&mut self, index: usize, radius: usize, away: bool) -> Option<FieldEvent> {
         let (player, actor) = (&self.actors[0], &self.actors[index]);
         let across = player.column.abs_diff(actor.column);
         let along = player.row.abs_diff(actor.row);
-        if across > SHY_RADIUS || along > SHY_RADIUS {
+        if across > radius || along > radius {
             self.wander(index);
-            return;
+            return None;
         }
-        let away_across = if player.column < actor.column {
+        let player_left = player.column < actor.column;
+        let player_above = player.row < actor.row;
+        let horizontal = if player_left == away {
             Direction::Right
         } else {
             Direction::Left
         };
-        let away_along = if player.row < actor.row {
+        let vertical = if player_above == away {
             Direction::Down
         } else {
             Direction::Up
@@ -887,16 +1037,21 @@ impl Field {
             random_direction(self.rng.next(self.frame))
         } else if across == along {
             if draw & SHY_VERTICAL_BIT == 0 {
-                away_across
+                horizontal
             } else {
-                away_along
+                vertical
             }
         } else if across > along {
-            away_across
+            horizontal
         } else {
-            away_along
+            vertical
         };
         let free = self.free(index, direction, true);
+        if !free && let Some(enemy) = self.meeting(index, direction) {
+            self.actors[enemy].face(direction);
+            self.actors[0].face(direction.opposite());
+            return Some(FieldEvent::Encounter { enemy });
+        }
         let actor = &mut self.actors[index];
         actor.face(direction);
         if free {
@@ -904,6 +1059,7 @@ impl Field {
         } else {
             actor.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
         }
+        None
     }
 
     /// The door the player's walk to a cell runs into at the end of a step,
@@ -1332,6 +1488,59 @@ mod tests {
         let mut actor = character(column, row, None, 0);
         actor.command = Command::Wander;
         actor
+    }
+
+    fn zoid_field() -> Field {
+        let mut field = field(8, 5);
+        field.player_mut().behavior = ZOID_BEHAVIOR;
+        field
+    }
+
+    fn enemy(column: usize, row: usize) -> Actor {
+        let mut actor = character(column, row, None, ZOID_BEHAVIOR);
+        actor.command = Command::Chase;
+        actor
+    }
+
+    #[test]
+    fn the_carrier_meets_a_roaming_enemy_it_steps_into() {
+        let mut field = zoid_field();
+        field.actors.push(enemy(4, 1));
+        assert_eq!(
+            field.update(held(Direction::Right)),
+            Some(FieldEvent::Encounter { enemy: 1 })
+        );
+        assert_eq!(field.actors[1].facing, Direction::Left);
+        assert!(!field.player().walking());
+    }
+
+    #[test]
+    fn an_enemy_nearby_heads_for_the_carrier_and_meets_it() {
+        let mut field = zoid_field();
+        field.actors.push(enemy(5, 1));
+        let mut met = None;
+        for _ in 0..200 {
+            if let Some(event) = field.update(Input::default()) {
+                met = Some(event);
+                break;
+            }
+        }
+        assert_eq!(met, Some(FieldEvent::Encounter { enemy: 1 }));
+    }
+
+    #[test]
+    fn townsfolk_and_paused_enemies_do_not_meet_the_player() {
+        let mut field = zoid_field();
+        field.actors.push(character(4, 1, None, 0));
+        assert_eq!(field.update(held(Direction::Right)), None);
+        let mut field = zoid_field();
+        let mut resting = enemy(5, 1);
+        resting.pause = 3;
+        field.actors.push(resting);
+        for _ in 0..3 {
+            assert_eq!(field.update(Input::default()), None);
+            assert!(!field.actors[1].walking());
+        }
     }
 
     #[test]

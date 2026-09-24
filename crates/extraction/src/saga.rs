@@ -297,6 +297,17 @@ impl Scene {
         self
     }
 
+    /// The attribute of metatile `(column, row)`; `None` outside the map.
+    #[must_use]
+    pub fn attribute(&self, column: usize, row: usize) -> Option<u16> {
+        if column >= self.attribute_columns() {
+            return None;
+        }
+        self.attributes
+            .get(row * self.attribute_columns() + column)
+            .copied()
+    }
+
     /// Whether metatile `(column, row)` blocks walking; cells outside the
     /// map block too.
     #[must_use]
@@ -424,7 +435,8 @@ pub fn scene(rom: &[u8], index: usize) -> Result<Scene, SceneError> {
 
 const MAP_TABLE_OFFSET: usize = 0x0031_B27C;
 const MAP_RECORD_LEN: usize = 28;
-const MAP_COUNT: usize = 343;
+/// Map records the table holds.
+pub const MAP_COUNT: usize = 343;
 const MAP_NAME_LEN: usize = 12;
 const WARP_TABLE_OFFSET: usize = 0x0031_FD84;
 const WARP_LEN: usize = 12;

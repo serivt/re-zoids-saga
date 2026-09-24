@@ -50,7 +50,8 @@ The fields this port reads and writes; everything else is kept as the save had i
 | `+0x06` | 2 | Metatile column of the player |
 | `+0x08` | 2 | Metatile row |
 | `+0x0C` | 33 × 2 | Game flags: flag `n` is bit `15 − n % 16` of half-word `n / 16`; flag `0x1E + n` marks chest `n` opened |
-| `+0x50` | 16 each | Object states of the current area, ended by `0xFFFF` (not modeled) |
+| `+0x0A` | 2 | Battles won against roaming enemies |
+| `+0x50` | 16 each | Object states of the current area, ended by `0xFFFF` (see below) |
 | `+0xCD2` | 1 | Party level (99 at most) |
 | `+0xCD4` | 4 | Party experience |
 | `+0xCD8` | 4 × 16 | Member records, copied from ROM `0x67AC4C` by a new game: the pilot bonuses in percent at `+4`, `+6`, `+8`, `+10`, `+12` (耐久, 反応, 防御, 攻撃, 命中); the hangar sets the three warriors' to the party level times their growth at ROM `0x66BB38` (`0x080368BC`) |
@@ -71,10 +72,26 @@ into the block, so a save always holds where the menu was opened. The player's f
 is not saved: a continued game faces down. Flag `0x11F` is set when a new game enters
 the first room; continuing a save without it plays the opening again.
 
-Entering a map whose area differs from the one in `+0x02` rebuilds the object states
-from the map data of every record of the new area whose id has bit 15. Continuing a save
-restores `+0x02` as the area already entered, so a save whose area byte does not match
-its map makes the game rebuild the table on loading.
+Entering a map whose area differs from the last one entered (RAM `0x0200000D`) rebuilds
+the object states (`0x08006E4C`). The game goes through every record of the new area
+whose id has bit 15 and adds a state for each object after the player:
+
+| Offset | Size | Field |
+|---|---|---|
+| `+0x00` | 2 | The map record, with bit 15 while the object is there |
+| `+0x02`, `+0x03` | 1 each | Metatile column and row, written back halfway through each step |
+| `+0x04` | 2 | The sprite |
+| `+0x06` | 2 | For a map Zoid, its formation slot |
+| `+0x08` | 2 | The object's parameter |
+| `+0x0A` | 1 | The object's command |
+| `+0x0B` | 3 | Bytes the loader copies into the entity, zero when built |
+
+A map Zoid (behavior 1) is drawn a formation, and its sprite becomes its leader's Zoid
+(see [../combat.md](../combat.md)). The table holds at most 200 states; the rebuild
+stops the game on an error screen past that. Continuing a game clears the area the
+rebuild compares with (`0x0800C0CC`), so the first map entered always rebuilds the
+table and the objects start again from their maps' lists. The formations are kept in
+RAM outside the block (`0x02004A70`).
 
 ### Units
 
@@ -136,11 +153,10 @@ parts and stock the equipment screen changes;
 the rest of the block is carried unchanged from the save that was loaded, or from the
 new-game block.
 
-A new game saved by the port matches the original's own save of the same moment byte
-for byte, except for the object states, which the port does not build. So that the
-original rebuilds them, the port writes area 0, which no map uses, unless the player is
-still in the area the loaded block describes. The original was checked continuing from
-such a save: it stood the player on the saved metatile and rebuilt the table.
+A new game saved by the port matched the original's own save of the same moment byte
+for byte, before the port built the object states. The states now differ where the
+formations were drawn: the draws mix in the frame counter, and the port's draws do not
+fall on the original's frames. The original rebuilds the table on continuing anyway.
 
 The Shift-JIS name cannot hold every letter a translation's alphabet offers. Half-width
 letters are stored as their full-width forms and others as `？`; the exact name is also
@@ -151,6 +167,6 @@ block's own name.
 
 ## Not modeled yet
 
-The object states, the counter block, the member records beyond carrying them, units
+The counter block, the member records beyond carrying them, units
 gained outside the opening chapter, and the title's opening animation when it starts
 over after a notice.

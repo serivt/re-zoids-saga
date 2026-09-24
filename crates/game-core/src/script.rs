@@ -211,6 +211,10 @@ pub struct ScriptRunner {
     started: Option<usize>,
     wait: Wait,
     previous: Input,
+    /// Whether closing a window while another stays open costs a second
+    /// frame, the time the original takes to redraw the menus' crowded
+    /// windows.
+    slow_redraw: bool,
 }
 
 impl ScriptRunner {
@@ -239,7 +243,16 @@ impl ScriptRunner {
             started: None,
             wait: Wait::Done,
             previous: Input::default(),
+            slow_redraw: true,
         }
+    }
+
+    /// Makes closing a window cost one frame even while others stay open:
+    /// the battle screen's few windows redraw within the frame.
+    #[must_use]
+    pub fn with_quick_redraws(mut self) -> Self {
+        self.slow_redraw = false;
+        self
     }
 
     /// The name of the table the runner runs strings of.
@@ -619,7 +632,7 @@ impl ScriptRunner {
             }
             Instruction::CloseWindow { id } => {
                 host.close_window(id);
-                let redrawn = (0..WINDOWS).any(|id| host.is_open(id));
+                let redrawn = self.slow_redraw && (0..WINDOWS).any(|id| host.is_open(id));
                 self.wait = Wait::Frames(1 + u32::from(redrawn));
             }
             Instruction::Present { id } => {

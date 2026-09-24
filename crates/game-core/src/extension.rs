@@ -114,6 +114,14 @@ pub enum Event {
     ShopOpened(Shop),
     /// The shop closed and the field is back.
     ShopClosed,
+    /// The player met roaming enemy `enemy` (an actor index) and its
+    /// battle started.
+    CombatStarted {
+        /// Index into the field's actors.
+        enemy: usize,
+    },
+    /// A battle against a roaming enemy handed back to the field.
+    CombatEnded(crate::combat::Outcome),
     /// The player chose to save.
     SaveRequested,
     /// The player chose to continue a saved game.

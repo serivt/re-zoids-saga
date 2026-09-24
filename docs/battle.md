@@ -182,4 +182,5 @@ its start.
 
 - The rewrite line of the scroll table under CPU load.
 - The battle engine itself: the port transcribes these two scenes' timelines and shots
-  rather than running the module's attack logic.
+  rather than running the module's attack logic. The real battles are described in
+  [combat.md](combat.md).

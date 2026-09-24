@@ -1321,6 +1321,27 @@ const fn shop(shop: Shop) -> [Op; 3] {
 /// Frames from a keeper's talk until the field starts darkening.
 const SHOP_FADE_DELAY: u8 = 2;
 
+/// Meeting a roaming enemy (`0x0800B9CC`, entity state 4, a frame after
+/// the step that met it): sound `0x52`, the field darkens to black from
+/// the next frame (`0x08001524`), the battle runs, and the field returns
+/// from black a level a frame (`0x080014A8`).
+pub const ENCOUNTER: &[Op] = &[
+    Op::Freeze(1),
+    Op::Sound(ENCOUNTER_SOUND),
+    Op::FadeOutHoldingAfter(ENCOUNTER_FADE_DELAY),
+    Op::Combat,
+    Op::Freeze(ENCOUNTER_RELOAD_FRAMES),
+    Op::FadeInHolding,
+];
+
+const ENCOUNTER_SOUND: u16 = 0x52;
+/// Frames from the sound until the field starts darkening: the first
+/// frame of `0x08001524` sets level 0.
+const ENCOUNTER_FADE_DELAY: u8 = 1;
+/// Black frames between the battle's end and the field's first brighter
+/// level: the map's reload.
+const ENCOUNTER_RELOAD_FRAMES: u32 = 14;
+
 /// Arcana's item shop (`0x080090F0`).
 const ARCANA_ITEM_SHOP: &[Op] = &shop(Shop::Items(1));
 

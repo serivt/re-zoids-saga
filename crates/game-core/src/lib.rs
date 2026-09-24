@@ -2,6 +2,7 @@
 
 pub mod battle;
 pub mod boot;
+pub mod combat;
 pub mod data;
 pub mod event;
 pub mod extension;
@@ -9,6 +10,7 @@ pub mod field;
 pub mod game;
 pub mod guide;
 pub mod menu;
+pub mod objects;
 pub mod rng;
 pub mod save;
 pub mod script;

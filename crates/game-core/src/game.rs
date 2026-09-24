@@ -30,12 +30,14 @@ use thiserror::Error;
 
 use crate::battle::BattleStage;
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
+use crate::combat::{Combat, Outcome};
 use crate::data::GameData;
 use crate::event::{BLACK, EventHost, Events, HoldStep, MAP_TASK, Op};
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
 use crate::guide::{Cover, Guide, GuideError, GuideKind};
 use crate::menu::{MenuStep, Party, PauseMenu, Shop};
+use crate::objects::AreaObjects;
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptContext, ScriptError, ScriptRunner};
 use crate::story;
@@ -95,10 +97,13 @@ const CONTINUE_LOAD_FRAMES: u32 = 75;
 const CONTINUE_NOTICE_FRAMES: u32 = 40;
 const CONTINUE_AFTER_NOTICE_FRAMES: u32 = 16;
 const MUSIC_PLAYER: usize = 0;
-/// The area a save names when its object table does not describe the
-/// current one; the original rebuilds the table on loading it. The port
-/// does not build the table, so it keeps a loaded area only while the
-/// player stays in it.
+/// Frames a roaming enemy stands still after the party retreated from it
+/// (entity state 8, `0x0800BD74`).
+const RETREAT_PAUSE: u16 = 180;
+/// The bits of the player's footing attribute the battle takes as its
+/// terrain; with any other set it takes the enemy's (`0x0800B9CC`).
+const TERRAIN_MASK: u16 = 0xFF;
+/// The area a map with no record belongs to.
 const NO_AREA: u8 = 0;
 /// Where the game is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -220,6 +225,10 @@ pub struct Game<'rom> {
     battle: Option<Box<BattleStage>>,
     /// The shop a keeper opened, while it is open.
     shop: Option<Box<PauseMenu>>,
+    /// The battle against a roaming enemy, while it runs.
+    combat: Option<Box<Combat>>,
+    /// The roaming enemy the player met, until its battle ends.
+    encounter: Option<usize>,
     field: Option<Field>,
     events: Events,
     screen: Screen,
@@ -232,6 +241,8 @@ pub struct Game<'rom> {
     player_name: String,
     party: Party,
     state: Vec<u8>,
+    /// The area whose objects the block keeps, and its formations.
+    objects: AreaObjects,
     save: SaveFile,
     storage: Option<Box<dyn SaveStorage>>,
     found: Option<Found>,
@@ -338,6 +349,8 @@ impl<'rom> Game<'rom> {
             last_runner: None,
             battle: None,
             shop: None,
+            combat: None,
+            encounter: None,
             field: None,
             events: Events::new(),
             screen: Screen::Loading,
@@ -349,6 +362,7 @@ impl<'rom> Game<'rom> {
             player_name: DEFAULT_PLAYER_NAME.to_owned(),
             party: Party::default(),
             state,
+            objects: AreaObjects::default(),
             save,
             storage: None,
             found: None,
@@ -403,6 +417,9 @@ impl<'rom> Game<'rom> {
     fn latch_screen(&mut self) {
         if let Some(field) = self.field.as_mut() {
             field.latch();
+        }
+        if let Some(combat) = self.combat.as_mut() {
+            combat.latch();
         }
         self.windows.latch();
         self.shown_brightness = self.events.brightness();
@@ -708,6 +725,7 @@ impl<'rom> Game<'rom> {
         };
         let map = usize::from(progress.map);
         let cell = (usize::from(progress.column), usize::from(progress.row));
+        self.objects.forget();
         if !self.windows.flag(OPENING_SEEN_FLAG) && map == FIRST_ROOM_MAP {
             return self.start_new_game_room();
         }
@@ -780,13 +798,6 @@ impl<'rom> Game<'rom> {
             return false;
         };
         let half = |value: usize| u16::try_from(value).unwrap_or(u16::MAX);
-        let area = self
-            .data
-            .map_record(field.map())
-            .map_or(NO_AREA, |record| record.id.to_le_bytes()[0]);
-        if progress.area != area {
-            progress.area = NO_AREA;
-        }
         progress.map = half(field.map());
         progress.column = half(field.player().column);
         progress.row = half(field.player().row);
@@ -818,7 +829,10 @@ impl<'rom> Game<'rom> {
 
     /// Loads map `map` with the player on `cell` and runs the map's handler.
     fn enter_map(&mut self, map: usize, cell: (usize, usize)) -> Result<(), GameError> {
+        self.objects
+            .enter(&self.data, &mut self.state, map, frame_counter(self.frame));
         let mut field = Field::load(&self.data, map, cell)?;
+        AreaObjects::place(&self.data, &self.state, map, &mut field)?;
         show_opened_chests(&mut field, &self.windows);
         self.field = Some(field);
         Self::emit(&self.extensions, &Event::RoomEntered { map, cell });
@@ -848,12 +862,16 @@ impl<'rom> Game<'rom> {
             last_runner: &mut self.last_runner,
             battle: &mut self.battle,
             shop: &mut self.shop,
+            combat: &mut self.combat,
+            encounter: self.encounter,
             warped: &mut self.warped,
             chest: self.chest,
             party: &mut self.party,
             sound: &mut self.sound,
             extensions: &self.extensions,
             state: &mut self.state,
+            objects: &mut self.objects,
+            frame: frame_counter(self.frame),
             error: None,
         }
     }
@@ -943,6 +961,9 @@ impl<'rom> Game<'rom> {
         if self.events.in_shop() {
             return self.update_shop(input);
         }
+        if self.events.in_combat() {
+            return self.update_combat(input);
+        }
         if self.events.in_dialogue() {
             if self.events.dialogue_in_task()
                 && let Some(field) = self.field.as_mut()
@@ -991,6 +1012,9 @@ impl<'rom> Game<'rom> {
             return Ok(());
         }
         let event = self.field.as_mut().and_then(|field| field.update(input));
+        if let Some(field) = &self.field {
+            AreaObjects::record(&mut self.state, field);
+        }
         match event {
             Some(FieldEvent::Exit(exit)) => return self.take_exit(exit, false),
             Some(FieldEvent::Door(exit)) => return self.take_exit(exit, true),
@@ -1023,6 +1047,7 @@ impl<'rom> Game<'rom> {
                     return self.run_handler(Some(program));
                 }
             }
+            Some(FieldEvent::Encounter { enemy }) => return self.meet_enemy(enemy),
             None => {}
         }
         self.update_events(|events, host| events.update(host))
@@ -1057,7 +1082,15 @@ impl<'rom> Game<'rom> {
             return Ok(());
         };
         let from = field.map();
+        let destination = self.data.warp(from, exit).map_err(FieldError::from)?.map;
+        self.objects.enter(
+            &self.data,
+            &mut self.state,
+            destination,
+            frame_counter(self.frame),
+        );
         let warp = field.warp(&self.data, exit)?;
+        AreaObjects::place(&self.data, &self.state, destination, field)?;
         show_opened_chests(field, &self.windows);
         let arrived = field.map();
         Self::emit(
@@ -1084,6 +1117,73 @@ impl<'rom> Game<'rom> {
         self.events.fade_in_after(black, WARP_SETTLE_FRAMES);
         self.events.end(MAP_TASK);
         self.run_handler(story::map_handler(arrived))
+    }
+
+    /// The player and the roaming enemy `enemy` ran into each other: the
+    /// field darkens and the battle starts (`0x0800B9CC`).
+    fn meet_enemy(&mut self, enemy: usize) -> Result<(), GameError> {
+        self.encounter = Some(enemy);
+        self.run_handler(Some(story::ENCOUNTER))
+    }
+
+    /// A frame of the battle an event holds the game for; once it hands
+    /// back, the enemy and the player take its outcome and the event goes
+    /// on.
+    fn update_combat(&mut self, input: Input) -> Result<(), GameError> {
+        let outcome = match self.combat.as_mut() {
+            Some(combat) => {
+                combat.update(self.data.bytes(), input, &mut self.windows)?;
+                if let Some(song) = combat.take_music() {
+                    Self::emit(&self.extensions, &Event::SoundRequested(usize::from(song)));
+                    self.sound.play(usize::from(song))?;
+                }
+                for sound in combat.take_sounds() {
+                    Self::emit(&self.extensions, &Event::SoundRequested(usize::from(sound)));
+                    self.sound.play(usize::from(sound))?;
+                }
+                combat.outcome()
+            }
+            None => Some(Outcome::Retreated),
+        };
+        let done = outcome.is_some();
+        if let Some(outcome) = outcome {
+            self.combat = None;
+            self.end_encounter(outcome)?;
+        }
+        self.update_events(|events, host| {
+            events.update_hold(done, host);
+        })
+    }
+
+    /// What a battle's outcome does to the enemy met (`0x0800B9CC`): a
+    /// beaten one is gone for good; after a retreat it stands still for
+    /// three seconds. The map's song plays again.
+    fn end_encounter(&mut self, outcome: Outcome) -> Result<(), GameError> {
+        Self::emit(&self.extensions, &Event::CombatEnded(outcome));
+        if let (Some(enemy), Some(field)) = (self.encounter.take(), self.field.as_mut()) {
+            match outcome {
+                Outcome::Won => {
+                    if let Some(actor) = field.actor_mut(enemy) {
+                        actor.visible = false;
+                        if let Some(slot) = actor.slot.take() {
+                            formats::progress::remove_object(&mut self.state, slot);
+                        }
+                    }
+                    formats::progress::count_battle(&mut self.state);
+                }
+                Outcome::Retreated => {
+                    if let Some(actor) = field.actor_mut(enemy) {
+                        actor.pause = RETREAT_PAUSE;
+                    }
+                }
+                Outcome::Lost => {}
+            }
+        }
+        let map = self.field.as_ref().map(Field::map);
+        if let Some(map) = map {
+            self.play_map_music(map)?;
+        }
+        Ok(())
     }
 
     /// Starts leaving by exit `exit`, a door when `door`: the screen
@@ -1175,6 +1275,11 @@ impl<'rom> Game<'rom> {
                     shop.draw(frame, &self.windows, &self.skin, &self.painter);
                 }
             }
+            Screen::Field if self.combat.is_some() => {
+                if let Some(combat) = &self.combat {
+                    combat.draw(frame, &self.windows, &self.skin, &self.painter);
+                }
+            }
             Screen::Field if self.battle.is_some() => {
                 if let Some(stage) = &self.battle {
                     stage.draw(frame, &self.windows, &self.skin, &self.painter);
@@ -1218,6 +1323,11 @@ pub const fn screen_size() -> (usize, usize) {
 }
 
 /// Shows the chests already opened open, as the game does from their flags.
+/// The frame counter the random draws mix in, as the game's 16-bit one.
+fn frame_counter(frame: u64) -> u16 {
+    u16::try_from(frame & u64::from(u16::MAX)).unwrap_or(0)
+}
+
 fn show_opened_chests(field: &mut Field, windows: &ScriptWindows<'_>) {
     for actor in &mut field.actors {
         if let Some(chest) = actor.chest
@@ -1239,12 +1349,16 @@ struct Host<'a, 'rom> {
     last_runner: &'a mut Option<usize>,
     battle: &'a mut Option<Box<BattleStage>>,
     shop: &'a mut Option<Box<PauseMenu>>,
+    combat: &'a mut Option<Box<Combat>>,
+    encounter: Option<usize>,
     warped: &'a mut Option<usize>,
     chest: Option<(usize, u16)>,
     party: &'a mut Party,
     sound: &'a mut SoundEngine<'rom>,
     extensions: &'a SharedExtensions,
     state: &'a mut Vec<u8>,
+    objects: &'a mut AreaObjects,
+    frame: u16,
     error: Option<GameError>,
 }
 
@@ -1306,6 +1420,45 @@ impl EventHost for Host<'_, '_> {
         }
     }
 
+    fn start_combat(&mut self) {
+        let Some(enemy) = self.encounter else {
+            return;
+        };
+        let Some(field) = self.field.as_ref() else {
+            return;
+        };
+        let attribute = |actor: &crate::Actor| {
+            let (column, row) = actor.footing();
+            field.scene().attribute(column, row).unwrap_or(0)
+        };
+        let Some(zoid) = field.actor(enemy) else {
+            return;
+        };
+        let enemy_terrain = attribute(zoid).to_le_bytes()[0];
+        let footing = attribute(field.player());
+        let player_terrain = if footing & !TERRAIN_MASK == 0 {
+            footing.to_le_bytes()[0]
+        } else {
+            enemy_terrain
+        };
+        let formation = self
+            .objects
+            .formation(zoid.group)
+            .copied()
+            .unwrap_or([0; extraction::saga_encounter::FORMATION_LEN]);
+        let mut combat = Combat::new(
+            &self.data,
+            self.state.as_mut_slice(),
+            &formation,
+            (player_terrain, enemy_terrain),
+        );
+        if let Err(error) = combat.update(self.data.bytes(), Input::default(), self.windows) {
+            self.fail(error);
+        }
+        *self.combat = Some(Box::new(combat));
+        Game::emit(self.extensions, &Event::CombatStarted { enemy });
+    }
+
     fn play_music(&mut self, song: u16) {
         let song = usize::from(song);
         Game::emit(self.extensions, &Event::SoundRequested(song));
@@ -1323,6 +1476,7 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn load_map(&mut self, map: usize, player: (usize, usize), objects: u32, count: usize) {
+        self.objects.enter(&self.data, self.state, map, self.frame);
         let loaded = self
             .data
             .objects_at(objects, count)
@@ -1433,7 +1587,11 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn warp(&mut self, map: usize, cell: (usize, usize), facing: Option<Direction>) -> usize {
-        match Field::load(&self.data, map, cell) {
+        self.objects.enter(&self.data, self.state, map, self.frame);
+        let loaded = Field::load(&self.data, map, cell).and_then(|mut field| {
+            AreaObjects::place(&self.data, self.state, map, &mut field).map(|()| field)
+        });
+        match loaded {
             Ok(mut field) => {
                 if let Some(facing) = facing {
                     field.player_mut().face(facing);

@@ -24,6 +24,7 @@ const AREA: usize = 0x02;
 const MAP: usize = 0x04;
 const COLUMN: usize = 0x06;
 const ROW: usize = 0x08;
+const BATTLES: usize = 0x0A;
 const FLAGS: usize = 0x0C;
 const LEVEL: usize = 0xCD2;
 const EXPERIENCE: usize = 0xCD4;
@@ -35,6 +36,10 @@ const ZOIDS_SEEN: usize = 0x33E2;
 const CHARACTERS: usize = 0x34A4;
 const DECK_COMMANDS: usize = 0x347B;
 const CHARACTER_LEN: usize = 4;
+const OBJECT_STATES: usize = 0x50;
+const OBJECT_STATE_LEN: usize = 16;
+const END_OF_OBJECTS: u16 = 0xFFFF;
+const OBJECT_PRESENT: u16 = 0x8000;
 const CHARACTER_IN_GUIDE: u16 = 0x20;
 const HALF_WIDTH_FIRST: char = '!';
 const HALF_WIDTH_LAST: char = '~';
@@ -201,6 +206,124 @@ pub fn command_learned(state: &[u8], command: usize) -> bool {
         .is_some_and(|learned| *learned != 0)
 }
 
+/// The most object states the block holds: the rebuild (`0x08006E4C`)
+/// stops the game on an error screen past 200.
+pub const OBJECT_STATE_LIMIT: usize = 200;
+
+/// What the block keeps of an object of a map whose record id has bit 15:
+/// the 16-byte records at `+0x50`, ended by a map of `0xFFFF`, which the
+/// map loader (`0x08007188`) builds the objects from instead of the map's
+/// own list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectState {
+    /// The map record the object belongs to.
+    pub map: u16,
+    /// Whether it is still there (bit 15 of the map); a beaten enemy is
+    /// not.
+    pub present: bool,
+    /// Metatile column where it last stood.
+    pub column: u8,
+    /// Metatile row.
+    pub row: u8,
+    /// Its sprite sheet.
+    pub sprite: u16,
+    /// For a map Zoid, its formation among those of the area.
+    pub group: u16,
+    /// The object's parameter (its record's half-word 7).
+    pub parameter: u16,
+    /// The object's command (its record's half-word 6).
+    pub command: u8,
+    /// Three bytes the loader copies into the entity (`+0x68`, `+0x6A`,
+    /// `+0x6C`); zero when the table is built.
+    pub extra: [u8; 3],
+}
+
+impl ObjectState {
+    fn read(bytes: &[u8]) -> Option<Self> {
+        let half = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+        let map = half(0);
+        (map != END_OF_OBJECTS).then(|| Self {
+            map: map & !OBJECT_PRESENT,
+            present: map & OBJECT_PRESENT != 0,
+            column: bytes[2],
+            row: bytes[3],
+            sprite: half(4),
+            group: half(6),
+            parameter: half(8),
+            command: bytes[10],
+            extra: [bytes[11], bytes[12], bytes[13]],
+        })
+    }
+
+    fn write(&self, bytes: &mut [u8]) {
+        let map = self.map | if self.present { OBJECT_PRESENT } else { 0 };
+        bytes[0..2].copy_from_slice(&map.to_le_bytes());
+        bytes[2] = self.column;
+        bytes[3] = self.row;
+        bytes[4..6].copy_from_slice(&self.sprite.to_le_bytes());
+        bytes[6..8].copy_from_slice(&self.group.to_le_bytes());
+        bytes[8..10].copy_from_slice(&self.parameter.to_le_bytes());
+        bytes[10] = self.command;
+        bytes[11..14].copy_from_slice(&self.extra);
+    }
+}
+
+/// The object states the block holds, up to the end marker.
+#[must_use]
+pub fn object_states(state: &[u8]) -> Vec<ObjectState> {
+    (0..=OBJECT_STATE_LIMIT)
+        .map_while(|index| {
+            let at = OBJECT_STATES + index * OBJECT_STATE_LEN;
+            state
+                .get(at..at + OBJECT_STATE_LEN)
+                .and_then(ObjectState::read)
+        })
+        .collect()
+}
+
+/// Replaces the object states with `objects`, ended by the marker; states
+/// past [`OBJECT_STATE_LIMIT`] are dropped.
+pub fn write_object_states(state: &mut [u8], objects: &[ObjectState]) {
+    let count = objects.len().min(OBJECT_STATE_LIMIT);
+    for (index, object) in objects.iter().take(count).enumerate() {
+        let at = OBJECT_STATES + index * OBJECT_STATE_LEN;
+        if let Some(bytes) = state.get_mut(at..at + OBJECT_STATE_LEN) {
+            object.write(bytes);
+        }
+    }
+    let end = OBJECT_STATES + count * OBJECT_STATE_LEN;
+    if let Some(bytes) = state.get_mut(end..end + 2) {
+        bytes.copy_from_slice(&END_OF_OBJECTS.to_le_bytes());
+    }
+}
+
+/// Records where object state `index` stands, as a step does halfway
+/// through (`0x0800B764`).
+pub fn set_object_cell(state: &mut [u8], index: usize, (column, row): (u8, u8)) {
+    let at = OBJECT_STATES + index * OBJECT_STATE_LEN;
+    if let Some(bytes) = state.get_mut(at + 2..at + 4) {
+        bytes.copy_from_slice(&[column, row]);
+    }
+}
+
+/// Marks object state `index` as gone, as a won battle does to the enemy
+/// (`0x0800B9CC`).
+pub fn remove_object(state: &mut [u8], index: usize) {
+    let at = OBJECT_STATES + index * OBJECT_STATE_LEN;
+    if let Some(byte) = state.get_mut(at + 1) {
+        *byte &= !OBJECT_PRESENT.to_le_bytes()[1];
+    }
+}
+
+/// Counts a battle won against a roaming enemy: the half-word at `+0x0A`
+/// (`0x0800B9CC`).
+pub fn count_battle(state: &mut [u8]) {
+    if let Some(bytes) = state.get_mut(BATTLES..BATTLES + 2) {
+        let count = u16::from_le_bytes([bytes[0], bytes[1]]).wrapping_add(1);
+        bytes.copy_from_slice(&count.to_le_bytes());
+    }
+}
+
 fn check_len(state: &[u8]) -> Result<(), ProgressError> {
     if state.len() == STATE_LEN {
         Ok(())
@@ -311,6 +434,35 @@ mod tests {
         assert!(zoid_seen(&state, 5) && !zoid_seen(&state, 6));
         assert!(character_known(&state, 2) && !character_known(&state, 3));
         assert!(!zoid_seen(&state, STATE_LEN));
+    }
+
+    #[test]
+    fn keeps_object_states_up_to_the_end_marker() {
+        let mut state = block();
+        let enemy = ObjectState {
+            map: 1,
+            present: true,
+            column: 8,
+            row: 9,
+            sprite: 0x27,
+            group: 10,
+            parameter: 0,
+            command: 4,
+            extra: [0; 3],
+        };
+        write_object_states(&mut state, &[enemy]);
+        assert_eq!(
+            &state[0x50..0x5B],
+            &[1, 0x80, 8, 9, 0x27, 0, 10, 0, 0, 0, 4]
+        );
+        assert_eq!(&state[0x60..0x62], &[0xFF, 0xFF]);
+        set_object_cell(&mut state, 0, (7, 9));
+        remove_object(&mut state, 0);
+        let read = object_states(&state);
+        assert_eq!(read.len(), 1);
+        assert_eq!((read[0].column, read[0].present), (7, false));
+        count_battle(&mut state);
+        assert_eq!(&state[0x0A..0x0C], &[1, 0]);
     }
 
     #[test]
