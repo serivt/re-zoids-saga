@@ -235,7 +235,7 @@ pub fn portrait(
     })
 }
 
-fn rom_offset(pointer: &[u8]) -> Option<usize> {
+pub(crate) fn rom_offset(pointer: &[u8]) -> Option<usize> {
     let address = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]);
     address
         .checked_sub(0x0800_0000)
@@ -1153,7 +1153,7 @@ pub(crate) fn read_animations(rom: &[u8], table: usize) -> Option<Vec<Vec<Animat
     Some(animations)
 }
 
-fn read_steps(rom: &[u8], mut at: usize) -> Option<Vec<AnimationStep>> {
+pub(crate) fn read_steps(rom: &[u8], mut at: usize) -> Option<Vec<AnimationStep>> {
     let mut steps = Vec::new();
     for _ in 0..SPRITE_ANIMATION_STEPS_MAX {
         let bytes = rom.get(at..at + SPRITE_ANIMATION_STEP_LEN)?;

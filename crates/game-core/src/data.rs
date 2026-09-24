@@ -8,7 +8,7 @@ use extraction::saga::{
     PauseWallpaper, Portrait, PortraitError, Scene, SceneError, SpriteSheet, SpriteSheetError,
     TitleGraphics, Warp, WindowSkin, WindowSkinError,
 };
-use extraction::saga_battle::{self, BattleImage, BattleScene};
+use extraction::saga_battle::{self, BattleImage, BattleScene, EffectSprite};
 use extraction::saga_guide::{
     self, CHARACTER_ENTRIES, CHARACTER_GUIDE_SCRIPTS, GuidePicture, SYSTEM_SCRIPTS,
     ZOID_GUIDE_SCRIPTS, ZoidPart,
@@ -220,6 +220,12 @@ impl<'rom> GameData<'rom> {
     #[must_use]
     pub fn scenery_image(&self, scenery: u8) -> Option<BattleImage> {
         saga_battle::scenery_image(self.rom, scenery)
+    }
+
+    /// Effect sprite `id`, of the shots battle scenes show.
+    #[must_use]
+    pub fn effect_sprite(&self, id: u16) -> Option<EffectSprite> {
+        saga_battle::effect_sprite(self.rom, usize::from(id))
     }
 
     /// Zoid `zoid`'s battle image.

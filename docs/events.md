@@ -158,8 +158,8 @@ formation.
 - The opening matches frame by frame. A known one-frame drift appears after dialogue 41.
 - The title, continuing and the notices match frame by frame.
 - Map exits match frame by frame.
-- The throne-room cutscene matches frame by frame, its two battle scenes included but
-  for their shots (see [battle.md](battle.md)).
+- The throne-room cutscene matches frame by frame, its two battle scenes included (see
+  [battle.md](battle.md)).
 - The later segments match as sequences of entity states: the throne room, the ground
   floor, the gate, the hangar, the choice, the departure, and the arrival in `mq0157`
   at pixel (128, 32).
@@ -167,8 +167,7 @@ formation.
 
 ## Not modeled yet
 
-- The shots of the battle scenes, and the battle engine itself (see
-  [battle.md](battle.md)).
+- The battle engine itself (see [battle.md](battle.md)).
 - The CPU-time variance of script operations.
 - Doors taken with A (`0xC000` attributes).
 - The object-state overlay.

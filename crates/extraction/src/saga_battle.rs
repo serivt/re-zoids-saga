@@ -22,9 +22,21 @@
 //! and `0x6F6BF0` (palette) by scenery, loaded to palette entries 64–127;
 //! a Zoid's at the first of three pointers per Zoid of ROM `0x6F8974`
 //! (tiles) and `0x6F9100` (palette), loaded to entries 0–63.
+//!
+//! The shots' effects are sprites of the 282 16-byte records at ROM
+//! `0x6F77D4`: LZ77-compressed 4bpp tiles, an LZ77-compressed palette, a
+//! table of animations and a table of frames. A frame is a list of 20-byte
+//! pieces ended by a tile of `0xFFFF`, which the sprite drawer at
+//! `0x08000560` turns into OAM entries: the first tile, the flips (low two
+//! bits) and a rotation (high byte), the offset from the anchor, the size,
+//! the horizontal and vertical scale in 8.8 and, unless `0xFF`, an affine
+//! slot with `0x200` for the double-size box.
 
+use formats::bgr555::parse_palette;
 use formats::lz77;
-use formats::tile::TILE_PIXELS;
+use formats::tile::{TILE_PIXELS, Tileset};
+
+use crate::saga::{AnimationStep, read_steps, rom_offset};
 
 const SCENES: usize = 0x0066_429C;
 const SCENE_LEN: usize = 44;
@@ -40,6 +52,12 @@ const IMAGE_COLORS: usize = 64;
 /// First `battle` string of the quotes the scenes' enemies speak.
 pub const QUOTE_BASE: usize = 172;
 const ROM_BASE: u32 = 0x0800_0000;
+const EFFECTS: usize = 0x006F_77D4;
+const EFFECT_LEN: usize = 16;
+const EFFECT_COUNT: usize = 282;
+const PIECE_LEN: usize = 20;
+const PIECES_END: u16 = 0xFFFF;
+const PIECES_MAX: usize = 16;
 
 /// What a staged battle scene shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +79,102 @@ pub struct BattleImage {
     pub tiles: Vec<[u8; TILE_PIXELS]>,
     /// BGR555 colors, to be loaded where the image's indices expect them.
     pub palette: Vec<u16>,
+}
+
+/// One piece of an effect's frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectPiece {
+    /// First tile, relative to the sprite's; the top four bits add to the
+    /// palette.
+    pub tile: u16,
+    /// Flips in the low two bits, a rotation in the high byte.
+    pub attributes: u16,
+    /// Offset of the piece's top-left corner from the anchor.
+    pub x: i16,
+    /// See [`EffectPiece::x`].
+    pub y: i16,
+    /// Size in pixels.
+    pub width: u16,
+    /// See [`EffectPiece::width`].
+    pub height: u16,
+    /// Horizontal scale, 8.8 (`0x100` is the image's size).
+    pub scale_x: i16,
+    /// Vertical scale, 8.8.
+    pub scale_y: i16,
+    /// `0xFF` for a plain piece; otherwise an affine one, drawn in a box
+    /// twice its size when bit `0x200` is set.
+    pub affine: u16,
+}
+
+/// A shot effect's sprite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectSprite {
+    /// Its 4bpp tiles.
+    pub tiles: Tileset,
+    /// Its 16 colors.
+    pub palette: [u16; 16],
+    /// Its frames, each a list of pieces.
+    pub frames: Vec<Vec<EffectPiece>>,
+    /// Its first animation.
+    pub animation: Vec<AnimationStep>,
+}
+
+/// Effect sprite `id` of the table at ROM `0x6F77D4`.
+#[must_use]
+pub fn effect_sprite(rom: &[u8], id: usize) -> Option<EffectSprite> {
+    if id >= EFFECT_COUNT {
+        return None;
+    }
+    let record = rom.get(EFFECTS + id * EFFECT_LEN..EFFECTS + (id + 1) * EFFECT_LEN)?;
+    let pointer = |at: usize| rom_offset(&record[at..at + 4]);
+    let (tile_bytes, _) = lz77::decompress(rom.get(pointer(0)?..)?).ok()?;
+    let (palette_bytes, _) = lz77::decompress(rom.get(pointer(4)?..)?).ok()?;
+    let palette = parse_palette(&palette_bytes)?;
+    let first_animation = rom_offset(rom.get(pointer(8)?..pointer(8)? + 4)?)?;
+    let animation = read_steps(rom, first_animation)?;
+    let frame_table = pointer(12)?;
+    let frame_count = animation
+        .iter()
+        .map(|step| step.frame + 1)
+        .max()
+        .unwrap_or(0);
+    let frames = (0..frame_count)
+        .map(|index| {
+            let at = frame_table + index * 4;
+            read_pieces(rom, rom_offset(rom.get(at..at + 4)?)?)
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(EffectSprite {
+        tiles: Tileset::from_4bpp(&tile_bytes),
+        palette,
+        frames,
+        animation,
+    })
+}
+
+fn read_pieces(rom: &[u8], mut at: usize) -> Option<Vec<EffectPiece>> {
+    let mut pieces = Vec::new();
+    for _ in 0..PIECES_MAX {
+        let bytes = rom.get(at..at + PIECE_LEN)?;
+        let half = |i: usize| u16::from_le_bytes([bytes[i], bytes[i + 1]]);
+        let signed = |i: usize| i16::from_le_bytes([bytes[i], bytes[i + 1]]);
+        if half(0) == PIECES_END {
+            return Some(pieces);
+        }
+        pieces.push(EffectPiece {
+            tile: half(0),
+            attributes: half(2),
+            x: signed(4),
+            y: signed(6),
+            width: half(8),
+            height: half(10),
+            scale_x: signed(12),
+            scale_y: signed(14),
+            affine: half(16),
+        });
+        at += PIECE_LEN;
+    }
+    None
 }
 
 /// Scene `index` of the table, if the ROM has it.
@@ -140,6 +254,59 @@ mod tests {
             block.extend(chunk.iter().map(|_| value));
         }
         block
+    }
+
+    #[test]
+    fn reads_an_effect_sprite_and_its_multi_piece_frames() {
+        let data = 0x0070_0000;
+        let mut rom = vec![0; data + 0x400];
+        let record = EFFECTS + 5 * EFFECT_LEN;
+        let tiles = literal_block(2 * 32, 0x21);
+        let palette = literal_block(32, 0x7F);
+        let (tiles_at, palette_at) = (data, data + 0x100);
+        let (animations, steps, frames, frame) =
+            (data + 0x200, data + 0x210, data + 0x220, data + 0x240);
+        rom[tiles_at..tiles_at + tiles.len()].copy_from_slice(&tiles);
+        rom[palette_at..palette_at + palette.len()].copy_from_slice(&palette);
+        put_pointer(&mut rom, record, tiles_at);
+        put_pointer(&mut rom, record + 4, palette_at);
+        put_pointer(&mut rom, record + 8, animations);
+        put_pointer(&mut rom, record + 12, frames);
+        put_pointer(&mut rom, animations, steps);
+        rom[steps..steps + 8].copy_from_slice(&[0, 0, 2, 0, 0xFF, 0xFF, 0, 0]);
+        put_pointer(&mut rom, frames, frame);
+        let piece = |tile: u16, x: i16, affine: u16| {
+            let mut bytes = Vec::new();
+            for half in [
+                tile,
+                0,
+                u16::from_ne_bytes(x.to_ne_bytes()),
+                0xFFFC,
+                32,
+                8,
+                0x100,
+                0x120,
+                affine,
+                0,
+            ] {
+                bytes.extend_from_slice(&half.to_le_bytes());
+            }
+            bytes
+        };
+        let mut pieces = piece(0, -60, 0xFF);
+        pieces.extend(piece(4, -28, 0x300));
+        pieces.extend_from_slice(&0xFFFFu16.to_le_bytes());
+        rom[frame..frame + pieces.len()].copy_from_slice(&pieces);
+        let sprite = effect_sprite(&rom, 5).expect("effect");
+        assert_eq!(sprite.palette[0], 0x7F7F);
+        assert_eq!(sprite.animation.len(), 1);
+        assert_eq!(sprite.frames.len(), 1);
+        assert_eq!(sprite.frames[0].len(), 2);
+        assert_eq!(sprite.frames[0][1].tile, 4);
+        assert_eq!(sprite.frames[0][1].x, -28);
+        assert_eq!(sprite.frames[0][1].scale_y, 0x120);
+        assert_eq!(sprite.frames[0][1].affine, 0x300);
+        assert_eq!(effect_sprite(&rom, EFFECT_COUNT), None);
     }
 
     #[test]

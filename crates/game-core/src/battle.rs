@@ -13,16 +13,24 @@
 //! 256×256 map, mirrored), BG1, the Zoid (the same kind of image on a
 //! 512×256 map), BG0 with two light-framed windows, the portrait's at
 //! tile (0, 14) 6×6 and the message's at (6, 16) 24×4, and the pilot's
-//! 48×48 portrait as sprites at (0, 112) over the first. Both images are drawn mirrored, as the
-//! map's entries flip every tile. The scenery scrolls per scanline: the
-//! sky by 1/16 pixel a frame, the forest by 1/4, and the ground faster on
-//! each line. The shots, their effects and the sounds are not modeled yet.
+//! 48×48 portrait as sprites at (0, 112) over the first. Both images are
+//! drawn mirrored, as the map's entries flip every tile. The scenery
+//! scrolls per scanline: the sky by 1/16 pixel a frame, the forest by 1/4,
+//! and the ground faster on each line.
+//!
+//! Each shot spawns effect sprites (see `extraction::saga_battle`): a
+//! muzzle flash, a ring and a round, or the scene's own kinds. Their
+//! positions are on BG1, so they follow the Zoid's recoil; they are drawn
+//! mirrored like the Zoid, semi-transparent (15/16 of the sprite over 8/16
+//! of the layer below), under the windows, and like BG1 a frame late. Each
+//! shot plays its sound effect in the frame its flash spawns, as the battle
+//! module's calls to `0x080019EC` do.
 
 use extraction::saga::Portrait;
-use extraction::saga_battle::{BattleImage, BattleScene};
+use extraction::saga_battle::{BattleImage, BattleScene, EffectPiece, EffectSprite};
 use formats::tile::TILE_PIXELS;
-use gba_runtime::ppu::{FullPalette, darken};
-use platform::{Frame, Input};
+use gba_runtime::ppu::{FullPalette, Palette, darken};
+use platform::{Frame, Input, Rgb};
 
 use crate::data::GameData;
 use crate::script::{ScriptError, ScriptRunner};
@@ -56,8 +64,17 @@ const SLIDE_FROM: i32 = 176;
 const SLIDE_DONE: u32 = 64;
 const PARALLAX_START: u32 = 11;
 const PARALLAX_OFFSET: i32 = -0x2000;
+/// The screen line the battle module's rewrite of the scroll table
+/// reaches the drawing at, when the frame is not loaded.
+const TABLE_WRITE_LINE: usize = 16;
 const QUOTE_START: u32 = 159;
 const RECOIL_STEPS: [(u32, i32); 3] = [(0, 4), (2, 2), (4, 1)];
+const PLAIN_PIECE: u16 = 0xFF;
+const DOUBLE_SIZE: u16 = 0x200;
+const FLIP_X: u16 = 1;
+const FLIP_Y: u16 = 2;
+const ROTATION: u16 = 0xFF00;
+const TILE_INDEX: u16 = 0x3FF;
 
 /// How one of the scenes unfolds, as measured frame by frame: the frames
 /// are counted from the one the scene first shows.
@@ -70,11 +87,121 @@ struct Timeline {
     /// Frames the battle module ran long and left the scenery's scroll
     /// table as it was (it loads the shot's graphics).
     stalls: &'static [u32],
+    /// The effect sprites the shots spawn.
+    spawns: &'static [Spawn],
     /// The frame the fade to black starts.
     fade_out: u32,
     /// The frame the scene hands the screen back.
     end: u32,
 }
+
+/// An effect sprite a shot spawns, as the entity table showed it.
+struct Spawn {
+    /// The frame it appears in the entity table.
+    at: u32,
+    /// Its sprite in the effects table.
+    sprite: u16,
+    /// Its anchor on BG1.
+    position: (i32, i32),
+    /// How a round flies; `None` for a sprite that stays until its
+    /// animation ends.
+    flight: Option<Flight>,
+    /// The sound effect the shot plays as the sprite appears.
+    sound: Option<u8>,
+}
+
+/// A round flying right along its line.
+struct Flight {
+    /// Frames it waits before moving.
+    delay: u32,
+    /// Frames it exists.
+    lifetime: u32,
+}
+
+/// Pixels a round flies a frame.
+const ROUND_SPEED: i32 = 24;
+
+const fn spawn(at: u32, sprite: u16, position: (i32, i32)) -> Spawn {
+    Spawn {
+        at,
+        sprite,
+        position,
+        flight: None,
+        sound: None,
+    }
+}
+
+/// A muzzle flash, which plays the shot's sound.
+const fn flash(at: u32, sprite: u16, position: (i32, i32), sound: u8) -> Spawn {
+    Spawn {
+        at,
+        sprite,
+        position,
+        flight: None,
+        sound: Some(sound),
+    }
+}
+
+const fn round(at: u32, sprite: u16, position: (i32, i32), delay: u32, lifetime: u32) -> Spawn {
+    Spawn {
+        at,
+        sprite,
+        position,
+        flight: Some(Flight { delay, lifetime }),
+        sound: None,
+    }
+}
+
+const MUZZLE: u16 = 188;
+const RING: u16 = 189;
+const BULLET: u16 = 167;
+const HORN_MUZZLE: u16 = 183;
+const HORN_ROUND: u16 = 156;
+const WOLF_SHOT_SOUND: u8 = 123;
+const HORN_SHOT_SOUND: u8 = 89;
+
+/// The Command Wolf's four shots: a flash with sound effect 123, a ring a
+/// frame later and a bullet a frame after that, from two barrels.
+const WOLF_SHOTS: [Spawn; 12] = [
+    flash(180, MUZZLE, (91, 55), WOLF_SHOT_SOUND),
+    spawn(181, RING, (91, 55)),
+    round(182, BULLET, (91, 55), 0, 9),
+    flash(191, MUZZLE, (91, 66), WOLF_SHOT_SOUND),
+    spawn(192, RING, (91, 66)),
+    round(193, BULLET, (91, 66), 0, 9),
+    flash(216, MUZZLE, (69, 54), WOLF_SHOT_SOUND),
+    spawn(217, RING, (69, 54)),
+    round(218, BULLET, (69, 54), 0, 9),
+    flash(227, MUZZLE, (69, 65), WOLF_SHOT_SOUND),
+    spawn(228, RING, (69, 65)),
+    round(229, BULLET, (69, 65), 0, 9),
+];
+
+/// The Red Horn's ten shots: a flash with sound effect 89 and, a frame
+/// later, a round that waits a frame before flying, the barrel moving
+/// between them.
+const HORN_SHOTS: [Spawn; 20] = [
+    flash(186, HORN_MUZZLE, (107, 55), HORN_SHOT_SOUND),
+    round(187, HORN_ROUND, (109, 50), 1, 10),
+    flash(198, HORN_MUZZLE, (104, 55), HORN_SHOT_SOUND),
+    round(199, HORN_ROUND, (106, 50), 1, 10),
+    flash(210, HORN_MUZZLE, (102, 58), HORN_SHOT_SOUND),
+    round(211, HORN_ROUND, (104, 53), 1, 10),
+    flash(221, HORN_MUZZLE, (104, 61), HORN_SHOT_SOUND),
+    round(222, HORN_ROUND, (106, 56), 1, 10),
+    flash(232, HORN_MUZZLE, (107, 61), HORN_SHOT_SOUND),
+    round(233, HORN_ROUND, (109, 56), 1, 10),
+    flash(243, HORN_MUZZLE, (109, 58), HORN_SHOT_SOUND),
+    round(244, HORN_ROUND, (111, 53), 1, 10),
+    flash(255, HORN_MUZZLE, (107, 55), HORN_SHOT_SOUND),
+    round(256, HORN_ROUND, (109, 50), 1, 10),
+    flash(267, HORN_MUZZLE, (104, 55), HORN_SHOT_SOUND),
+    round(268, HORN_ROUND, (106, 50), 1, 10),
+    flash(279, HORN_MUZZLE, (102, 58), HORN_SHOT_SOUND),
+    round(280, HORN_ROUND, (104, 53), 1, 10),
+    flash(290, HORN_MUZZLE, (104, 61), HORN_SHOT_SOUND),
+    round(291, HORN_ROUND, (106, 56), 1, 10),
+];
 
 /// Frames the game spends reloading the map after a scene.
 const RELOAD_FRAMES: u32 = 9;
@@ -84,6 +211,7 @@ const TIMELINES: [Timeline; 2] = [
         lag: 0,
         recoils: &[181, 192, 217, 228],
         stalls: &[164],
+        spawns: &WOLF_SHOTS,
         fade_out: 298,
         end: 310,
     },
@@ -91,6 +219,7 @@ const TIMELINES: [Timeline; 2] = [
         lag: 1,
         recoils: &[],
         stalls: &[],
+        spawns: &HORN_SHOTS,
         fade_out: 288,
         end: 300,
     },
@@ -105,6 +234,7 @@ pub struct BattleStage {
     quote: usize,
     timeline: &'static Timeline,
     runner: ScriptRunner,
+    effects: Vec<(u16, EffectSprite)>,
     frame: u32,
     started: bool,
 }
@@ -135,6 +265,13 @@ impl BattleStage {
         let mut palette = FullPalette::from_bgr555(&[0]);
         palette.write(ZOID_COLORS, &zoid.palette);
         palette.write(SCENERY_COLORS, &scenery.palette);
+        let mut effects: Vec<(u16, EffectSprite)> = Vec::new();
+        for spawn in timeline.spawns {
+            if effects.iter().all(|(id, _)| *id != spawn.sprite) {
+                let sprite = data.effect_sprite(spawn.sprite).ok_or(missing)?;
+                effects.push((spawn.sprite, sprite));
+            }
+        }
         let strings = data
             .script_offsets(BATTLE_TABLE)
             .ok()
@@ -148,6 +285,7 @@ impl BattleStage {
             quote,
             timeline,
             runner: ScriptRunner::named(BATTLE_TABLE, strings),
+            effects,
             frame: 0,
             started: false,
         })
@@ -200,6 +338,16 @@ impl BattleStage {
         if self.frame > QUOTE_START + self.timeline.lag && self.frame < self.timeline.end {
             self.runner.update(rom, input, windows)?;
         }
+        for spawn in self
+            .timeline
+            .spawns
+            .iter()
+            .filter(|spawn| spawn.at == self.frame)
+        {
+            if let Some(sound) = spawn.sound {
+                windows.play_sound(sound);
+            }
+        }
         if self.frame + 1 == self.timeline.end {
             windows.close_window(None);
         }
@@ -225,11 +373,18 @@ impl BattleStage {
     /// BG2's horizontal scroll on screen line `line`: the `HBlank` handler
     /// writes the per-line table's entry for the line just drawn, so a line
     /// shows the entry of the line above it (line 0 shows entry 1, which
-    /// the handler writes during `VBlank`).
+    /// the handler writes during `VBlank`). The module rewrites the table
+    /// while the frame is drawn, about 16 lines in, so the lines above show
+    /// the frame before's values.
     #[must_use]
     pub fn scenery_scroll(&self, line: usize) -> i32 {
         let entry = if line == 0 { 1 } else { line - 1 };
-        scenery_scroll_at(self.frame, self.timeline, entry)
+        let frame = if line < TABLE_WRITE_LINE {
+            self.frame.saturating_sub(1)
+        } else {
+            self.frame
+        };
+        scenery_scroll_at(frame, self.timeline, entry)
     }
 
     /// Draws the scene: scenery, Zoid, message window and portrait, with
@@ -254,6 +409,7 @@ impl BattleStage {
                 frame.set_pixel(x, y, self.palette.color(index));
             }
         }
+        self.draw_effects(frame);
         windows.draw(frame, skin, painter);
         draw_sprite(
             frame,
@@ -315,6 +471,196 @@ fn zoid_scroll_at(frame: u32, timeline: &Timeline) -> i32 {
         .map(|(_, push)| push)
         .sum();
     base + recoil
+}
+
+impl BattleStage {
+    /// Draws the effects the entity table held the frame before, blended
+    /// over the layers: the first sprite drawn at a pixel covers the later
+    /// ones, as lower OAM entries do.
+    fn draw_effects(&self, frame: &mut Frame) {
+        let Some(shown) = self.frame.checked_sub(1) else {
+            return;
+        };
+        let scroll = zoid_scroll_at(shown, self.timeline);
+        let mut layer: Vec<Option<Rgb>> = vec![None; WIDTH * HEIGHT];
+        for spawn in self.timeline.spawns {
+            let Some(age) = shown.checked_sub(spawn.at) else {
+                continue;
+            };
+            let Some((_, sprite)) = self.effects.iter().find(|(id, _)| *id == spawn.sprite) else {
+                continue;
+            };
+            let Some((x, frame_index)) = effect_state(spawn, sprite, age) else {
+                continue;
+            };
+            let anchor = (x - scroll, spawn.position.1);
+            if hidden(anchor) {
+                continue;
+            }
+            let palette = Palette::new(sprite.palette.map(Palette::from_bgr555));
+            for piece in sprite.frames.get(frame_index).into_iter().flatten() {
+                draw_piece(&mut layer, sprite, &palette, piece, anchor);
+            }
+        }
+        for (index, color) in layer.into_iter().enumerate() {
+            let (x, y) = (index % WIDTH, index / WIDTH);
+            if let (Some(color), Some(below)) = (color, frame.pixel(x, y)) {
+                frame.set_pixel(x, y, blend(color, below));
+            }
+        }
+    }
+}
+
+/// Where an effect is and which frame it shows `age` frames after it
+/// spawned; `None` once it is gone. A sprite that stays shows its
+/// animation, which starts a step in, and goes with its end; a round
+/// keeps its last frame while it flies.
+fn effect_state(spawn: &Spawn, sprite: &EffectSprite, age: u32) -> Option<(i32, usize)> {
+    let elapsed = age + 1;
+    let mut start = 0;
+    let mut step = None;
+    for candidate in &sprite.animation {
+        if elapsed < start + candidate.duration {
+            step = Some(candidate.frame);
+            break;
+        }
+        start += candidate.duration;
+    }
+    match &spawn.flight {
+        None => step.map(|frame| (spawn.position.0, frame)),
+        Some(flight) if age < flight.lifetime => {
+            let frame = step.or_else(|| sprite.animation.last().map(|last| last.frame))?;
+            let flown = i32::try_from(age.saturating_sub(flight.delay)).unwrap_or(0);
+            Some((spawn.position.0 + ROUND_SPEED * flown, frame))
+        }
+        Some(_) => None,
+    }
+}
+
+/// Whether the sprite drawer culls an anchor this far off screen
+/// (`0x080005CA`).
+fn hidden((x, y): (i32, i32)) -> bool {
+    const RIGHT: i32 = 0x140;
+    const BOTTOM: i32 = 0xC0;
+    (x + 0x38).rem_euclid(0x1_0000) > RIGHT || (y + 0x20).rem_euclid(0x1_0000) > BOTTOM
+}
+
+/// Rasterizes one piece of an effect, mirrored as the enemy's sprites are,
+/// into `layer`, where the first sprite at a pixel wins.
+fn draw_piece(
+    layer: &mut [Option<Rgb>],
+    sprite: &EffectSprite,
+    palette: &Palette,
+    piece: &EffectPiece,
+    (anchor_x, anchor_y): (i32, i32),
+) {
+    let (width, height) = (i32::from(piece.width), i32::from(piece.height));
+    let affine = piece.affine != PLAIN_PIECE;
+    let double = affine && piece.affine & DOUBLE_SIZE != 0;
+    let (box_width, box_height) = if double {
+        (width * 2, height * 2)
+    } else {
+        (width, height)
+    };
+    let left = anchor_x - i32::from(piece.x) - width - if double { width } else { 0 };
+    let top = anchor_y + i32::from(piece.y);
+    let matrix = affine.then(|| piece_matrix(piece));
+    for row in 0..box_height {
+        for column in 0..box_width {
+            let (x, y) = (left + column, top + row);
+            let (Ok(sx), Ok(sy)) = (usize::try_from(x), usize::try_from(y)) else {
+                continue;
+            };
+            if sx >= WIDTH || sy >= HEIGHT || layer[sy * WIDTH + sx].is_some() {
+                continue;
+            }
+            let source = if let Some((pa, pb, pc, pd)) = matrix {
+                let (dx, dy) = (column - box_width / 2, row - box_height / 2);
+                (
+                    ((pa * dx + pb * dy) >> 8) + width / 2,
+                    ((pc * dx + pd * dy) >> 8) + height / 2,
+                )
+            } else {
+                let mirrored = piece.attributes & FLIP_X == 0;
+                let tx = if mirrored { width - 1 - column } else { column };
+                let ty = if piece.attributes & FLIP_Y != 0 {
+                    height - 1 - row
+                } else {
+                    row
+                };
+                (tx, ty)
+            };
+            if let Some(index) = piece_pixel(sprite, piece, source)
+                && index != 0
+            {
+                layer[sy * WIDTH + sx] = Some(palette.color(index));
+            }
+        }
+    }
+}
+
+/// The affine matrix the drawer sets for a piece (`ObjAffineSet` with the
+/// reciprocal of each scale and the piece's rotation), in 8.8, with the
+/// first entry negated for the enemy's mirroring.
+fn piece_matrix(piece: &EffectPiece) -> (i32, i32, i32, i32) {
+    let reciprocal = |scale: i16| 0x1_0000 / i32::from(scale.unsigned_abs()).max(1);
+    let (sx, sy) = (reciprocal(piece.scale_x), reciprocal(piece.scale_y));
+    let sy = if piece.scale_y < 0 { -sy } else { sy };
+    let turn = (0x1_0000 - i32::from(piece.attributes & ROTATION)) & 0xFFFF;
+    let angle = f64::from(turn) * std::f64::consts::TAU / 65536.0;
+    let (cos, sin) = (angle.cos(), angle.sin());
+    let mut pa = to_fixed(f64::from(sx) * cos);
+    let pb = to_fixed(-f64::from(sx) * sin);
+    let pc = to_fixed(f64::from(sy) * sin);
+    let mut pd = to_fixed(f64::from(sy) * cos);
+    pa = -pa;
+    if piece.scale_x < 0 {
+        pa = -pa;
+    }
+    if piece.scale_y < 0 {
+        pd = -pd;
+    }
+    (pa, pb, pc, pd)
+}
+
+/// Rounds a matrix entry, bounded by the reciprocal of the smallest scale,
+/// to an integer.
+#[allow(clippy::cast_possible_truncation)]
+fn to_fixed(value: f64) -> i32 {
+    value
+        .round()
+        .clamp(-f64::from(0x1_0000), f64::from(0x1_0000)) as i32
+}
+
+/// The palette index at `(x, y)` of a piece's image: its tiles in rows of
+/// `width / 8`, one-dimensional OBJ mapping.
+fn piece_pixel(sprite: &EffectSprite, piece: &EffectPiece, (x, y): (i32, i32)) -> Option<u8> {
+    let (width, height) = (i32::from(piece.width), i32::from(piece.height));
+    if !(0..width).contains(&x) || !(0..height).contains(&y) {
+        return None;
+    }
+    let (x, y) = (usize::try_from(x).ok()?, usize::try_from(y).ok()?);
+    let columns = usize::from(piece.width) / TILE;
+    let tile = usize::from(piece.tile & TILE_INDEX) + (y / TILE) * columns + x / TILE;
+    sprite
+        .tiles
+        .tile(tile)
+        .map(|pixels| pixels[(y % TILE) * TILE + x % TILE])
+}
+
+/// A semi-transparent sprite's pixel over the layer below it: 15/16 of the
+/// sprite and 8/16 of the layer (`BLDALPHA` `0x080F`), per 5-bit channel.
+fn blend(sprite: Rgb, below: Rgb) -> Rgb {
+    let channel = |top: u8, bottom: u8| {
+        let mixed = ((u16::from(top >> 3) * 15 + u16::from(bottom >> 3) * 8) >> 4).min(31);
+        let five = u8::try_from(mixed).unwrap_or(31);
+        five << 3 | five >> 2
+    };
+    Rgb::new(
+        channel(sprite.r, below.r),
+        channel(sprite.g, below.g),
+        channel(sprite.b, below.b),
+    )
 }
 
 /// The table's step per frame for entry `line`: the sky 1/16 pixel, the
@@ -394,6 +740,83 @@ mod tests {
         assert_eq!(scenery_scroll_at(163, first, 72), 37);
         assert_eq!(scenery_scroll_at(164, first, 72), 37);
         assert_eq!(scenery_scroll_at(165, first, 72), 38);
+    }
+
+    fn effect(durations: &[u32]) -> EffectSprite {
+        use extraction::saga::AnimationStep;
+        use formats::tile::Tileset;
+        EffectSprite {
+            tiles: Tileset::from_pixels(vec![[1; TILE_PIXELS]; 4]),
+            palette: [0x7FFF; 16],
+            frames: vec![Vec::new(); durations.len()],
+            animation: durations
+                .iter()
+                .enumerate()
+                .map(|(frame, duration)| AnimationStep {
+                    frame,
+                    duration: *duration,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn effects_play_their_animation_or_fly_for_their_lifetime() {
+        let muzzle = effect(&[2, 2, 16]);
+        let stay = flash(10, MUZZLE, (91, 55), WOLF_SHOT_SOUND);
+        assert_eq!(effect_state(&stay, &muzzle, 0), Some((91, 0)));
+        assert_eq!(effect_state(&stay, &muzzle, 1), Some((91, 1)));
+        assert_eq!(effect_state(&stay, &muzzle, 3), Some((91, 2)));
+        assert_eq!(effect_state(&stay, &muzzle, 18), Some((91, 2)));
+        assert_eq!(effect_state(&stay, &muzzle, 19), None);
+        let bullet = effect(&[1]);
+        let flying = round(10, BULLET, (91, 55), 1, 10);
+        assert_eq!(effect_state(&flying, &bullet, 0), Some((91, 0)));
+        assert_eq!(effect_state(&flying, &bullet, 1), Some((91, 0)));
+        assert_eq!(effect_state(&flying, &bullet, 3), Some((91 + 48, 0)));
+        assert_eq!(effect_state(&flying, &bullet, 10), None);
+        let shots = TIMELINES[0]
+            .spawns
+            .iter()
+            .filter_map(|spawn| spawn.sound.map(|sound| (spawn.at, sound)));
+        assert_eq!(
+            shots.collect::<Vec<_>>(),
+            [(180, 123), (191, 123), (216, 123), (227, 123)]
+        );
+        assert_eq!(
+            TIMELINES[1]
+                .spawns
+                .iter()
+                .filter(|spawn| spawn.sound == Some(89))
+                .count(),
+            10
+        );
+    }
+
+    #[test]
+    fn effects_are_culled_blended_and_scaled_like_the_hardware_draws_them() {
+        assert!(!hidden((91, 55)));
+        assert!(hidden((283, 55)));
+        assert!(hidden((91, 170)));
+        let white = Rgb::new(0xFF, 0xFF, 0xFF);
+        let black = Rgb::new(0, 0, 0);
+        assert_eq!(blend(white, black).r, 239);
+        assert_eq!(blend(black, white).r, 123);
+        let piece = EffectPiece {
+            tile: 0,
+            attributes: 0,
+            x: -16,
+            y: 0,
+            width: 16,
+            height: 16,
+            scale_x: 0x200,
+            scale_y: 0x100,
+            affine: 0x300,
+        };
+        assert_eq!(piece_matrix(&piece), (-128, 0, 0, 256));
+        let sprite = effect(&[1]);
+        assert_eq!(piece_pixel(&sprite, &piece, (15, 15)), Some(1));
+        assert_eq!(piece_pixel(&sprite, &piece, (16, 0)), None);
     }
 
     #[test]
