@@ -20,6 +20,10 @@ usually abut but the length is never stored. Tables located in Zoids Saga
 | `dialogue` | `0x74FC54` | 1017 | Story and character dialogue, ~300 KB of script; the game indexes this table directly (map objects name entries by index), 29 of the first 40 pointers are null |
 | `battle` | `0x755D30` | 198 | Battle quotes |
 | `menu` | `0x75B388` | 156 | Menu strings |
+| `battle-menu` | `0x675D94` | 28 | Script strings of the battle menus, which events also call (the box around a found item or a learned command) |
+| `battle-text` | `0x675E04` | 134 | Script strings of battle messages (Ｇ手に入れた and the like), which events also call |
+
+The deck commands' names are strings `77 + n` of the `item` table.
 
 String IDs are `<table>_<index>` with a five-digit zero-padded index.
 
@@ -50,7 +54,10 @@ first room's conversations in a reference emulator. Implemented in
 `crates/formats/src/script_ops.rs` (decoding) and `crates/game-core/src/script.rs`
 (execution). The interpreter keeps eight 16-bit variables, a saved copy of them, a
 current text window, and runs strings recursively through calls. Jump offsets are signed
-16-bit values relative to the opcode's own address.
+16-bit values relative to the opcode's own address. There is one interpreter for every
+table: a string of one table goes on in the window a string of another left current,
+with the variables it saved, which is how the chest and deck-command messages print a
+`battle-text` string inside a box a `battle-menu` string opened.
 
 | Opcode | Args | Meaning |
 |---|---|---|
@@ -88,8 +95,12 @@ current text window, and runs strings recursively through calls. Jump offsets ar
 | `0x3B` | 1 | Set bit 4 of window `a0`'s flags (not modeled) |
 | `0x3D` | 1 | Wait `a0` frames |
 
-Presenting, closing or clearing a window and showing a portrait flush the display, which
-costs one frame each. A message starts in the current window; inside it, `0x1C a0`
+Presenting, clearing or opening a window and showing a portrait flush the display,
+which costs one frame each; closing costs one frame, or two when another window stays
+open to be redrawn, and a reset three. After a key or a menu is accepted the next
+opcode runs one frame later. These are the usual costs measured in a reference
+emulator; the original's own costs grow when a frame runs out of CPU time (a reset
+took ten frames after a battle), which the port does not model. A message starts in the current window; inside it, `0x1C a0`
 redirects the rest of that message to window `a0` without changing the current window,
 and `0x1F a0 a1` prints var[`a0`] right-aligned in `a1 & 7` cells.
 

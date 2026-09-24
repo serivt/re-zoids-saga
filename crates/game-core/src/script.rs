@@ -4,9 +4,13 @@
 //! a saved copy of them that survives across strings, calls of other
 //! strings of the same table, jumps relative to the opcode, windows the
 //! host owns, and waits. Every operation that flushes the display in the
-//! original costs one frame here: presenting, closing or clearing a window,
-//! showing a portrait, and each character of a typewriter window. The key
-//! wait polls once per frame and blinks the prompt 20 frames off, 20 on.
+//! original costs one frame here: opening, presenting or clearing a window,
+//! showing a portrait, and each character of a typewriter window; closing a
+//! window costs two while another stays open (the others are redrawn) and
+//! resetting the text system three. The
+//! key wait polls once per frame and blinks the prompt 20 frames off, 20
+//! on; after the key that ends a key wait or a menu, the script goes on the
+//! next frame.
 //!
 //! One addition to the original: a message that would scroll its window
 //! (a translation longer than the Japanese text) stops before the line that
@@ -25,6 +29,11 @@ const VARIABLES: usize = 8;
 const WINDOWS: u8 = 8;
 const PROMPT_HALF_PERIOD: u32 = 20;
 const CONFIRM_SOUND: u8 = 0x41;
+/// Frames the text system's reset takes to redraw the cleared screen.
+const RESET_FRAMES: u32 = 3;
+/// Frames between the key that ends a key wait or a menu and the next
+/// operation.
+const KEY_ACCEPT_FRAMES: u32 = 1;
 const MENU_MOVE_SOUND: u8 = 0x40;
 const MENU_CONFIRM_SOUND: u8 = 0x47;
 const KEY_A: u16 = 1;
@@ -153,6 +162,15 @@ pub enum ScriptError {
     Decode(#[from] ScriptOpError),
 }
 
+/// The part of the interpreter's state that outlives a string: see
+/// [`ScriptRunner::context`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScriptContext {
+    window: u8,
+    text_window: u8,
+    saved: [u16; VARIABLES],
+}
+
 /// Runs strings of one table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptRunner {
@@ -200,6 +218,12 @@ impl ScriptRunner {
         }
     }
 
+    /// The name of the table the runner runs strings of.
+    #[must_use]
+    pub fn table(&self) -> &'static str {
+        self.table
+    }
+
     /// Starts string `index`, dropping anything that was running.
     ///
     /// # Errors
@@ -245,6 +269,27 @@ impl ScriptRunner {
     #[must_use]
     pub fn saved_vars(&self) -> &[u16; VARIABLES] {
         &self.saved
+    }
+
+    /// The interpreter state the game keeps from one string to the next:
+    /// the original has a single interpreter for every table, so a string
+    /// goes on in the window the previous one left current, with the
+    /// variables it saved.
+    #[must_use]
+    pub fn context(&self) -> ScriptContext {
+        ScriptContext {
+            window: self.window,
+            text_window: self.text_window,
+            saved: self.saved,
+        }
+    }
+
+    /// Takes over the state another runner left, before starting a string
+    /// of this runner's table.
+    pub fn resume(&mut self, context: ScriptContext) {
+        self.window = context.window;
+        self.text_window = context.text_window;
+        self.saved = context.saved;
     }
 
     /// Where string `index` starts in the ROM, if the table has it.
@@ -374,7 +419,7 @@ impl ScriptRunner {
             self.vars[0] = 0;
         }
         host.prompt(self.window, false);
-        self.wait = Wait::Frames(1);
+        self.wait = Wait::Frames(KEY_ACCEPT_FRAMES);
         true
     }
 
@@ -423,7 +468,7 @@ impl ScriptRunner {
             return false;
         }
         self.vars[1] = u16::try_from(cursor).unwrap_or(u16::MAX);
-        self.wait = Wait::Frames(1);
+        self.wait = Wait::Frames(KEY_ACCEPT_FRAMES);
         true
     }
 
@@ -509,16 +554,19 @@ impl ScriptRunner {
                 let rect = host.fit_window(self.table, index, id, kind, (x, y, width, height));
                 host.open_window(id, kind, rect, style);
                 self.window = id;
+                self.wait = Wait::Frames(1);
             }
             Instruction::Reset { mode } => {
                 host.reset(mode);
                 if mode & 0xF0 == 0 {
                     self.vars = [0; VARIABLES];
                 }
+                self.wait = Wait::Frames(RESET_FRAMES);
             }
             Instruction::CloseWindow { id } => {
                 host.close_window(id);
-                self.wait = Wait::Frames(1);
+                let redrawn = (0..WINDOWS).any(|id| host.is_open(id));
+                self.wait = Wait::Frames(1 + u32::from(redrawn));
             }
             Instruction::Present { id } => {
                 host.present(id);
@@ -879,7 +927,9 @@ mod tests {
         let mut host = Recorder::default();
         runner.start(1).unwrap();
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
-        assert_eq!(host.log, ["open 1 0x10 (0, 12, 30, 8) 1", "present None"]);
+        assert_eq!(host.log, ["open 1 0x10 (0, 12, 30, 8) 1"]);
+        assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
+        assert_eq!(host.log[1..], ["present None"]);
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert_eq!(host.log.len(), 4);
         assert_eq!(host.log[2..], ["char 1 あ", "reveal 1"]);
@@ -910,7 +960,7 @@ mod tests {
             ..Recorder::default()
         };
         runner.start(0).unwrap();
-        for _ in 0..4 {
+        for _ in 0..5 {
             assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
         }
         assert_eq!(host.log.last().unwrap(), "break 1");
@@ -954,6 +1004,8 @@ mod tests {
         let mut runner = ScriptRunner::new(offsets);
         let mut host = Recorder::default();
         runner.start(0).unwrap();
+        runner.update(&bytes, Input::default(), &mut host).unwrap();
+        assert!(!runner.is_waiting_for_key());
         runner.update(&bytes, Input::default(), &mut host).unwrap();
         assert!(runner.is_waiting_for_key());
         for _ in 0..19 {
@@ -1021,6 +1073,9 @@ mod tests {
         runner.start(1).unwrap();
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert_eq!(host.log, ["portrait 0 2 6"]);
+        assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
+        assert_eq!(host.log[1..], ["reset 0"]);
+        assert!(!run(&bytes, &mut runner, &mut host, 2));
         assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert_eq!(host.log[1..], ["reset 0", "sound 0x3c"]);
         assert_eq!(runner.vars()[0], 0);
@@ -1035,6 +1090,7 @@ mod tests {
         let mut runner = ScriptRunner::new(offsets);
         let mut host = Recorder::default();
         runner.start(0).unwrap();
+        assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert_eq!(host.log.last().unwrap(), "cursor 0 Some(0)");
         let down = Input::default().with(Button::Down);
@@ -1062,6 +1118,7 @@ mod tests {
         assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
         let mut runner = ScriptRunner::new(vec![24]);
         runner.start(0).unwrap();
+        runner.update(&bytes, Input::default(), &mut host).unwrap();
         runner.update(&bytes, Input::default(), &mut host).unwrap();
         runner
             .update(&bytes, Input::default().with(Button::B), &mut host)
@@ -1142,14 +1199,14 @@ mod tests {
         let mut runner = ScriptRunner::new(offsets);
         let mut host = Recorder::default();
         runner.start(0).unwrap();
-        run(&bytes, &mut runner, &mut host, 3);
+        run(&bytes, &mut runner, &mut host, 5);
         assert_eq!(
             host.log[2..],
             ["char 0 あ", "present None", "reveal 3", "cursor 3 Some(0)"]
         );
         let a = Input::default().with(Button::A);
         runner.update(&bytes, a, &mut host).unwrap();
-        run(&bytes, &mut runner, &mut host, 3);
+        run(&bytes, &mut runner, &mut host, 4);
         assert!(runner.is_waiting_for_key());
         assert_eq!(host.log.last().unwrap(), "prompt 0 false");
     }

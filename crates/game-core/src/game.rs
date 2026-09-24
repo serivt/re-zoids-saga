@@ -1,22 +1,23 @@
-//! The whole game as one state machine: logo, title, name entry, the
-//! opening cutscene in the first room, then the field with its
-//! conversations and exits.
+//! The whole game as one state machine: logo, title, name entry, then the
+//! field with its conversations, exits and events.
 //!
-//! The opening follows the original's entity trace: the player sits at
-//! the desk on metatile (6, 2) facing up, Regina starts on (6, 4), walks
-//! three steps left, turns right and walks five, turns left and walks
-//! two, faces the player, and the first dialogue string runs. Afterwards
-//! the player stands up onto (5, 2) and control begins.
+//! Entering a map runs the map's own handler (see [`crate::story`]); a new
+//! game enters the first room from black and brightens it a level a frame
+//! while the game holds, and the room's handler starts the opening. Objects
+//! whose script is code run the event transcribed for it; events run as
+//! tasks after the actors every frame (see [`crate::event`]).
 //!
-//! Continuing darkens the title 10 frames after A, fades it out over 16,
-//! keeps the screen black for 73 and fades the saved room in over 16, as
-//! the original does. When the loader has a notice (no save, a broken one,
-//! the backup used) it appears 23 frames into the black; once it is
-//! dismissed the title starts over, or, with the backup, the room fades
-//! in after 33 more black frames.
+//! Continuing, as the original does it once the title's script has ended:
+//! three frames on, the title darkens a level a frame to 31 (black from the
+//! 16th), and 75 frames after the script's end the saved room loads and
+//! brightens like any map entered. When the loader has a notice (no save, a
+//! broken one, the backup used) its script starts 40 frames after the
+//! script's end; once it is dismissed the title starts over, or, with the
+//! backup, the room loads 16 frames later.
 
 use extraction::saga::{
-    BootError, FIRST_ROOM_MAP, OPENING_SEEN_FLAG, PLAYER_START, SpriteSheetError,
+    BootError, CHEST_FLAG_BASE, FIRST_ROOM_MAP, OPENING_SEEN_FLAG, ObjectScript, PLAYER_START,
+    SpriteSheetError,
 };
 use extraction::saga_save::SaveDataError;
 use formats::Progress;
@@ -29,110 +30,50 @@ use thiserror::Error;
 
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::data::GameData;
+use crate::event::{BLACK, EventHost, Events, HoldStep, MAP_TASK, Op};
 use crate::extension::{Event, GameSound, SharedExtensions};
-use crate::field::{Direction, Field, FieldError, FieldEvent, NpcCommand};
+use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
 use crate::guide::{Guide, GuideError, GuideKind};
 use crate::menu::{MenuStep, Party, PauseMenu};
 use crate::save::{Found, SaveFile, SavedGame};
-use crate::script::{ScriptError, ScriptRunner};
+use crate::script::{ScriptContext, ScriptError, ScriptRunner};
+use crate::story;
 use crate::text::TextMetrics;
 use crate::translation::{DIALOGUE_TABLE, Translation, TranslationExtension};
 use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows};
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
 const TALK_START_DELAY: u32 = 3;
-const NAME_TO_ROOM_BLACK_FRAMES: u32 = 60;
-const INTRO_DIALOGUE: usize = 40;
-const INTRO_SECOND_DIALOGUE: usize = 41;
-const INTRO_PLAYER_CELL: (usize, usize) = (6, 2);
-const REGINA_SPRITE: usize = 0x99;
-const REGINA_START: (usize, usize) = (6, 4);
-const INTRO_FADE_FRAMES: u32 = 32;
-const INTRO_DARK_FRAMES: u32 = 158;
-const INTRO_DIALOGUE_DELAY: u32 = 60;
-const INTRO_STAND_UP_DELAY: u32 = 2;
-const CONTINUE_HOLD_FRAMES: u32 = 8;
-const CONTINUE_FADE_FRAMES: u32 = 16;
-const CONTINUE_BLACK_FRAMES: u32 = 72;
-const CONTINUE_NOTICE_DELAY: u32 = 22;
-const CONTINUE_AFTER_NOTICE_FRAMES: u32 = 33;
+/// Frames between A and a chest opening.
+const CHEST_START_DELAY: u32 = 1;
+const CHEST_SOUND: u16 = 0x48;
+const SMALL_CHEST_SOUND: u16 = 0x46;
+const SMALL_CHEST_SPRITE: &str = "tb00";
+const CHEST_OPEN_ANIMATION: usize = 1;
+const MONEY_WINDOW: u8 = 1;
+/// Frames between the step onto an exit and the first darker level.
+const EXIT_FADE_DELAY: u8 = 1;
+/// Frames the destination stays black once loaded, and frames the game
+/// stays held once it is bright again.
+const WARP_BLACK_FRAMES: u8 = 10;
+const WARP_SETTLE_FRAMES: u8 = 1;
+/// Once the name entry's script ends the entry stays this many frames,
+/// then darkens a level a frame (visibly for 16, on to 31), and the first
+/// room loads this many frames after the script's end.
+const NAME_HOLD_FRAMES: u32 = 4;
+const NAME_TO_ROOM_FRAMES: u32 = 67;
+/// The name entry's music stops this many frames after the script's end.
+const NAME_MUSIC_STOP_FRAMES: u32 = 43;
+const CONTINUE_HOLD_FRAMES: u32 = 3;
+const CONTINUE_LOAD_FRAMES: u32 = 75;
+const CONTINUE_NOTICE_FRAMES: u32 = 40;
+const CONTINUE_AFTER_NOTICE_FRAMES: u32 = 16;
 const MUSIC_PLAYER: usize = 0;
 /// The area a save names when its object table does not describe the
 /// current one; the original rebuilds the table on loading it. The port
 /// does not build the table, so it keeps a loaded area only while the
 /// player stays in it.
 const NO_AREA: u8 = 0;
-/// Regina's walk before the first line, as `(frames to wait, order)`.
-const INTRO_ARRIVAL: [(u32, IntroOrder); 13] = [
-    (15, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (25, IntroOrder::Regina(NpcCommand::Face(Direction::Right))),
-    (31, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Face(Direction::Left))),
-    (61, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (11, IntroOrder::Regina(NpcCommand::Face(Direction::Up))),
-];
-/// Regina's pacing while the screen is dark, from the first line's end.
-const INTRO_PACING: [(u32, IntroOrder); 10] = [
-    (4, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Face(Direction::Right))),
-    (61, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Right))),
-    (0, IntroOrder::Regina(NpcCommand::Face(Direction::Left))),
-];
-/// Regina's way out after the second line, the player watching her go.
-const INTRO_LEAVING: [(u32, IntroOrder); 15] = [
-    (6, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
-    (23, IntroOrder::Player(Direction::Down)),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Left))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
-    (1, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
-    (0, IntroOrder::Regina(NpcCommand::Step(Direction::Down))),
-];
-
-/// One order of the opening's choreography.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum IntroOrder {
-    /// Regina moves or turns.
-    Regina(NpcCommand),
-    /// The player turns.
-    Player(Direction),
-}
-
-/// Where the opening is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum IntroPhase {
-    Arriving,
-    FirstTalk,
-    FadingOut(u32),
-    Dark(u32),
-    FadingIn(u32),
-    SecondTalkWait,
-    SecondTalk,
-    Leaving,
-    StandingUp,
-}
-
 /// Where the game is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
@@ -144,8 +85,6 @@ pub enum Stage {
     NameEntry,
     /// Black between the name entry and the room.
     Loading,
-    /// The opening cutscene.
-    Intro,
     /// Free play.
     Field,
     /// The pause menu.
@@ -192,24 +131,22 @@ enum Screen {
     Logo(LogoScreen),
     Title(TitleScreen),
     NameEntry(NameEntry),
-    Loading(u32),
-    Intro(IntroState),
+    Loading,
+    LeavingNameEntry(Box<NameEntry>, u32),
     Field,
     Menu(PauseMenu),
     Continuing(Continuing),
     Guide(Box<Guide>),
 }
 
-/// Where continuing is: the title held then fading out, black (with the
-/// loader's notice once it is due), then the room fading in.
+/// Where continuing is: frames since the title's script ended (the title
+/// held, darkening, then black), the loader's notice, or frames since it
+/// was dismissed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ContinuePhase {
-    Holding(u32),
-    FadingOut(u32),
-    Black(u32),
+    Leaving(u32),
     Notice,
     AfterNotice(u32),
-    FadingIn(u32),
 }
 
 struct Continuing {
@@ -219,48 +156,23 @@ struct Continuing {
 
 impl Continuing {
     fn darkness(&self) -> u8 {
-        let level = match self.phase {
-            ContinuePhase::Holding(_) => 0,
-            ContinuePhase::FadingOut(frames) => {
-                frames * u32::from(FADE_STEPS) / CONTINUE_FADE_FRAMES
+        match self.phase {
+            ContinuePhase::Leaving(frames) => {
+                u8::try_from(frames.saturating_sub(CONTINUE_HOLD_FRAMES))
+                    .map_or(BLACK, |level| level.min(BLACK))
             }
-            ContinuePhase::Black(_) | ContinuePhase::Notice | ContinuePhase::AfterNotice(_) => {
-                u32::from(FADE_STEPS)
-            }
-            ContinuePhase::FadingIn(frames) => {
-                u32::from(FADE_STEPS) - frames * u32::from(FADE_STEPS) / CONTINUE_FADE_FRAMES
-            }
-        };
-        u8::try_from(level).unwrap_or(FADE_STEPS)
+            ContinuePhase::Notice | ContinuePhase::AfterNotice(_) => BLACK,
+        }
     }
 }
 
-struct IntroState {
-    regina: usize,
-    path: &'static [(u32, IntroOrder)],
-    step: usize,
-    wait: u32,
-    phase: IntroPhase,
-}
-
-impl IntroState {
-    fn follow(&mut self, path: &'static [(u32, IntroOrder)]) {
-        self.path = path;
-        self.step = 0;
-        self.wait = path.first().map_or(0, |order| order.0);
-    }
-
-    fn darkness(&self) -> u8 {
-        let level = match self.phase {
-            IntroPhase::FadingOut(frames) => frames * u32::from(FADE_STEPS) / INTRO_FADE_FRAMES,
-            IntroPhase::Dark(_) => u32::from(FADE_STEPS),
-            IntroPhase::FadingIn(frames) => {
-                u32::from(FADE_STEPS) - frames * u32::from(FADE_STEPS) / INTRO_FADE_FRAMES
-            }
-            _ => 0,
-        };
-        u8::try_from(level).unwrap_or(FADE_STEPS)
-    }
+/// What speaking to an object starts once the talk delay has passed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Talk {
+    /// A string of the dialogue table.
+    Dialogue(usize),
+    /// A transcribed event.
+    Event(&'static [Op]),
 }
 
 /// The running game.
@@ -273,9 +185,16 @@ pub struct Game<'rom> {
     windows: ScriptWindows<'rom>,
     sound: SoundEngine<'rom>,
     dialogue: ScriptRunner,
+    scripts: Vec<ScriptRunner>,
+    active_script: Option<usize>,
+    last_runner: Option<usize>,
     field: Option<Field>,
+    events: Events,
     screen: Screen,
-    pending_talk: Option<(usize, u32)>,
+    pending_talk: Option<(Talk, u32)>,
+    exit_taken: Option<usize>,
+    warped: Option<usize>,
+    chest: Option<(usize, u16)>,
     player_name: String,
     party: Party,
     state: Vec<u8>,
@@ -283,6 +202,7 @@ pub struct Game<'rom> {
     storage: Option<Box<dyn SaveStorage>>,
     found: Option<Found>,
     previous: Input,
+    latched: Input,
 }
 
 impl<'rom> Game<'rom> {
@@ -305,14 +225,7 @@ impl<'rom> Game<'rom> {
     pub fn in_first_room(rom: &'rom [u8]) -> Result<Self, GameError> {
         let mut game = Self::bare(rom)?;
         game.windows.set_flag(OPENING_SEEN_FLAG, true);
-        game.field = Some(Field::load(&game.data, FIRST_ROOM_MAP, PLAYER_START)?);
-        Self::emit(
-            &game.extensions,
-            &Event::RoomEntered {
-                map: FIRST_ROOM_MAP,
-                cell: PLAYER_START,
-            },
-        );
+        game.enter_map(FIRST_ROOM_MAP, PLAYER_START)?;
         game.screen = Screen::Field;
         Self::play(
             &mut game.sound,
@@ -382,9 +295,16 @@ impl<'rom> Game<'rom> {
             },
             sound: SoundEngine::new(data.bytes(), song_table, song_count, master_volume),
             dialogue: ScriptRunner::named(DIALOGUE_TABLE, dialogue),
+            scripts: Vec::new(),
+            active_script: None,
+            last_runner: None,
             field: None,
-            screen: Screen::Loading(0),
+            events: Events::new(),
+            screen: Screen::Loading,
             pending_talk: None,
+            exit_taken: None,
+            warped: None,
+            chest: None,
             player_name: DEFAULT_PLAYER_NAME.to_owned(),
             party: Party::default(),
             state,
@@ -392,6 +312,7 @@ impl<'rom> Game<'rom> {
             storage: None,
             found: None,
             previous: Input::default(),
+            latched: Input::default(),
         })
     }
 
@@ -402,8 +323,7 @@ impl<'rom> Game<'rom> {
             Screen::Logo(_) => Stage::Logo,
             Screen::Title(_) => Stage::Title,
             Screen::NameEntry(_) => Stage::NameEntry,
-            Screen::Loading(_) => Stage::Loading,
-            Screen::Intro(_) => Stage::Intro,
+            Screen::Loading | Screen::LeavingNameEntry(..) => Stage::Loading,
             Screen::Field => Stage::Field,
             Screen::Menu(_) => Stage::Menu,
             Screen::Continuing(_) => Stage::Continuing,
@@ -417,18 +337,33 @@ impl<'rom> Game<'rom> {
         self.field.as_ref()
     }
 
+    /// The script windows on screen.
+    #[must_use]
+    pub fn windows(&self) -> &ScriptWindows<'rom> {
+        &self.windows
+    }
+
+    /// The brightness events set: 0 normal, 16 and above black.
+    #[must_use]
+    pub fn brightness(&self) -> u8 {
+        self.events.brightness()
+    }
+
     /// The player's name.
     #[must_use]
     pub fn player_name(&self) -> &str {
         &self.player_name
     }
 
-    /// Advances one frame.
+    /// Advances one frame. The game acts on the buttons of the previous
+    /// call, as the original reads the keys at the vertical blank before
+    /// the frame's logic.
     ///
     /// # Errors
     ///
     /// Returns [`GameError`] when a screen or script fails.
     pub fn update(&mut self, input: Input) -> Result<(), GameError> {
+        let input = std::mem::replace(&mut self.latched, input);
         let start = input.is_held(Button::Start) && !self.previous.is_held(Button::Start);
         self.previous = input;
         self.frame += 1;
@@ -466,28 +401,10 @@ impl<'rom> Game<'rom> {
                     _ => {}
                 }
             }
-            Screen::NameEntry(entry) => {
-                if entry.update(rom, input, &mut self.windows)? {
-                    self.player_name = entry.name();
-                    self.windows.set_player_name(&self.player_name);
-                    self.windows.close_window(None);
-                    self.screen = Screen::Loading(0);
-                    Self::emit(
-                        &self.extensions,
-                        &Event::NameConfirmed(self.player_name.clone()),
-                    );
-                    self.sound.stop_music();
-                }
-            }
-            Screen::Loading(frames) => {
-                *frames += 1;
-                if *frames >= NAME_TO_ROOM_BLACK_FRAMES {
-                    self.start_intro()?;
-                }
-            }
-            Screen::Intro(_) => self.update_intro(input)?,
+            Screen::NameEntry(_) | Screen::LeavingNameEntry(..) => self.update_name_entry(input)?,
+            Screen::Loading => {}
             Screen::Field => {
-                if start && self.dialogue.is_done() && self.pending_talk.is_none() {
+                if start && self.player_in_control() {
                     let mut menu = PauseMenu::new(&self.data, self.party.clone())?;
                     menu.open(rom, &mut self.windows)?;
                     self.screen = Screen::Menu(menu);
@@ -553,6 +470,41 @@ impl<'rom> Game<'rom> {
         self.sound.output()
     }
 
+    /// Runs the name entry, then holds and darkens it until the first room
+    /// loads.
+    fn update_name_entry(&mut self, input: Input) -> Result<(), GameError> {
+        let rom = self.data.bytes();
+        match &mut self.screen {
+            Screen::NameEntry(entry) => {
+                if !entry.update(rom, input, &mut self.windows)? {
+                    return Ok(());
+                }
+                self.player_name = entry.name();
+                self.windows.set_player_name(&self.player_name);
+                self.windows.close_window(None);
+                Self::emit(
+                    &self.extensions,
+                    &Event::NameConfirmed(self.player_name.clone()),
+                );
+                let screen = std::mem::replace(&mut self.screen, Screen::Loading);
+                if let Screen::NameEntry(entry) = screen {
+                    self.screen = Screen::LeavingNameEntry(Box::new(entry), 0);
+                }
+            }
+            Screen::LeavingNameEntry(_, frames) => {
+                *frames += 1;
+                if *frames == NAME_MUSIC_STOP_FRAMES {
+                    self.sound.stop_music();
+                }
+                if *frames >= NAME_TO_ROOM_FRAMES {
+                    self.start_new_game_room()?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn new_game(&mut self, input: Input) -> Result<(), GameError> {
         self.state = self.data.new_game_state()?;
         self.party = Party::default();
@@ -580,7 +532,7 @@ impl<'rom> Game<'rom> {
             Some(saved) => saved.state.clone(),
             None => self.data.new_game_state()?,
         };
-        let screen = std::mem::replace(&mut self.screen, Screen::Loading(0));
+        let screen = std::mem::replace(&mut self.screen, Screen::Loading);
         let Screen::Title(title) = screen else {
             self.screen = screen;
             return Ok(());
@@ -603,7 +555,7 @@ impl<'rom> Game<'rom> {
             None => None,
         };
         self.found = Some(self.save.read(image));
-        let screen = std::mem::replace(&mut self.screen, Screen::Loading(0));
+        let screen = std::mem::replace(&mut self.screen, Screen::Loading);
         let Screen::Title(title) = screen else {
             self.screen = screen;
             return;
@@ -612,7 +564,7 @@ impl<'rom> Game<'rom> {
         self.sound.stop_music();
         self.screen = Screen::Continuing(Continuing {
             title,
-            phase: ContinuePhase::Holding(0),
+            phase: ContinuePhase::Leaving(0),
         });
     }
 
@@ -622,28 +574,23 @@ impl<'rom> Game<'rom> {
         };
         let notice = self.found.as_ref().and_then(Found::notice);
         match continuing.phase {
-            ContinuePhase::Holding(frames) => {
-                continuing.phase = if frames + 1 >= CONTINUE_HOLD_FRAMES {
-                    ContinuePhase::FadingOut(0)
-                } else {
-                    ContinuePhase::Holding(frames + 1)
-                };
-            }
-            ContinuePhase::FadingOut(frames) => {
-                continuing.phase = if frames + 1 >= CONTINUE_FADE_FRAMES {
-                    ContinuePhase::Black(0)
-                } else {
-                    ContinuePhase::FadingOut(frames + 1)
-                };
-            }
-            ContinuePhase::Black(frames) => match notice {
-                Some(notice) if frames + 1 >= CONTINUE_NOTICE_DELAY => {
-                    self.dialogue.start(notice)?;
-                    continuing.phase = ContinuePhase::Notice;
+            ContinuePhase::Leaving(frames) => {
+                let frames = frames + 1;
+                continuing.phase = ContinuePhase::Leaving(frames);
+                match notice {
+                    Some(notice) if frames >= CONTINUE_NOTICE_FRAMES => {
+                        start_dialogue(
+                            &mut self.dialogue,
+                            &self.scripts,
+                            &mut self.last_runner,
+                            notice,
+                        )?;
+                        continuing.phase = ContinuePhase::Notice;
+                    }
+                    None if frames >= CONTINUE_LOAD_FRAMES => self.resume()?,
+                    _ => {}
                 }
-                None if frames + 1 >= CONTINUE_BLACK_FRAMES => self.resume()?,
-                _ => continuing.phase = ContinuePhase::Black(frames + 1),
-            },
+            }
             ContinuePhase::Notice => {
                 if !self
                     .dialogue
@@ -664,19 +611,12 @@ impl<'rom> Game<'rom> {
                     continuing.phase = ContinuePhase::AfterNotice(frames + 1);
                 }
             }
-            ContinuePhase::FadingIn(frames) => {
-                if frames + 1 >= CONTINUE_FADE_FRAMES {
-                    self.screen = Screen::Field;
-                } else {
-                    continuing.phase = ContinuePhase::FadingIn(frames + 1);
-                }
-            }
         }
         Ok(())
     }
 
-    /// Puts the loaded game in place and fades its room in, or goes back
-    /// to the title when there is none.
+    /// Puts the loaded game in place and brightens its room like any map
+    /// entered, or goes back to the title when there is none.
     fn resume(&mut self) -> Result<(), GameError> {
         let saved = self.found.take().as_ref().and_then(Found::game).cloned();
         let Some(progress) = saved.and_then(|saved| self.restore(&saved)) else {
@@ -689,13 +629,12 @@ impl<'rom> Game<'rom> {
                 GameSound::TitleMusic,
             );
         };
-        if !self.windows.flag(OPENING_SEEN_FLAG) && usize::from(progress.map) == FIRST_ROOM_MAP {
-            return self.start_intro();
-        }
         let map = usize::from(progress.map);
         let cell = (usize::from(progress.column), usize::from(progress.row));
-        self.field = Some(Field::load(&self.data, map, cell)?);
-        Self::emit(&self.extensions, &Event::RoomEntered { map, cell });
+        if !self.windows.flag(OPENING_SEEN_FLAG) && map == FIRST_ROOM_MAP {
+            return self.start_new_game_room();
+        }
+        self.enter_map(map, cell)?;
         let song = Some(usize::from(progress.song))
             .filter(|song| *song != 0)
             .or_else(|| self.extensions.borrow().music_for_map(map))
@@ -704,9 +643,9 @@ impl<'rom> Game<'rom> {
             Self::emit(&self.extensions, &Event::SoundRequested(song));
             self.sound.play(song)?;
         }
-        if let Screen::Continuing(continuing) = &mut self.screen {
-            continuing.phase = ContinuePhase::FadingIn(0);
-        }
+        self.events.set_brightness(BLACK);
+        self.events.fade_in_holding();
+        self.screen = Screen::Field;
         Ok(())
     }
 
@@ -774,8 +713,8 @@ impl<'rom> Game<'rom> {
             progress.area = NO_AREA;
         }
         progress.map = half(field.map());
-        progress.column = half(field.player.column);
-        progress.row = half(field.player.row);
+        progress.column = half(field.player().column);
+        progress.row = half(field.player().row);
         progress.flags = [0; FLAG_WORDS];
         for flag in self.windows.flags() {
             progress.set_flag(flag, true);
@@ -793,205 +732,231 @@ impl<'rom> Game<'rom> {
         progress.write(&mut self.state).is_ok()
     }
 
-    fn start_intro(&mut self) -> Result<(), GameError> {
-        self.windows.set_flag(OPENING_SEEN_FLAG, true);
-        let mut field = Field::load(&self.data, FIRST_ROOM_MAP, INTRO_PLAYER_CELL)?;
-        field.player.facing = Direction::Up;
-        let regina = field.spawn_npc(&self.data, REGINA_SPRITE, REGINA_START, Direction::Up)?;
-        self.field = Some(field);
-        Self::emit(
-            &self.extensions,
-            &Event::RoomEntered {
-                map: FIRST_ROOM_MAP,
-                cell: INTRO_PLAYER_CELL,
-            },
-        );
-        let mut intro = IntroState {
-            regina,
-            path: &INTRO_ARRIVAL,
-            step: 0,
-            wait: 0,
-            phase: IntroPhase::Arriving,
-        };
-        intro.follow(&INTRO_ARRIVAL);
-        self.screen = Screen::Intro(intro);
-        Self::play(
-            &mut self.sound,
-            &self.data,
-            &self.extensions,
-            GameSound::OpeningMusic,
-        )?;
+    /// Enters the first room of a new game from black: the room's handler
+    /// starts the opening, and the room brightens while the game holds.
+    fn start_new_game_room(&mut self) -> Result<(), GameError> {
+        self.enter_map(FIRST_ROOM_MAP, PLAYER_START)?;
+        self.play_map_music(FIRST_ROOM_MAP)?;
+        self.events.set_brightness(BLACK);
+        self.events.fade_in_holding();
+        self.screen = Screen::Field;
         Ok(())
     }
 
-    fn update_intro(&mut self, input: Input) -> Result<(), GameError> {
-        let Some(field) = self.field.as_mut() else {
+    /// Loads map `map` with the player on `cell` and runs the map's handler.
+    fn enter_map(&mut self, map: usize, cell: (usize, usize)) -> Result<(), GameError> {
+        let mut field = Field::load(&self.data, map, cell)?;
+        show_opened_chests(&mut field, &self.windows);
+        self.field = Some(field);
+        Self::emit(&self.extensions, &Event::RoomEntered { map, cell });
+        self.run_handler(story::map_handler(map))
+    }
+
+    fn run_handler(&mut self, handler: Option<&'static [Op]>) -> Result<(), GameError> {
+        let Some(handler) = handler else {
             return Ok(());
         };
-        let Screen::Intro(intro) = &mut self.screen else {
+        let mut events = std::mem::take(&mut self.events);
+        let mut host = self.host();
+        events.run_now(handler, &mut host);
+        let result = host.finish();
+        self.events = events;
+        result
+    }
+
+    fn host(&mut self) -> Host<'_, 'rom> {
+        Host {
+            data: self.data,
+            field: &mut self.field,
+            windows: &mut self.windows,
+            dialogue: &mut self.dialogue,
+            scripts: &mut self.scripts,
+            active_script: &mut self.active_script,
+            last_runner: &mut self.last_runner,
+            warped: &mut self.warped,
+            chest: self.chest,
+            party: &mut self.party,
+            sound: &mut self.sound,
+            extensions: &self.extensions,
+            state: &mut self.state,
+            error: None,
+        }
+    }
+
+    /// Whether the player walks freely: no conversation, event hold or
+    /// talk about to start, and the player's own command in force.
+    fn player_in_control(&self) -> bool {
+        self.dialogue.is_done()
+            && self.pending_talk.is_none()
+            && !self.events.holding()
+            && self
+                .field
+                .as_ref()
+                .is_some_and(|field| field.player().command == Command::Player)
+    }
+
+    fn update_field(&mut self, input: Input) -> Result<(), GameError> {
+        if self.field.is_none() {
             return Ok(());
-        };
-        field.update(Input::default());
-        let path_done = Self::follow_path(field, intro);
-        match intro.phase {
-            IntroPhase::Arriving if path_done => {
-                self.dialogue.start(INTRO_DIALOGUE)?;
-                intro.phase = IntroPhase::FirstTalk;
+        }
+        if self.events.in_dialogue() {
+            let runner = match self.active_script {
+                Some(index) => &mut self.scripts[index],
+                None => &mut self.dialogue,
+            };
+            let done = runner.update(self.data.bytes(), input, &mut self.windows)?;
+            if done {
+                self.active_script = None;
             }
-            IntroPhase::FirstTalk => {
-                if self
-                    .dialogue
-                    .update(self.data.bytes(), input, &mut self.windows)?
-                {
-                    intro.phase = IntroPhase::FadingOut(0);
-                    intro.follow(&INTRO_PACING);
+            return self.update_events(|events, host| {
+                events.update_hold(done, host);
+            });
+        }
+        if self.events.holding() {
+            let mut step = HoldStep::Free;
+            self.update_events(|events, host| step = events.update_hold(false, host))?;
+            match step {
+                HoldStep::Held => return Ok(()),
+                HoldStep::Darkened => {
+                    if let Some(exit) = self.exit_taken.take() {
+                        self.warp(exit)?;
+                    }
+                    return Ok(());
                 }
+                HoldStep::Free | HoldStep::Released => {}
             }
-            IntroPhase::FadingOut(frames) => {
-                intro.phase = if frames + 1 >= INTRO_FADE_FRAMES {
-                    IntroPhase::Dark(0)
-                } else {
-                    IntroPhase::FadingOut(frames + 1)
-                };
+        }
+        if let Some((talk, delay)) = self.pending_talk.take() {
+            if delay > 1 {
+                self.pending_talk = Some((talk, delay - 1));
+                return Ok(());
             }
-            IntroPhase::Dark(frames) => {
-                intro.phase = if frames + 1 >= INTRO_DARK_FRAMES {
-                    IntroPhase::FadingIn(0)
-                } else {
-                    IntroPhase::Dark(frames + 1)
-                };
-            }
-            IntroPhase::FadingIn(frames) => {
-                intro.phase = if frames + 1 >= INTRO_FADE_FRAMES {
-                    IntroPhase::SecondTalkWait
-                } else {
-                    IntroPhase::FadingIn(frames + 1)
-                };
-            }
-            IntroPhase::SecondTalkWait if path_done => {
-                self.dialogue.start(INTRO_SECOND_DIALOGUE)?;
-                intro.phase = IntroPhase::SecondTalk;
-            }
-            IntroPhase::SecondTalk => {
-                if self
-                    .dialogue
-                    .update(self.data.bytes(), input, &mut self.windows)?
-                {
-                    intro.phase = IntroPhase::Leaving;
-                    intro.follow(&INTRO_LEAVING);
-                }
-            }
-            IntroPhase::Leaving if path_done => {
-                field.npcs.remove(intro.regina);
-                field.player.facing = Direction::Left;
-                field.update(Input::default().with(platform::Button::Left));
-                intro.phase = IntroPhase::StandingUp;
-            }
-            IntroPhase::StandingUp if !field.player.walking => {
-                self.screen = Screen::Field;
+            return match talk {
+                Talk::Dialogue(id) => Ok(start_dialogue(
+                    &mut self.dialogue,
+                    &self.scripts,
+                    &mut self.last_runner,
+                    id,
+                )?),
+                Talk::Event(program) => self.run_handler(Some(program)),
+            };
+        }
+        if !self.dialogue.is_done() {
+            self.dialogue
+                .update(self.data.bytes(), input, &mut self.windows)?;
+            return Ok(());
+        }
+        let event = self.field.as_mut().and_then(|field| field.update(input));
+        match event {
+            Some(FieldEvent::Exit(exit)) => {
+                self.exit_taken = Some(exit);
+                self.events.fade_out_holding(EXIT_FADE_DELAY);
                 Self::play(
                     &mut self.sound,
                     &self.data,
                     &self.extensions,
-                    GameSound::FirstRoomMusic,
+                    GameSound::Door,
                 )?;
+                return Ok(());
             }
-            _ => {}
+            Some(FieldEvent::Talk {
+                actor,
+                script: ObjectScript::Dialogue(id),
+            }) => {
+                let id = usize::from(id);
+                Self::emit(
+                    &self.extensions,
+                    &Event::Talk {
+                        npc: actor,
+                        dialogue: id,
+                    },
+                );
+                self.pending_talk = Some((Talk::Dialogue(id), TALK_START_DELAY));
+            }
+            Some(FieldEvent::Chest { actor, chest }) => {
+                let flag = CHEST_FLAG_BASE + chest;
+                if !self.windows.flag(flag) {
+                    self.chest = Some((actor, chest));
+                    self.pending_talk = Some((Talk::Event(story::CHEST), CHEST_START_DELAY));
+                }
+            }
+            Some(FieldEvent::Talk {
+                script: ObjectScript::Code(address),
+                ..
+            }) => {
+                if let Some(program) = story::talk_handler(address) {
+                    self.pending_talk = Some((Talk::Event(program), TALK_START_DELAY));
+                }
+            }
+            None => {}
+        }
+        self.update_events(|events, host| events.update(host))
+    }
+
+    fn update_events(
+        &mut self,
+        run: impl FnOnce(&mut Events, &mut Host<'_, 'rom>),
+    ) -> Result<(), GameError> {
+        let mut events = std::mem::take(&mut self.events);
+        let mut host = self.host();
+        run(&mut events, &mut host);
+        let result = host.finish();
+        self.events = events;
+        result?;
+        if let Some(map) = self.warped.take() {
+            let cell = self
+                .field
+                .as_ref()
+                .map_or((0, 0), |field| (field.player().column, field.player().row));
+            Self::emit(&self.extensions, &Event::RoomEntered { map, cell });
+            self.play_map_music(map)?;
+            self.run_handler(story::map_handler(map))?;
         }
         Ok(())
     }
 
-    /// Issues the next order of the intro's path when its wait has passed
-    /// (Regina's orders also wait for her to stand still); returns whether
-    /// the path has ended, its closing wait included.
-    fn follow_path(field: &mut Field, intro: &mut IntroState) -> bool {
-        let Some((_, order)) = intro.path.get(intro.step) else {
-            if intro.wait > 0 {
-                intro.wait -= 1;
-            }
-            return intro.wait == 0 && field.npc_idle(intro.regina);
-        };
-        if matches!(order, IntroOrder::Regina(_)) && !field.npc_idle(intro.regina) {
-            return false;
-        }
-        if intro.wait > 0 {
-            intro.wait -= 1;
-            return false;
-        }
-        match *order {
-            IntroOrder::Regina(command) => {
-                field.command_npc(intro.regina, command);
-            }
-            IntroOrder::Player(direction) => field.player.facing = direction,
-        }
-        intro.step += 1;
-        intro.wait = match intro.path.get(intro.step) {
-            Some(next) => next.0,
-            None => match intro.phase {
-                IntroPhase::Leaving => INTRO_STAND_UP_DELAY,
-                _ => INTRO_DIALOGUE_DELAY,
-            },
-        };
-        false
-    }
-
-    fn update_field(&mut self, input: Input) -> Result<(), GameError> {
+    /// Follows `exit` once the screen is black: loads the destination, runs
+    /// its handler and starts its song, then holds black and brightens.
+    fn warp(&mut self, exit: usize) -> Result<(), GameError> {
         let Some(field) = self.field.as_mut() else {
             return Ok(());
         };
-        if let Some((id, delay)) = self.pending_talk {
-            self.pending_talk = if delay > 1 {
-                Some((id, delay - 1))
-            } else {
-                self.dialogue.start(id)?;
-                None
-            };
-        } else if self.dialogue.is_done() {
-            match field.update(input) {
-                Some(FieldEvent::Exit(exit)) => {
-                    let from = field.map();
-                    let warp = field.warp(&self.data, exit)?;
-                    let arrived = field.map();
-                    Self::emit(
-                        &self.extensions,
-                        &Event::ExitTaken {
-                            map: from,
-                            exit,
-                            destination: warp.map,
-                        },
-                    );
-                    Self::emit(
-                        &self.extensions,
-                        &Event::RoomEntered {
-                            map: arrived,
-                            cell: (warp.column, warp.row),
-                        },
-                    );
-                    Self::play(
-                        &mut self.sound,
-                        &self.data,
-                        &self.extensions,
-                        GameSound::Door,
-                    )?;
-                    let music = self
-                        .extensions
-                        .borrow()
-                        .music_for_map(arrived)
-                        .or_else(|| self.data.map_music(arrived));
-                    if let Some(music) = music {
-                        Self::emit(&self.extensions, &Event::SoundRequested(music));
-                        self.sound.play_if_changed(music)?;
-                    }
-                }
-                Some(FieldEvent::Talk { npc, dialogue: id }) => {
-                    Self::emit(&self.extensions, &Event::Talk { npc, dialogue: id });
-                    self.pending_talk = Some((id, TALK_START_DELAY));
-                }
-                None => {}
-            }
-        } else {
-            self.dialogue
-                .update(self.data.bytes(), input, &mut self.windows)?;
+        let from = field.map();
+        let warp = field.warp(&self.data, exit)?;
+        show_opened_chests(field, &self.windows);
+        let arrived = field.map();
+        Self::emit(
+            &self.extensions,
+            &Event::ExitTaken {
+                map: from,
+                exit,
+                destination: warp.map,
+            },
+        );
+        Self::emit(
+            &self.extensions,
+            &Event::RoomEntered {
+                map: arrived,
+                cell: (warp.column, warp.row),
+            },
+        );
+        self.play_map_music(arrived)?;
+        self.events
+            .fade_in_after(WARP_BLACK_FRAMES, WARP_SETTLE_FRAMES);
+        self.events.end(MAP_TASK);
+        self.run_handler(story::map_handler(arrived))
+    }
+
+    /// Starts the song map `map` names unless it is already playing.
+    fn play_map_music(&mut self, map: usize) -> Result<(), GameError> {
+        let music = self
+            .extensions
+            .borrow()
+            .music_for_map(map)
+            .or_else(|| self.data.map_music(map));
+        if let Some(music) = music {
+            Self::emit(&self.extensions, &Event::SoundRequested(music));
+            self.sound.play_if_changed(music)?;
         }
         Ok(())
     }
@@ -1005,40 +970,32 @@ impl<'rom> Game<'rom> {
                 self.windows.draw(frame, &self.skin, &self.painter);
             }
             Screen::NameEntry(entry) => entry.draw(frame, &self.windows, &self.skin, &self.painter),
-            Screen::Loading(_) => {
+            Screen::Loading => {
                 frame.fill(Rgb::default());
                 darken(frame, FADE_STEPS);
             }
-            Screen::Intro(intro) => {
-                if let Some(field) = &self.field {
-                    field.draw(frame);
-                }
-                self.windows.draw(frame, &self.skin, &self.painter);
-                darken(frame, intro.darkness());
+            Screen::LeavingNameEntry(entry, frames) => {
+                entry.draw(frame, &self.windows, &self.skin, &self.painter);
+                let level = frames.saturating_sub(NAME_HOLD_FRAMES);
+                darken(frame, u8::try_from(level).unwrap_or(BLACK));
             }
             Screen::Field => {
                 if let Some(field) = &self.field {
                     field.draw(frame);
                 }
                 self.windows.draw(frame, &self.skin, &self.painter);
+                darken(frame, self.events.brightness());
             }
             Screen::Menu(menu) => menu.draw(frame, &self.windows, &self.skin, &self.painter),
             Screen::Guide(guide) => guide.draw(frame, &self.windows, &self.skin, &self.painter),
             Screen::Continuing(continuing) => {
-                match continuing.phase {
-                    ContinuePhase::Holding(_) | ContinuePhase::FadingOut(_) => {
-                        continuing.title.draw(frame);
-                    }
-                    ContinuePhase::FadingIn(_) => {
-                        if let Some(field) = &self.field {
-                            field.draw(frame);
-                        }
-                    }
-                    ContinuePhase::Black(_)
-                    | ContinuePhase::Notice
-                    | ContinuePhase::AfterNotice(_) => frame.fill(Rgb::default()),
+                let darkness = continuing.darkness();
+                if darkness < FADE_STEPS {
+                    continuing.title.draw(frame);
+                } else {
+                    frame.fill(Rgb::default());
                 }
-                darken(frame, continuing.darkness());
+                darken(frame, darkness);
                 self.windows.draw(frame, &self.skin, &self.painter);
             }
         }
@@ -1049,4 +1006,230 @@ impl<'rom> Game<'rom> {
 #[must_use]
 pub const fn screen_size() -> (usize, usize) {
     (SCREEN_WIDTH, SCREEN_HEIGHT)
+}
+
+/// Shows the chests already opened open, as the game does from their flags.
+fn show_opened_chests(field: &mut Field, windows: &ScriptWindows<'_>) {
+    for actor in &mut field.actors {
+        if let Some(chest) = actor.chest
+            && windows.flag(CHEST_FLAG_BASE + chest)
+        {
+            actor.play(CHEST_OPEN_ANIMATION);
+        }
+    }
+}
+
+/// The game as events see it, borrowed for one frame.
+struct Host<'a, 'rom> {
+    data: GameData<'rom>,
+    field: &'a mut Option<Field>,
+    windows: &'a mut ScriptWindows<'rom>,
+    dialogue: &'a mut ScriptRunner,
+    scripts: &'a mut Vec<ScriptRunner>,
+    active_script: &'a mut Option<usize>,
+    last_runner: &'a mut Option<usize>,
+    warped: &'a mut Option<usize>,
+    chest: Option<(usize, u16)>,
+    party: &'a mut Party,
+    sound: &'a mut SoundEngine<'rom>,
+    extensions: &'a SharedExtensions,
+    state: &'a mut Vec<u8>,
+    error: Option<GameError>,
+}
+
+impl Host<'_, '_> {
+    fn fail(&mut self, error: impl Into<GameError>) {
+        if self.error.is_none() {
+            self.error = Some(error.into());
+        }
+    }
+
+    fn finish(self) -> Result<(), GameError> {
+        self.error.map_or(Ok(()), Err)
+    }
+}
+
+impl EventHost for Host<'_, '_> {
+    fn field(&mut self) -> Option<&mut Field> {
+        self.field.as_mut()
+    }
+
+    fn flag(&self, flag: u16) -> bool {
+        self.windows.flag(flag)
+    }
+
+    fn set_flag(&mut self, flag: u16, set: bool) {
+        self.windows.set_flag(flag, set);
+    }
+
+    fn start_dialogue(&mut self, index: u16) {
+        if let Err(error) = start_dialogue(
+            self.dialogue,
+            self.scripts,
+            self.last_runner,
+            usize::from(index),
+        ) {
+            self.fail(error);
+        }
+    }
+
+    fn play_music(&mut self, song: u16) {
+        let song = usize::from(song);
+        Game::emit(self.extensions, &Event::SoundRequested(song));
+        if let Err(error) = self.sound.play_if_changed(song) {
+            self.fail(error);
+        }
+    }
+
+    fn play_sound(&mut self, sound: u16) {
+        let sound = usize::from(sound);
+        Game::emit(self.extensions, &Event::SoundRequested(sound));
+        if let Err(error) = self.sound.play(sound) {
+            self.fail(error);
+        }
+    }
+
+    fn load_map(&mut self, map: usize, player: (usize, usize), objects: u32, count: usize) {
+        let loaded = self
+            .data
+            .objects_at(objects, count)
+            .map_err(FieldError::from)
+            .and_then(|objects| Field::load_with(&self.data, map, player, &objects));
+        match loaded {
+            Ok(field) => *self.field = Some(field),
+            Err(error) => self.fail(error),
+        }
+    }
+
+    fn meet(&mut self, group: u8) {
+        self.data.meet_characters(self.state, usize::from(group));
+    }
+
+    fn start_script(&mut self, table: &'static str, index: u16) {
+        let found = self
+            .scripts
+            .iter()
+            .position(|runner| runner.table() == table);
+        let slot = match found {
+            Some(slot) => slot,
+            None => match self.data.script_offsets(table) {
+                Ok(Some(offsets)) => {
+                    self.scripts.push(ScriptRunner::named(table, offsets));
+                    self.scripts.len() - 1
+                }
+                Ok(None) => return self.fail(GameError::Text(format!("no script table {table}"))),
+                Err(error) => return self.fail(GameError::Text(error.to_string())),
+            },
+        };
+        let context = last_context(self.dialogue, self.scripts, *self.last_runner);
+        self.scripts[slot].resume(context);
+        *self.last_runner = Some(slot);
+        if let Err(error) = self.scripts[slot].start(usize::from(index)) {
+            return self.fail(error);
+        }
+        *self.active_script = Some(slot);
+    }
+
+    fn learn_command(&mut self, command: u8) {
+        formats::progress::learn_command(self.state, usize::from(command));
+    }
+
+    fn saved_vars(&self) -> [u16; 8] {
+        match *self.active_script {
+            Some(index) => *self.scripts[index].saved_vars(),
+            None => *self.dialogue.saved_vars(),
+        }
+    }
+
+    fn form_party(&mut self, choice: u8) {
+        self.data.form_party(self.state, usize::from(choice));
+    }
+
+    fn see_zoid(&mut self, id: u8) {
+        formats::progress::see_zoid(self.state, usize::from(id));
+    }
+
+    fn open_chest(&mut self) {
+        let Some((actor, _)) = self.chest else {
+            return;
+        };
+        let Some(chest) = self.field.as_mut().and_then(|field| field.actor_mut(actor)) else {
+            return;
+        };
+        chest.play(CHEST_OPEN_ANIMATION);
+        let small = chest
+            .sheet
+            .as_ref()
+            .is_some_and(|sheet| sheet.tag == SMALL_CHEST_SPRITE);
+        self.play_sound(if small {
+            SMALL_CHEST_SOUND
+        } else {
+            CHEST_SOUND
+        });
+    }
+
+    fn mark_chest(&mut self) {
+        if let Some((_, chest)) = self.chest {
+            self.windows.set_flag(CHEST_FLAG_BASE + chest, true);
+        }
+    }
+
+    fn chest_money(&self) -> u32 {
+        self.chest
+            .and_then(|(_, chest)| self.data.treasure(usize::from(chest)))
+            .map_or(0, |treasure| treasure.money)
+    }
+
+    fn take_chest_money(&mut self) {
+        let money = self.chest_money();
+        self.party.money = self.party.money.saturating_add(money);
+        for digit in money.to_string().chars() {
+            ScriptHost::put_char(self.windows, MONEY_WINDOW, digit);
+        }
+    }
+
+    fn warp(&mut self, map: usize, cell: (usize, usize), facing: Option<Direction>) -> usize {
+        match Field::load(&self.data, map, cell) {
+            Ok(mut field) => {
+                if let Some(facing) = facing {
+                    field.player_mut().face(facing);
+                }
+                let count = field.actors.len();
+                show_opened_chests(&mut field, self.windows);
+                *self.field = Some(field);
+                *self.warped = Some(map);
+                count
+            }
+            Err(error) => {
+                self.fail(error);
+                0
+            }
+        }
+    }
+}
+
+/// The interpreter state the runner that ran last left: `last` is a slot
+/// of `scripts`, or `None` for the dialogue runner.
+fn last_context(
+    dialogue: &ScriptRunner,
+    scripts: &[ScriptRunner],
+    last: Option<usize>,
+) -> ScriptContext {
+    last.and_then(|slot| scripts.get(slot))
+        .unwrap_or(dialogue)
+        .context()
+}
+
+/// Starts string `index` of the dialogue table where the last string left
+/// the interpreter.
+fn start_dialogue(
+    dialogue: &mut ScriptRunner,
+    scripts: &[ScriptRunner],
+    last: &mut Option<usize>,
+    index: usize,
+) -> Result<(), ScriptError> {
+    let context = last_context(dialogue, scripts, *last);
+    dialogue.resume(context);
+    *last = None;
+    dialogue.start(index)
 }

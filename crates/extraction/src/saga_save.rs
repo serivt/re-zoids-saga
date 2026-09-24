@@ -138,9 +138,7 @@ pub fn new_game_state(rom: &[u8]) -> Result<Vec<u8>, SaveDataError> {
     }
     state[EMPTY_RUN].fill(EMPTY);
     mark_character(&mut state, 0, FIRST_CHARACTER_BITS);
-    for entry in starting_list(rom).ok_or_else(|| too_short("starting characters"))? {
-        mark_character(&mut state, usize::from(entry), IN_GUIDE);
-    }
+    meet_characters(rom, &mut state, 0).ok_or_else(|| too_short("starting characters"))?;
     let mut progress = Progress::read(&state).map_err(|_| too_short("game state"))?;
     progress.level = NEW_GAME_LEVEL;
     progress.message_speed = NEW_GAME_MESSAGE_SPEED;
@@ -150,8 +148,19 @@ pub fn new_game_state(rom: &[u8]) -> Result<Vec<u8>, SaveDataError> {
     Ok(state)
 }
 
-fn starting_list(rom: &[u8]) -> Option<Vec<u8>> {
-    let pointer = rom.get(CHARACTER_LISTS..CHARACTER_LISTS + 4)?;
+/// Puts the characters of list `list` in the character guide, as events do
+/// when the player meets them (`0x08037858`); `None` when the list cannot
+/// be read.
+pub fn meet_characters(rom: &[u8], state: &mut [u8], list: usize) -> Option<()> {
+    for entry in character_list(rom, list)? {
+        mark_character(state, usize::from(entry), IN_GUIDE);
+    }
+    Some(())
+}
+
+fn character_list(rom: &[u8], list: usize) -> Option<Vec<u8>> {
+    let at = CHARACTER_LISTS + list * 4;
+    let pointer = rom.get(at..at + 4)?;
     let address = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]);
     let start = to_usize(address.checked_sub(ROM_BASE)?);
     let list = rom.get(start..)?;

@@ -25,10 +25,12 @@ except the link-cable ones:
 | 11 | Ｚｉデータ受け渡し, trading Zi data |
 
 The guides read what the player has seen from the save, loaded silently as continuing
-does; without a save they read a new game's state. Opening one holds the title 11
-frames after A, fades it out over 16, keeps the screen black 54 frames and fades the
-guide's menu in over 16. Leaving holds 10 frames, fades out over 16 and stays black 45
-frames before the title starts over.
+does; without a save they read a new game's state. Opening one, counted from the
+frame the title's script ends (the brightness register traced per frame): the title
+darkens a level a frame from the fourth frame (black from the 19th), the guide's menu
+script starts on the 42nd, and the screen stays black two more frames, then brightens a
+level a frame from 31 (visibly over the last 16). Leaving holds 10 frames, fades out over
+16 and stays black 45 frames before the title starts over.
 
 ## Scripts
 

@@ -35,7 +35,7 @@ BG3 rows 0–3 hold a 12×4 block from tile `0x10D` with an 11-tile row stride (
 11), scrolled by (−76, −32). Fifty sprites (32×8, 16×8 and 8×8) draw "ZOIDS SAGA", the
 subtitle and the copyright lines; OBJ tiles 0–111 are the 4bpp block from tile 175 on,
 112 on the copyright block. The title fades in over about 165 frames; START skips the
-fade, and START again runs the menu script at ROM `0x6C04FE`: reset, open menu window 0
+fade, and START again runs the menu script at ROM `0x6C04FE` five frames later: reset, open menu window 0
 at (10, 10) 9×8 tiles, the three choices, a menu, then a switch on var1 (0 new game,
 1 continue, 2 options). The script ends by storing the variables and resetting the text
 system, which clears them, so the game reads the choice from the stored copy. The

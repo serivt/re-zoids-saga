@@ -75,19 +75,23 @@ Implemented in `crates/game-core/src/rng.rs`.
 Pressing A while standing still with a character on the metatile ahead of the footing
 speaks to it: a character of behavior 0 or 1 turns to face the player (animation =
 opposite facing), and if its object names a dialogue string the field reports it and
-the caller runs that script with `ScriptRunner` (see [formats/script-text.md](formats/script-text.md))
-about three frames later while the field stays frozen. Furniture
-(behavior 2) neither turns nor talks, and objects whose script is code are silent for
-now. Observed on `ch56`: entity state 3 for the player and 1 for the character during
-the box, both back to 0 when it closes.
+the caller runs that script with `ScriptRunner` (see
+[formats/script-text.md](formats/script-text.md)) about three frames later while the
+field stays frozen. Furniture (behavior 2) neither turns nor talks. Observed on `ch56`:
+entity state 3 for the player and 1 for the character during the box, both back to 0
+when it closes. Objects whose script is code run the event the port transcribed for
+that address, and chests (behavior 4) open; both are described in [events.md](events.md).
 
 ## Exits
 
 When a step completes onto a footing whose attribute is `0x4000 | n`, the engine reports
 exit `n`; the caller looks the warp up in the current map's table (see
 [formats/map.md](formats/map.md)), loads the destination scene and stands the player on
-the arrival metatile, turning it when the warp says so. The first room's lower exit lands
-in map 5 at metatile (8, 16): sprite (120, 256), camera (16, 160), as in the original.
+the arrival metatile, turning it when the warp says so. The screen fades out with the
+door sound before the load and back in after it, at the timings in
+[events.md](events.md), and the destination map runs its own event when it has one. The
+first room's lower exit lands in map 5 at metatile (8, 16): sprite (120, 256), camera
+(16, 160), as in the original.
 
 ## Pause menu
 
@@ -95,8 +99,7 @@ START opens the menu described in [menu.md](menu.md); the field waits underneath
 
 ## Not modeled yet
 
-Doors taken by pressing A (`0xC000` attributes), the fade and door sound of a warp,
-code-driven character scripts, the saved-state overlay of object lists, objects that
-show the party's Zoid, dialogue opcodes beyond plain messages, and
-the diagonal input priority of the original (this engine takes the first held direction
-in the order up, down, left, right).
+Doors taken by pressing A (`0xC000` attributes), the code-driven scripts of characters
+beyond the opening chapter, the saved-state overlay of object lists, objects that show
+the party's Zoid, and the diagonal input priority of the original (this engine takes the
+first held direction in the order up, down, left, right).

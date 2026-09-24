@@ -258,23 +258,36 @@ pub struct Scene {
     pub map: TileMap,
     /// The 32×32 backdrop tiled behind the map.
     pub backdrop: TileMap,
-    /// One entry per 16×16 metatile, row-major, `width / 2` per row;
-    /// bit 15 marks a cell the player cannot enter, bits 15–14 = `01`
-    /// an exit whose index is the low byte.
+    /// One entry per cell of `cell_tiles`×`cell_tiles` map tiles (16×16
+    /// pixels in rooms and towns, 32×32 on Zoid maps), row-major; bit 15
+    /// marks a cell the player cannot enter, bits 15–14 = `01` an exit
+    /// whose index is the low byte.
     pub attributes: Vec<u16>,
+    /// Map tiles per attribute cell side, from the map record.
+    pub cell_tiles: usize,
 }
 
 impl Scene {
     /// Attribute columns.
     #[must_use]
     pub fn attribute_columns(&self) -> usize {
-        self.map.width / METATILE_TILES
+        self.map.width / self.cell_tiles.max(1)
     }
 
     /// Attribute rows.
     #[must_use]
     pub fn attribute_rows(&self) -> usize {
-        self.map.height / METATILE_TILES
+        self.map.height / self.cell_tiles.max(1)
+    }
+
+    /// The scene as a map with cells of `cell_tiles` map tiles uses it:
+    /// the attribute grid is that coarse.
+    #[must_use]
+    pub fn with_cell_tiles(mut self, cell_tiles: usize) -> Self {
+        self.cell_tiles = cell_tiles.max(1);
+        let cells = self.attribute_columns() * self.attribute_rows();
+        self.attributes.truncate(cells);
+        self
     }
 
     /// Whether metatile `(column, row)` blocks walking; cells outside the
@@ -325,7 +338,8 @@ pub enum SceneError {
     Lz77(#[from] Lz77Error),
 }
 
-/// Reads a field scene by its index in the scene table.
+/// Reads a field scene by its index in the scene table, with the attribute
+/// grid of a room (cells of two map tiles); see [`Scene::with_cell_tiles`].
 ///
 /// # Errors
 ///
@@ -370,6 +384,7 @@ pub fn scene(rom: &[u8], index: usize) -> Result<Scene, SceneError> {
         map,
         backdrop,
         attributes,
+        cell_tiles: METATILE_TILES,
     })
 }
 
@@ -805,47 +820,20 @@ pub const SOUND_TITLE_START: usize = 0x3D;
 pub const SOUND_CONFIRM: usize = 0x47;
 /// Sound of a door.
 pub const SOUND_DOOR: usize = 0x82;
-const MUSIC_START_IF_CHANGED: u32 = 0x0800_19B4;
-const MUSIC_START: u32 = 0x0800_19A4;
-const MAP_CODE_WINDOW: usize = 0x400;
-const MAP_CODE_FIELD: usize = 12;
+const MAP_MUSIC_FIELD: usize = 8;
 const ROM_BASE: u32 = 0x0800_0000;
-const THUMB_MOVS_R0: u8 = 0x20;
 
-/// Song a map's own code starts when it loads, found by looking for the
-/// call to the game's music routine in that code (a heuristic: some maps
-/// leave the music to a cutscene instead).
+/// The song map `map` plays: the word at offset 8 of its record, which the
+/// map loader starts unless it is already playing (the first room's
+/// opening then switches to song 7 when control begins).
 #[must_use]
 pub fn map_music(rom: &[u8], map: usize) -> Option<usize> {
     if map >= MAP_COUNT {
         return None;
     }
-    let at = MAP_TABLE_OFFSET + map * MAP_RECORD_LEN + MAP_CODE_FIELD;
-    let pointer = rom.get(at..at + 4)?;
-    let pointer = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]) & !1;
-    let code = usize::try_from(pointer.checked_sub(ROM_BASE)?).ok()?;
-    let window = rom.get(code..(code + MAP_CODE_WINDOW).min(rom.len()))?;
-    window.windows(6).enumerate().find_map(|(offset, bytes)| {
-        let [THUMB_MOVS_R0, song, high1, high2, low1, low2] = *bytes else {
-            return None;
-        };
-        let at = code + offset + 2;
-        let target = thumb_call_target(at, [high1, high2, low1, low2])?;
-        (target == MUSIC_START_IF_CHANGED || target == MUSIC_START).then_some(usize::from(song))
-    })
-}
-
-/// Target of a Thumb `bl` pair at ROM offset `at`, if the bytes are one.
-fn thumb_call_target(at: usize, bytes: [u8; 4]) -> Option<u32> {
-    let high = u16::from_le_bytes([bytes[0], bytes[1]]);
-    let low = u16::from_le_bytes([bytes[2], bytes[3]]);
-    if high & 0xF800 != 0xF000 || low & 0xF800 != 0xF800 {
-        return None;
-    }
-    let upper = (i32::from(high & 0x7FF) << 21) >> 9;
-    let offset = upper | (i32::from(low & 0x7FF) << 1);
-    let pc = u32::try_from(at).ok()?.checked_add(ROM_BASE + 4)?;
-    Some(pc.wrapping_add_signed(offset))
+    let at = MAP_TABLE_OFFSET + map * MAP_RECORD_LEN + MAP_MUSIC_FIELD;
+    let field = rom.get(at..at + 2)?;
+    Some(usize::from(u16::from_le_bytes([field[0], field[1]])))
 }
 
 /// The experience table: 99 words at ROM `0x66BB58`, entry `n` being the
@@ -866,6 +854,27 @@ pub fn experience_to_next(rom: &[u8], level: usize) -> Option<u32> {
     let bytes = rom.get(at..at + 4)?;
     Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
+
+/// The battle system's menu scripts (the command list, the status
+/// window's frames and the helpers that open the battle's windows), which
+/// events also call.
+pub const BATTLE_MENU_SCRIPTS: StringTable = StringTable {
+    name: "battle-menu",
+    offset: 0x0067_5D94,
+    count: 28,
+};
+
+/// The battle system's messages ("the deck command 「…」 was taught" and
+/// the like), which events also call.
+pub const BATTLE_TEXT_SCRIPTS: StringTable = StringTable {
+    name: "battle-text",
+    offset: 0x0067_5E04,
+    count: 134,
+};
+
+/// Where the deck commands' names start in the `item` table: command `n`
+/// is its string `77 + n` (the game reads them from ROM `0x676530`).
+pub const COMMAND_NAMES: usize = 77;
 
 /// The scripts the pause menu is assembled from: window openers, the item
 /// list (46), the help line and menu (47), the status submenu (48, 49),
@@ -1055,7 +1064,7 @@ const TILE_SIDE: usize = 8;
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SpriteSheetError {
     /// No such record.
-    #[error("no sprite {id}; ids run from 1 to {}", SPRITE_COUNT - 1)]
+    #[error("no sprite {id}; ids run from 0 to {}", SPRITE_COUNT - 1)]
     NoSuchSprite {
         /// Requested id.
         id: usize,
@@ -1082,7 +1091,7 @@ pub enum SpriteSheetError {
 ///
 /// Returns [`SpriteSheetError`] when the id is out of range or the ROM is too short.
 pub fn sprite_sheet(rom: &[u8], id: usize) -> Result<SpriteSheet, SpriteSheetError> {
-    if id == 0 || id >= SPRITE_COUNT {
+    if id >= SPRITE_COUNT {
         return Err(SpriteSheetError::NoSuchSprite { id });
     }
     let too_short = || SpriteSheetError::TooShort { len: rom.len(), id };
@@ -1197,11 +1206,13 @@ const OBJECT_LEN: usize = 20;
 const OBJECT_SPRITE_LOOKUP: u16 = 0x8000;
 const OBJECT_NO_SCRIPT: u32 = 0x8000_0000;
 const OBJECT_EVENT_FLAG: u32 = 0x8000_0000;
+const CHEST_BEHAVIOR: u16 = 4;
 
 /// An object placed on a map: the player (object 0) or a character.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapObject {
-    /// Sprite id; 0 for none, bit 15 set to use the party's Zoid.
+    /// Sprite id (0 is the carrier, `mz10`), bit 15 set to use the party's
+    /// Zoid.
     pub sprite: u16,
     /// OBJ palette slot the game reserves for it.
     pub palette_slot: usize,
@@ -1226,19 +1237,117 @@ impl MapObject {
     /// The sprite sheet to draw, when the object names a fixed one.
     #[must_use]
     pub fn sprite_sheet_id(&self) -> Option<usize> {
-        (self.sprite != 0 && self.sprite & OBJECT_SPRITE_LOOKUP == 0)
-            .then_some(usize::from(self.sprite))
+        (self.sprite & OBJECT_SPRITE_LOOKUP == 0).then_some(usize::from(self.sprite))
     }
 
     /// The dialogue string index the object says when spoken to: a script
-    /// reference with bit 31 set names it in the low half-word. Code
-    /// references are not modeled.
+    /// reference with bit 31 set names it in the low half-word.
     #[must_use]
     pub fn event_id(&self) -> Option<u16> {
         self.script
             .filter(|script| script & OBJECT_EVENT_FLAG != 0)
             .and_then(|script| u16::try_from(script & u32::from(u16::MAX)).ok())
     }
+
+    /// The chest number of an object of behavior 4 (the low half-word of its
+    /// script reference, 0 when it has none).
+    #[must_use]
+    pub fn chest(&self) -> Option<u16> {
+        (self.behavior == CHEST_BEHAVIOR)
+            .then(|| u16::try_from(self.script.unwrap_or(0) & u32::from(u16::MAX)).unwrap_or(0))
+    }
+
+    /// What the object runs when spoken to.
+    #[must_use]
+    pub fn script_kind(&self) -> Option<ObjectScript> {
+        let script = self.script?;
+        Some(match self.event_id() {
+            Some(index) => ObjectScript::Dialogue(index),
+            None => ObjectScript::Code(script & !1),
+        })
+    }
+}
+
+/// What a chest holds (the 12-byte records at ROM `0x66BCE4`, read by the
+/// routine at `0x080376A8`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Treasure {
+    /// Money in G.
+    pub money: u32,
+    /// A Zoid (a picture id), when the chest holds one.
+    pub zoid: Option<u8>,
+    /// An item, when it holds one.
+    pub item: Option<u16>,
+    /// Two more kinds of reward the port does not model yet (bytes 8 and 9).
+    pub other: [Option<u8>; 2],
+}
+
+const TREASURE_TABLE: usize = 0x0066_BCE4;
+const TREASURE_LEN: usize = 12;
+const NO_TREASURE_BYTE: u8 = 0xFF;
+const NO_TREASURE_ITEM: u16 = 0xFFFF;
+/// Flag `CHEST_FLAG_BASE + n` marks chest `n` as opened.
+pub const CHEST_FLAG_BASE: u16 = 0x1E;
+
+/// Reads what chest `chest` holds.
+#[must_use]
+pub fn treasure(rom: &[u8], chest: usize) -> Option<Treasure> {
+    let at = TREASURE_TABLE + chest * TREASURE_LEN;
+    let bytes = rom.get(at..at + TREASURE_LEN)?;
+    let byte = |value: u8| (value != NO_TREASURE_BYTE).then_some(value);
+    let item = u16::from_le_bytes([bytes[6], bytes[7]]);
+    Some(Treasure {
+        money: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+        zoid: (bytes[4] != 0).then_some(bytes[4]),
+        item: (item != NO_TREASURE_ITEM).then_some(item),
+        other: [byte(bytes[8]), byte(bytes[9])],
+    })
+}
+
+/// What an object runs when the player speaks to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectScript {
+    /// A string of the `dialogue` table; for a chest, the chest's number.
+    Dialogue(u16),
+    /// Thumb code at this ROM address.
+    Code(u32),
+}
+
+/// Reads `count` objects in the map objects' format from the list at ROM
+/// address `address` (`0x08xxxxxx`), as cutscenes pass to the scene loader.
+///
+/// # Errors
+///
+/// Returns [`MapError::TooShort`] when the list is outside the ROM.
+pub fn objects_at(rom: &[u8], address: u32, count: usize) -> Result<Vec<MapObject>, MapError> {
+    let too_short = || MapError::TooShort {
+        len: rom.len(),
+        index: 0,
+    };
+    let list = address
+        .checked_sub(ROM_BASE)
+        .and_then(|offset| usize::try_from(offset).ok())
+        .ok_or_else(too_short)?;
+    (0..count)
+        .map(|index| read_object(rom, list + index * OBJECT_LEN).ok_or_else(too_short))
+        .collect()
+}
+
+fn read_object(rom: &[u8], at: usize) -> Option<MapObject> {
+    let bytes = rom.get(at..at + OBJECT_LEN)?;
+    let half = |i: usize| u16::from_le_bytes([bytes[i], bytes[i + 1]]);
+    let script = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+    Some(MapObject {
+        sprite: half(0),
+        palette_slot: usize::from(half(2)),
+        column: usize::from(half(4)),
+        row: usize::from(half(6)),
+        script: (script != OBJECT_NO_SCRIPT).then_some(script),
+        kind: half(12),
+        parameter: half(14),
+        animation: usize::from(half(16)),
+        behavior: half(18),
+    })
 }
 
 /// Reads the objects of map `map`; object 0 is the player's entry.
@@ -1262,23 +1371,7 @@ pub fn map_objects(rom: &[u8], map: usize) -> Result<Vec<MapObject>, MapError> {
     let count = usize::from(u16::from_le_bytes([entry[0], entry[1]]));
     let list = rom_offset(&entry[4..8]).ok_or_else(too_short)?;
     (0..count)
-        .map(|index| {
-            let at = list + index * OBJECT_LEN;
-            let bytes = rom.get(at..at + OBJECT_LEN).ok_or_else(too_short)?;
-            let half = |i: usize| u16::from_le_bytes([bytes[i], bytes[i + 1]]);
-            let script = u32::from_le_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
-            Ok(MapObject {
-                sprite: half(0),
-                palette_slot: usize::from(half(2)),
-                column: usize::from(half(4)),
-                row: usize::from(half(6)),
-                script: (script != OBJECT_NO_SCRIPT).then_some(script),
-                kind: half(12),
-                parameter: half(14),
-                animation: usize::from(half(16)),
-                behavior: half(18),
-            })
-        })
+        .map(|index| read_object(rom, list + index * OBJECT_LEN).ok_or_else(too_short))
         .collect()
 }
 
@@ -1448,8 +1541,8 @@ mod tests {
         );
         assert_eq!(sheet.frame_image(2).unwrap().indices[0], 2);
         assert_eq!(
-            sprite_sheet(&rom, 0),
-            Err(SpriteSheetError::NoSuchSprite { id: 0 })
+            sprite_sheet(&rom, SPRITE_COUNT),
+            Err(SpriteSheetError::NoSuchSprite { id: SPRITE_COUNT })
         );
         assert_eq!(sprite_sheet_by_tag(&rom, "ch01").unwrap().tag, "ch01");
         assert!(matches!(
@@ -1695,16 +1788,11 @@ mod tests {
     }
 
     #[test]
-    fn decodes_thumb_calls_and_finds_no_music_outside_the_map_table() {
-        assert_eq!(
-            thumb_call_target(0x1000, [0x00, 0xF0, 0xD8, 0xFC]),
-            Some(0x0800_19B4)
-        );
-        assert_eq!(
-            thumb_call_target(0x2000, [0xFE, 0xF7, 0xFE, 0xFF]),
-            Some(0x0800_1000)
-        );
-        assert_eq!(thumb_call_target(0, [0x00, 0x20, 0x00, 0x00]), None);
+    fn reads_a_map_song_from_its_record() {
+        let mut rom = vec![0; MAP_TABLE_OFFSET + 3 * MAP_RECORD_LEN];
+        rom[MAP_TABLE_OFFSET + 2 * MAP_RECORD_LEN + 8] = 0x0B;
+        assert_eq!(map_music(&rom, 2), Some(11));
+        assert_eq!(map_music(&rom, 1), Some(0));
         assert_eq!(map_music(&[0; 16], 0), None);
         assert_eq!(map_music(&[0; 16], MAP_COUNT), None);
         assert_eq!(SONG_TABLE + SONG_COUNT * 8, 0x0056_7B98);
@@ -1725,6 +1813,7 @@ mod tests {
                 height: 32,
                 entries: vec![0; 1024],
             },
+            cell_tiles: METATILE_TILES,
             attributes: vec![0x8000, 0x4001, 0xC002, 0x0001],
         };
         assert_eq!(scene.exit(0, 0), None);

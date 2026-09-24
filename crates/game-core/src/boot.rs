@@ -29,7 +29,9 @@ const LOGO_FADE_IN_FRAMES: u32 = 45;
 const LOGO_HOLD_UNTIL: u32 = 375;
 const LOGO_FADE_OUT_FRAMES: u32 = 30;
 const LOGO_TAIL_FRAMES: u32 = 30;
-const TITLE_FADE_IN_FRAMES: u32 = 165;
+const TITLE_FADE_IN_FRAMES: u32 = 166;
+/// Frames between START and the first operation of the menu script.
+const TITLE_MENU_DELAY: u32 = 4;
 const SCREEN_TILES: usize = 32;
 const TILE_PIXELS_I32: i32 = 8;
 const TITLE_TILE_BASE: usize = 0x102;
@@ -271,6 +273,7 @@ impl TitleChoice {
 enum TitleState {
     FadingIn,
     Waiting,
+    Starting(u32),
     Menu,
 }
 
@@ -342,10 +345,14 @@ impl TitleScreen {
             }
             TitleState::Waiting => {
                 if start {
-                    self.runner.start(0)?;
-                    self.state = TitleState::Menu;
+                    self.state = TitleState::Starting(0);
                 }
             }
+            TitleState::Starting(frames) if frames + 1 >= TITLE_MENU_DELAY => {
+                self.runner.start(0)?;
+                self.state = TitleState::Menu;
+            }
+            TitleState::Starting(frames) => self.state = TitleState::Starting(frames + 1),
             TitleState::Menu => {
                 if self.runner.update(rom, input, windows)? {
                     self.state = TitleState::Waiting;

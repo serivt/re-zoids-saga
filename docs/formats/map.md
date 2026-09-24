@@ -18,7 +18,7 @@ A map is a scene plus the data the game attaches to it. 343 records of 28 bytes 
 | 2 | Map id with bit 15 set on some records; the game searches records by `id & 0x7FFF` |
 | 4 | Map tiles per attribute cell side: 2 for rooms and towns, 4 for the world map |
 | 6 | Unknown half-word |
-| 8 | Unknown word |
+| 8 | The map's song, started on loading unless it is already playing |
 | 12 | Code pointer: a per-map handler (not modeled) |
 | 16 | ASCII name, zero-padded to 12 bytes: `START`, `mq0100`, `md0151`… |
 
@@ -50,7 +50,7 @@ and a pointer to the list. Each object is 20 bytes:
 
 | Offset | Field |
 |---|---|
-| 0 | Sprite id (see [sprite.md](sprite.md)); 0 for an invisible object, bit 15 set to show the party's Zoid |
+| 0 | Sprite id (see [sprite.md](sprite.md)); 0 is the carrier `mz10` (the player on Zoid maps, the Gustav in the hangar), bit 15 set to show the party's Zoid |
 | 2 | OBJ palette slot the game reserves |
 | 4 | Metatile column the object stands on |
 | 6 | Metatile row |

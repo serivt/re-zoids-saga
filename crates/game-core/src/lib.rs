@@ -2,6 +2,7 @@
 
 pub mod boot;
 pub mod data;
+pub mod event;
 pub mod extension;
 pub mod field;
 pub mod game;
@@ -11,6 +12,7 @@ pub mod rng;
 pub mod save;
 pub mod script;
 pub mod sprite;
+pub mod story;
 pub mod text;
 pub mod translation;
 pub mod window;
@@ -18,9 +20,11 @@ pub mod windows;
 
 pub use boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 pub use data::GameData;
+pub use event::{EventHost, Events, Op};
 pub use extension::{Event, Extension, Extensions, GameSound, Rect, SharedExtensions};
 pub use field::{
-    Direction, Field, FieldError, FieldEvent, Npc, NpcCommand, Player, current_frame, draw_scene,
+    Actor, Command, Direction, Field, FieldError, FieldEvent, Walk, current_frame, draw_scene,
+    frame_at,
 };
 pub use game::{Game, GameError, Stage};
 pub use menu::{Character, MenuStep, Party, PauseMenu, Unit};

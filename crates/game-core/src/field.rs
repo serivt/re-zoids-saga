@@ -1,28 +1,30 @@
-//! The field: a scene the player walks around, with the camera following.
+//! The field: a scene with actors on it, the player among them, and the
+//! camera following the player.
 //!
-//! Movement matches the original: the player stands on a 16×16 metatile,
-//! a held direction starts a step onto the next metatile when it is not
-//! blocked, and a started step always completes at one pixel per frame.
-//! Every actor has an anchor at the bottom center of its standing
-//! metatile's lower neighbour, `(16 × column + 8, 16 × row + 16)`; frames
-//! are drawn at the anchor plus their own offset, which puts a 32×32
-//! sprite's top-left at `(16 × column − 8, 16 × row)`. The camera keeps the
-//! player's anchor at screen (120, 80) within the map's bounds. Animations
-//! come from the sprite sheet: idle animation = facing direction, walking
-//! animation = facing + 4, each step lasting half its listed ticks.
-//! Characters from the map's object list stand still on their metatile,
-//! block the player and are drawn in back-to-front order, in front of the
-//! player when level with it. Completing a step onto an exit metatile
-//! reports the exit so the caller can warp; pressing A while standing and
-//! facing a character turns it to the player (unless it is furniture) and
-//! reports its dialogue so the caller can open a talk box. Wandering
-//! characters (kind 2) wait a random `0..=127` frames, turn to a random
-//! direction and, when the metatile ahead of their footing is free, walk
-//! there at half the player's speed (32 frames); a blocked direction only
-//! turns them and rolls a new wait.
+//! Actors mirror the game's entity table: one per object of the map's list,
+//! object 0 being the player, each standing on a 16×16 metatile with its
+//! sprite's top-left at `(16 × column − 8, 16 × row)` in 16.16 fixed-point
+//! pixels. Every frame each actor, in object order, either continues the
+//! step it is taking or runs its command, which may start one: the
+//! player's command reads the buttons, a wanderer picks a random direction
+//! now and then, and a walk heads for a metatile one step at a time. A step
+//! moves the metatile at once and the sprite over the following frames at
+//! the step's speed (16 frames at one pixel per frame for the player, 32 at
+//! half for characters); its first frame already moves. Steps are blocked
+//! by the scene's attributes under the footing (the metatile below the
+//! standing one) and by other visible actors' footings, both the one they
+//! stand on and, while stepping, the one they left; a walk through
+//! (command 11) ignores both. Animations come from the sprite sheet: idle
+//! animation = facing, walking = facing + 4, restarted by every step and
+//! turn, each tick shortened by the actor's animation shift (1 halves them:
+//! the player's steps last one walking cycle). Actors are drawn in
+//! back-to-front order of their anchor, the bottom center of the footing.
+//! Completing a step onto an exit reports it; pressing A while standing and
+//! facing an actor turns it toward the player (characters only) and reports
+//! what it runs.
 
 use extraction::saga::{
-    self, METATILE_TILES, MapError, PLAYER_SPRITE, Scene, SceneError, SpriteSheet,
+    MapError, MapObject, ObjectScript, PLAYER_SPRITE, Scene, SceneError, SpriteSheet,
     SpriteSheetError, WALK_ANIMATION_BASE, Warp,
 };
 use gba_runtime::ppu::{PaletteBank, SCREEN_HEIGHT, SCREEN_WIDTH, draw_background};
@@ -34,16 +36,28 @@ use crate::draw_sprite;
 use crate::rng::Rng;
 
 const TILE_SIZE: usize = 8;
-const METATILE_SIZE: usize = METATILE_TILES * TILE_SIZE;
-const ANCHOR_OFFSET: (isize, isize) = (8, 16);
+/// Side of a room's cell in pixels; Zoid maps use cells twice as large.
+pub const ROOM_CELL: i32 = 16;
+const SPRITE_SIDE: i32 = 32;
+const FRACTION_BITS: u32 = 16;
+/// One pixel in the actors' fixed-point positions.
+pub const PIXEL: i32 = 1 << FRACTION_BITS;
+/// The player's speed: a pixel a frame.
+pub const PLAYER_SPEED: i32 = PIXEL;
+/// A wandering character's speed: half a pixel a frame.
+pub const WANDER_SPEED: i32 = PIXEL / 2;
+const ANCHOR_FROM_ORIGIN: (isize, isize) = (16, 16);
 const CAMERA_ANCHOR: (isize, isize) = (120, 80);
-const ANIMATION_SPEED_SHIFT: u32 = 1;
-const FURNITURE_BEHAVIOR: u16 = 2;
+const PLAYER_ANIMATION_SHIFT: i8 = 1;
+const CHARACTER_BEHAVIOR: u16 = 0;
+const TURNING_BEHAVIORS: u16 = 2;
+const PASSABLE_BEHAVIOR: u16 = 3;
+const SILENT_BEHAVIOR: u16 = 5;
+const PLAYER_KIND: u16 = 0;
 const WANDER_KIND: u16 = 2;
-const NPC_STEP_FRAMES: u32 = 32;
 const IDLE_TIMER_MASK: u16 = 0x7F;
 
-/// Where the player faces, in the order the sprite sheet uses.
+/// Where an actor faces, in the order the sprite sheet uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     /// Facing away from the camera.
@@ -89,7 +103,9 @@ impl Direction {
         }
     }
 
-    const fn index(self) -> usize {
+    /// The sprite sheet's number for this direction.
+    #[must_use]
+    pub const fn index(self) -> usize {
         match self {
             Self::Up => 0,
             Self::Down => 1,
@@ -113,125 +129,318 @@ impl Direction {
 pub enum FieldEvent {
     /// The player finished a step onto this exit.
     Exit(usize),
-    /// The player spoke to the character at this index in `npcs`, whose
-    /// dialogue string this is.
+    /// The player faced chest `chest` (actor `actor`) and pressed A.
+    Chest {
+        /// Index into the field's actors.
+        actor: usize,
+        /// The chest's number.
+        chest: u16,
+    },
+    /// The player spoke to this actor, which runs `script`.
     Talk {
-        /// Index into the field's characters.
-        npc: usize,
-        /// Dialogue string index.
-        dialogue: usize,
+        /// Index into the field's actors (the object's index).
+        actor: usize,
+        /// What it runs.
+        script: ObjectScript,
     },
 }
 
-/// The player's position and animation state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Player {
-    /// Metatile column the player stands on.
-    pub column: usize,
-    /// Metatile row the player stands on.
-    pub row: usize,
-    /// Facing direction.
-    pub facing: Direction,
-    /// Pixels advanced into the step being taken, 0 when standing.
-    pub step: usize,
-    /// Frames spent in the current animation.
-    pub animation: u32,
-    /// Whether the player is stepping.
-    pub walking: bool,
-}
-
-impl Player {
-    /// Anchor in map pixels: bottom center of the standing metatile's
-    /// lower neighbour, moved along the step in progress.
-    #[must_use]
-    pub fn anchor(&self) -> (isize, isize) {
-        let (dx, dy) = if self.walking {
-            self.facing.delta()
-        } else {
-            (0, 0)
-        };
-        let step = isize::try_from(self.step).unwrap_or(0);
-        let (x, y) = anchor(self.column, self.row);
-        (x + dx * step, y + dy * step)
-    }
-
-    /// The metatile the collision box sits on: below the standing one.
-    #[must_use]
-    pub fn footing(&self) -> (usize, usize) {
-        (self.column, self.row + 1)
-    }
-
-    /// Sheet animation to play: idle while standing, walking while stepping.
-    #[must_use]
-    pub fn animation_id(&self) -> usize {
-        let base = if self.walking { WALK_ANIMATION_BASE } else { 0 };
-        base + self.facing.index()
-    }
-}
-
-/// An order given to a character by a cutscene.
+/// A walk toward a metatile, as cutscenes give it (the game's commands 10
+/// and 11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NpcCommand {
-    /// Turn without moving.
-    Face(Direction),
-    /// Turn and walk one metatile, when the cell ahead is free.
-    Step(Direction),
+pub struct Walk {
+    /// Destination column.
+    pub column: usize,
+    /// Destination row.
+    pub row: usize,
+    /// Pixels a frame, in 16.16 fixed point.
+    pub speed: i32,
+    /// Shift applied to the animation's ticks while walking.
+    pub animation_shift: i8,
+    /// Whether it walks through walls and actors (command 11).
+    pub through: bool,
 }
 
-/// A character standing on the map.
+/// What an actor does when it is not stepping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Command {
+    /// Moves with the buttons (command 0).
+    Player,
+    /// Stands still (command 1); a walk becomes this once it arrives.
+    Idle,
+    /// Walks around at random (command 2).
+    Wander,
+    /// Heads for a metatile, the longer axis first, horizontally on ties.
+    WalkTo(Walk),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Step {
+    direction: Direction,
+    frames: i32,
+    speed: i32,
+}
+
+/// Someone or something standing on the map: the player or an object of
+/// the map's list.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Npc {
-    /// Metatile column it stands on.
+pub struct Actor {
+    /// Metatile column it stands on (a step's destination from its start).
     pub column: usize,
     /// Metatile row it stands on.
     pub row: usize,
-    /// Its sprite.
-    pub sheet: SpriteSheet,
-    /// Sheet animation it plays.
-    pub animation_id: usize,
-    /// Frames spent in the animation.
-    pub animation: u32,
-    /// Dialogue string it says when spoken to.
-    pub dialogue: Option<usize>,
-    /// Whether it turns toward the player when spoken to.
-    pub turns: bool,
-    /// Whether it walks around on its own.
-    pub wanders: bool,
+    previous: (usize, usize),
+    x: i32,
+    y: i32,
+    size: i32,
+    /// Its sprite; `None` for invisible objects.
+    pub sheet: Option<SpriteSheet>,
+    /// Whether it is drawn and blocks others.
+    pub visible: bool,
     /// Where it faces.
     pub facing: Direction,
-    /// Frames left before it acts again while standing.
+    /// Sheet animation it plays.
+    pub animation_id: usize,
+    /// Frames into the animation, the frame that started it counting one.
+    pub animation: u32,
+    /// Shift applied to the animation's ticks (1 halves them).
+    pub animation_shift: i8,
+    /// What it does when standing.
+    pub command: Command,
+    step: Option<Step>,
+    /// What it runs when spoken to.
+    pub script: Option<ObjectScript>,
+    /// The object's behavior: 0 characters, 1 map Zoids, 2 furniture, 3
+    /// passable, 4 chests, 5 silent.
+    pub behavior: u16,
+    /// Frames left before a wanderer acts again.
     pub timer: u16,
-    /// Frames into the step being taken, 0 when standing; the standing
-    /// metatile is already the step's destination.
-    pub step: u32,
+    /// The chest's number, for a chest.
+    pub chest: Option<u16>,
+    /// Whether the animation stops on its last step instead of looping.
+    pub once: bool,
+    /// A step of the animation shown without animating.
+    pub pose: Option<usize>,
 }
 
-impl Npc {
-    /// The metatile it blocks: below the standing one.
+impl Actor {
+    /// An actor standing on `(column, row)` facing `facing`.
+    #[must_use]
+    pub fn new(
+        sheet: Option<SpriteSheet>,
+        (column, row): (usize, usize),
+        facing: Direction,
+    ) -> Self {
+        let (x, y) = origin(column, row, ROOM_CELL);
+        Self {
+            column,
+            row,
+            previous: (column, row),
+            x,
+            y,
+            size: ROOM_CELL,
+            sheet,
+            visible: true,
+            facing,
+            animation_id: facing.index(),
+            animation: 0,
+            animation_shift: PLAYER_ANIMATION_SHIFT,
+            command: Command::Idle,
+            step: None,
+            script: None,
+            behavior: CHARACTER_BEHAVIOR,
+            timer: 0,
+            chest: None,
+            once: false,
+            pose: None,
+        }
+    }
+
+    fn from_object(sheet: Option<SpriteSheet>, object: &MapObject) -> Self {
+        let facing = Direction::from_index(object.animation).unwrap_or(Direction::Down);
+        let mut actor = Self::new(sheet, (object.column, object.row), facing);
+        actor.animation_id = object.animation;
+        actor.script = object.script_kind();
+        actor.chest = object.chest();
+        actor.behavior = object.behavior;
+        actor.command = match object.kind {
+            PLAYER_KIND => Command::Player,
+            WANDER_KIND => Command::Wander,
+            _ => Command::Idle,
+        };
+        actor
+    }
+
+    /// The cell its collision box sits on: the bottom half of its 32×32
+    /// sprite, below the standing cell in rooms, the standing cell itself
+    /// on Zoid maps.
     #[must_use]
     pub fn footing(&self) -> (usize, usize) {
-        (self.column, self.row + 1)
+        (self.column, self.row + self.footing_offset())
     }
 
-    /// Anchor in map pixels, behind the destination by what is left of
-    /// the step.
+    fn previous_footing(&self) -> (usize, usize) {
+        (self.previous.0, self.previous.1 + self.footing_offset())
+    }
+
+    fn footing_offset(&self) -> usize {
+        usize::try_from(SPRITE_SIDE / self.size.max(1) - 1).unwrap_or(0)
+    }
+
+    /// Uses cells of `size` pixels, as its map does, standing where it is.
+    pub fn set_cell_size(&mut self, size: i32) {
+        self.size = size;
+        self.place((self.column, self.row));
+    }
+
+    /// Whether it is taking a step.
+    #[must_use]
+    pub fn walking(&self) -> bool {
+        self.step.is_some()
+    }
+
+    /// Top-left of its 32×32 box in map pixels.
+    #[must_use]
+    pub fn position(&self) -> (isize, isize) {
+        let pixels = |value: i32| isize::try_from(value >> FRACTION_BITS).unwrap_or(0);
+        (pixels(self.x), pixels(self.y))
+    }
+
+    /// Anchor in map pixels: the bottom center of its footing, moved along
+    /// the step in progress.
     #[must_use]
     pub fn anchor(&self) -> (isize, isize) {
-        let (x, y) = anchor(self.column, self.row);
-        if self.step == 0 {
-            return (x, y);
-        }
-        let (dx, dy) = self.facing.delta();
-        let left =
-            isize::try_from((NPC_STEP_FRAMES - self.step.min(NPC_STEP_FRAMES)) / 2).unwrap_or(0);
-        (x - dx * left, y - dy * left)
+        let (x, y) = self.position();
+        (x + ANCHOR_FROM_ORIGIN.0, y + ANCHOR_FROM_ORIGIN.1)
     }
 
-    fn face(&mut self, direction: Direction) {
+    /// Turns toward `direction` and plays its idle animation from the start.
+    pub fn face(&mut self, direction: Direction) {
         self.facing = direction;
-        self.animation_id = direction.index();
+        self.play(direction.index());
+    }
+
+    /// Plays animation `id` from the start.
+    pub fn play(&mut self, id: usize) {
+        self.animation_id = id;
         self.animation = 0;
     }
+
+    /// Stands it on `(column, row)`, ending any step.
+    pub fn place(&mut self, (column, row): (usize, usize)) {
+        self.column = column;
+        self.row = row;
+        self.previous = (column, row);
+        (self.x, self.y) = origin(column, row, self.size);
+        self.step = None;
+    }
+
+    /// Moves its sprite by `(dx, dy)` pixels without changing its metatile.
+    pub fn nudge(&mut self, (dx, dy): (i32, i32)) {
+        self.x += dx * PIXEL;
+        self.y += dy * PIXEL;
+    }
+
+    /// Puts its sprite's top-left at map pixel `(x, y)` without changing its
+    /// metatile.
+    pub fn set_position(&mut self, (x, y): (i32, i32)) {
+        self.x = x * PIXEL;
+        self.y = y * PIXEL;
+    }
+
+    /// Plays animation `id` once from the start, stopping on its last step.
+    pub fn play_once(&mut self, id: usize) {
+        self.once = true;
+        self.pose = None;
+        self.play(id);
+    }
+
+    /// Whether an animation played once has reached its end.
+    #[must_use]
+    pub fn animation_done(&self) -> bool {
+        let Some(sheet) = self.sheet.as_ref() else {
+            return true;
+        };
+        self.once
+            && animation_length(sheet, self.animation_id, self.animation_shift)
+                .is_some_and(|length| self.animation >= length)
+    }
+
+    /// Whether a walk has arrived or it otherwise stands idle.
+    #[must_use]
+    pub fn idle(&self) -> bool {
+        self.command == Command::Idle && self.step.is_none()
+    }
+
+    fn start_step(&mut self, direction: Direction, speed: i32) {
+        let (dx, dy) = direction.delta();
+        self.previous = (self.column, self.row);
+        self.column = self.column.saturating_add_signed(dx);
+        self.row = self.row.saturating_add_signed(dy);
+        self.facing = direction;
+        self.play(WALK_ANIMATION_BASE + direction.index());
+        self.animation_shift = PLAYER_ANIMATION_SHIFT;
+        self.step = Some(Step {
+            direction,
+            frames: self.size * PIXEL / speed.max(1),
+            speed,
+        });
+        self.advance_step();
+    }
+
+    fn advance_step(&mut self) -> bool {
+        let Some(step) = self.step.as_mut() else {
+            return false;
+        };
+        let (dx, dy) = step.direction.delta();
+        let delta = |d: isize| i32::try_from(d).unwrap_or(0) * step.speed;
+        self.x += delta(dx);
+        self.y += delta(dy);
+        step.frames -= 1;
+        if step.frames > 0 {
+            return false;
+        }
+        self.step = None;
+        self.previous = (self.column, self.row);
+        (self.x, self.y) = origin(self.column, self.row, self.size);
+        self.face(self.facing);
+        true
+    }
+
+    fn current_frame(&self) -> Option<usize> {
+        let sheet = self.sheet.as_ref()?;
+        let steps = sheet.animations.get(self.animation_id)?;
+        if let Some(step) = self.pose {
+            return steps
+                .get(step)
+                .or_else(|| steps.last())
+                .map(|step| step.frame);
+        }
+        if self.animation_done() {
+            return steps.last().map(|step| step.frame);
+        }
+        frame_at(
+            sheet,
+            self.animation_id,
+            self.animation,
+            self.animation_shift,
+        )
+    }
+}
+
+/// The sprite's top-left for cell `(column, row)` of `size` pixels, in
+/// fixed point: centered on the cell, its top on the cell's top. The game
+/// keeps cells in 16 bits, so `0xFFFE` stands two rows above the map (where
+/// cutscenes park the player).
+fn origin(column: usize, row: usize, size: i32) -> (i32, i32) {
+    let signed = |cell: usize| {
+        let cell = u16::try_from(cell & usize::from(u16::MAX)).unwrap_or(0);
+        i32::from(i16::from_ne_bytes(cell.to_ne_bytes()))
+    };
+    (
+        (signed(column) * size + size / 2 - SPRITE_SIDE / 2) * PIXEL,
+        signed(row) * size * PIXEL,
+    )
 }
 
 fn random_direction(value: u16) -> Direction {
@@ -243,20 +452,44 @@ fn random_direction(value: u16) -> Direction {
     }
 }
 
-fn anchor(column: usize, row: usize) -> (isize, isize) {
-    let pixels = |cell: usize| isize::try_from(cell * METATILE_SIZE).unwrap_or(isize::MAX);
-    (
-        pixels(column) + ANCHOR_OFFSET.0,
-        pixels(row) + ANCHOR_OFFSET.1,
-    )
+/// The direction a walk from `from` to `to` steps in: along the longer
+/// axis, horizontally when both are as long, as the game's routine at
+/// `0x0800A864` decides.
+fn toward(from: (usize, usize), to: (usize, usize)) -> Option<Direction> {
+    let signed = |value: usize| isize::try_from(value).unwrap_or(isize::MAX);
+    let dx = signed(to.0) - signed(from.0);
+    let dy = signed(to.1) - signed(from.1);
+    if dx == 0 && dy == 0 {
+        return None;
+    }
+    Some(if dx.abs() >= dy.abs() {
+        if dx < 0 {
+            Direction::Left
+        } else {
+            Direction::Right
+        }
+    } else if dy < 0 {
+        Direction::Up
+    } else {
+        Direction::Down
+    })
 }
 
 /// Frame record shown by `sheet`'s animation `id` after `elapsed` frames,
 /// with steps lasting half their ticks (at least one frame).
 #[must_use]
 pub fn current_frame(sheet: &SpriteSheet, id: usize, elapsed: u32) -> Option<usize> {
+    frame_at(sheet, id, elapsed, PLAYER_ANIMATION_SHIFT)
+}
+
+/// Frame record shown by `sheet`'s animation `id` after `elapsed` frames,
+/// each step lasting its ticks shifted right by `shift` (left when
+/// negative), at least one frame. The frame that starts an animation
+/// already counts one, so its first step shows a frame shorter.
+#[must_use]
+pub fn frame_at(sheet: &SpriteSheet, id: usize, elapsed: u32, shift: i8) -> Option<usize> {
     let steps = sheet.animations.get(id)?;
-    let length = |ticks: u32| (ticks >> ANIMATION_SPEED_SHIFT).max(1);
+    let length = |ticks: u32| tick_length(ticks, shift);
     let cycle: u32 = steps.iter().map(|step| length(step.duration)).sum();
     if cycle == 0 {
         return None;
@@ -276,6 +509,26 @@ pub fn current_frame(sheet: &SpriteSheet, id: usize, elapsed: u32) -> Option<usi
         .map(|step| step.frame)
 }
 
+/// Frames `sheet`'s animation `id` lasts with ticks shifted by `shift`.
+fn animation_length(sheet: &SpriteSheet, id: usize, shift: i8) -> Option<u32> {
+    let steps = sheet.animations.get(id)?;
+    Some(
+        steps
+            .iter()
+            .map(|step| tick_length(step.duration, shift))
+            .sum(),
+    )
+}
+
+fn tick_length(ticks: u32, shift: i8) -> u32 {
+    let scaled = if shift >= 0 {
+        ticks >> shift.unsigned_abs()
+    } else {
+        ticks << shift.unsigned_abs()
+    };
+    scaled.max(1)
+}
+
 /// Why a field could not be loaded from the ROM.
 #[derive(Debug, Error)]
 pub enum FieldError {
@@ -290,48 +543,44 @@ pub enum FieldError {
     Sprite(#[from] SpriteSheetError),
 }
 
-/// A scene with the player and the map's characters in it.
+/// A scene with the player and the map's objects on it.
 pub struct Field {
     map: usize,
     scene: Scene,
-    sheet: SpriteSheet,
     palettes: PaletteBank,
-    /// The player.
-    pub player: Player,
-    /// The characters standing on the map.
-    pub npcs: Vec<Npc>,
+    /// The actors, by object index; actor 0 is the player.
+    pub actors: Vec<Actor>,
+    /// How far cutscenes have scrolled the camera from the player, in
+    /// 16.16 fixed-point pixels.
+    pub pan: (i32, i32),
     previous: Input,
     frame: u16,
     rng: Rng,
 }
 
 impl Field {
-    /// Stands the player on metatile `(column, row)` of `scene`.
+    /// Stands the player, drawn with `sheet`, on metatile `(column, row)` of
+    /// `scene`.
     #[must_use]
     pub fn new(scene: Scene, sheet: SpriteSheet, (column, row): (usize, usize)) -> Self {
         let palettes = PaletteBank::from_bgr555(&scene.palettes);
+        let mut player = Actor::new(Some(sheet), (column, row), Direction::Down);
+        player.command = Command::Player;
+        player.set_cell_size(cell_pixels(&scene));
         Self {
             map: 0,
             scene,
-            sheet,
             palettes,
-            player: Player {
-                column,
-                row,
-                facing: Direction::Down,
-                step: 0,
-                animation: 0,
-                walking: false,
-            },
-            npcs: Vec::new(),
+            actors: vec![player],
+            pan: (0, 0),
             previous: Input::default(),
             frame: 0,
             rng: Rng::default(),
         }
     }
 
-    /// Loads map `map` from `rom` with its characters and stands the player
-    /// on `(column, row)`.
+    /// Loads map `map` with its objects and stands the player on
+    /// `(column, row)`.
     ///
     /// # Errors
     ///
@@ -342,10 +591,39 @@ impl Field {
         map: usize,
         (column, row): (usize, usize),
     ) -> Result<Self, FieldError> {
-        let (scene, player_sheet, npcs) = load_map(data, map)?;
-        let mut field = Self::new(scene, player_sheet, (column, row));
-        field.map = map;
-        field.npcs = npcs;
+        let objects = data.map_objects(map)?;
+        Self::load_with(data, map, (column, row), &objects)
+    }
+
+    /// Loads map `map` with the objects `objects` instead of its own list,
+    /// as cutscenes do, and stands the player (object 0) on `(column, row)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError`] when the map record, its scene or a sprite
+    /// cannot be read.
+    pub fn load_with(
+        data: &GameData<'_>,
+        map: usize,
+        (column, row): (usize, usize),
+        objects: &[MapObject],
+    ) -> Result<Self, FieldError> {
+        let scene = map_scene(data, map)?;
+        let mut actors = load_actors(data, objects)?;
+        for actor in &mut actors {
+            actor.set_cell_size(cell_pixels(&scene));
+        }
+        let mut field = Self {
+            map,
+            palettes: PaletteBank::from_bgr555(&scene.palettes),
+            scene,
+            actors,
+            pan: (0, 0),
+            previous: Input::default(),
+            frame: 0,
+            rng: Rng::default(),
+        };
+        field.player_mut().place((column, row));
         Ok(field)
     }
 
@@ -361,258 +639,252 @@ impl Field {
         &self.scene
     }
 
+    /// The player.
+    #[must_use]
+    pub fn player(&self) -> &Actor {
+        &self.actors[0]
+    }
+
+    /// The player, to move or turn.
+    pub fn player_mut(&mut self) -> &mut Actor {
+        &mut self.actors[0]
+    }
+
+    /// Actor `index`, if there is one.
+    #[must_use]
+    pub fn actor(&self, index: usize) -> Option<&Actor> {
+        self.actors.get(index)
+    }
+
+    /// Actor `index`, to command.
+    pub fn actor_mut(&mut self, index: usize) -> Option<&mut Actor> {
+        self.actors.get_mut(index)
+    }
+
     /// Advances one frame with the buttons held; reports an exit reached or
-    /// a character spoken to.
+    /// an actor spoken to.
     pub fn update(&mut self, input: Input) -> Option<FieldEvent> {
         let pressed_a = input.is_held(Button::A) && !self.previous.is_held(Button::A);
         self.previous = input;
         self.frame = self.frame.wrapping_add(1);
-        self.player.animation += 1;
-        for index in 0..self.npcs.len() {
-            self.npcs[index].animation += 1;
-            self.wander(index);
+        let mut event = None;
+        for index in 0..self.actors.len() {
+            if let Some(found) = self.update_actor(index, input, pressed_a) {
+                event = Some(found);
+            }
         }
-        if self.player.walking {
-            return self.advance_step().map(FieldEvent::Exit);
+        for actor in &mut self.actors {
+            actor.animation = actor.animation.saturating_add(1);
         }
+        event
+    }
+
+    fn update_actor(&mut self, index: usize, input: Input, pressed_a: bool) -> Option<FieldEvent> {
+        let actor = &mut self.actors[index];
+        if actor.step.is_some() {
+            let finished = actor.advance_step();
+            if finished && actor.command == Command::Wander {
+                actor.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
+            }
+            if finished && index == 0 && actor.command == Command::Player {
+                let (column, row) = actor.footing();
+                return self.scene.exit(column, row).map(FieldEvent::Exit);
+            }
+            return None;
+        }
+        let event = match actor.command {
+            Command::Player => self.update_player(input, pressed_a),
+            Command::Idle => None,
+            Command::Wander => {
+                self.wander(index);
+                None
+            }
+            Command::WalkTo(walk) => {
+                self.walk(index, walk);
+                None
+            }
+        };
+        let actor = &mut self.actors[index];
+        if actor.step.is_none() {
+            actor.animation_shift = if actor.behavior == CHARACTER_BEHAVIOR {
+                PLAYER_ANIMATION_SHIFT
+            } else {
+                0
+            };
+        }
+        event
+    }
+
+    fn update_player(&mut self, input: Input, pressed_a: bool) -> Option<FieldEvent> {
         if pressed_a {
             return self.talk();
         }
         let direction = Direction::from_input(input)?;
-        if self.player.facing != direction {
-            self.player.facing = direction;
-            self.player.animation = 0;
+        let player = &mut self.actors[0];
+        if player.facing != direction {
+            player.face(direction);
         }
-        let (dx, dy) = direction.delta();
-        let (column, row) = self.player.footing();
-        let target = (column.checked_add_signed(dx), row.checked_add_signed(dy));
-        if let (Some(column), Some(row)) = target
-            && !self.blocked(column, row)
-        {
-            self.player.walking = true;
-            self.player.animation = 0;
-            self.advance_step();
+        if self.free(0, direction, false) {
+            self.actors[0].start_step(direction, PLAYER_SPEED);
         }
         None
     }
 
     fn wander(&mut self, index: usize) {
-        let npc = &self.npcs[index];
-        if npc.step > 0 {
-            let npc = &mut self.npcs[index];
-            npc.step += 1;
-            if npc.step >= NPC_STEP_FRAMES {
-                npc.step = 0;
-                npc.animation_id = npc.facing.index();
-                npc.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
-            }
-            return;
-        }
-        if !npc.wanders {
-            return;
-        }
-        if npc.timer > 0 {
-            self.npcs[index].timer -= 1;
+        if self.actors[index].timer > 0 {
+            self.actors[index].timer -= 1;
             return;
         }
         self.rng.seed(self.frame);
         let direction = random_direction(self.rng.next(self.frame));
-        if !self.start_npc_step(index, direction) {
-            self.npcs[index].timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
-        }
-    }
-
-    /// Turns character `index` toward `direction` and starts a step when
-    /// the cell ahead is free; returns whether it stepped.
-    fn start_npc_step(&mut self, index: usize, direction: Direction) -> bool {
-        let (dx, dy) = direction.delta();
-        let (column, row) = self.npcs[index].footing();
-        let target = (column.checked_add_signed(dx), row.checked_add_signed(dy));
-        let free = match target {
-            (Some(column), Some(row)) => !self.blocked_for_npc(index, column, row),
-            _ => false,
-        };
-        let npc = &mut self.npcs[index];
-        npc.face(direction);
+        let free = self.free(index, direction, true);
+        let actor = &mut self.actors[index];
+        actor.face(direction);
         if free {
-            npc.column = npc.column.saturating_add_signed(dx);
-            npc.row = npc.row.saturating_add_signed(dy);
-            npc.step = 1;
-            npc.animation_id = WALK_ANIMATION_BASE + direction.index();
+            actor.start_step(direction, WANDER_SPEED);
+        } else {
+            actor.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
         }
-        free
     }
 
-    /// Gives character `index` a cutscene order; returns whether a step
-    /// started (or, for a turn, whether the character exists).
-    pub fn command_npc(&mut self, index: usize, command: NpcCommand) -> bool {
-        if index >= self.npcs.len() {
+    fn walk(&mut self, index: usize, walk: Walk) {
+        let actor = &self.actors[index];
+        let Some(direction) = toward((actor.column, actor.row), (walk.column, walk.row)) else {
+            self.actors[index].command = Command::Idle;
+            return;
+        };
+        let free = walk.through || self.free(index, direction, false);
+        let actor = &mut self.actors[index];
+        if free {
+            actor.start_step(direction, walk.speed);
+            actor.animation_shift = walk.animation_shift;
+        } else if actor.facing != direction {
+            actor.face(direction);
+        }
+    }
+
+    /// Whether actor `index` may step toward `direction`: the footing ahead
+    /// is inside the scene and not blocked, no other visible actor stands
+    /// or is stepping out of it, and, for wanderers, it is not an exit.
+    fn free(&self, index: usize, direction: Direction, avoid_exits: bool) -> bool {
+        let (dx, dy) = direction.delta();
+        let (column, row) = self.actors[index].footing();
+        let (Some(column), Some(row)) = (column.checked_add_signed(dx), row.checked_add_signed(dy))
+        else {
+            return false;
+        };
+        if self.scene.blocked(column, row) || avoid_exits && self.scene.exit(column, row).is_some()
+        {
             return false;
         }
-        match command {
-            NpcCommand::Face(direction) => {
-                self.npcs[index].face(direction);
-                true
-            }
-            NpcCommand::Step(direction) => self.start_npc_step(index, direction),
-        }
-    }
-
-    /// Whether character `index` is standing still (or absent).
-    #[must_use]
-    pub fn npc_idle(&self, index: usize) -> bool {
-        self.npcs.get(index).is_none_or(|npc| npc.step == 0)
-    }
-
-    /// Adds a character loaded from `rom` at `(column, row)`; returns its
-    /// index.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`FieldError`] when the sprite cannot be read.
-    pub fn spawn_npc(
-        &mut self,
-        data: &GameData<'_>,
-        sprite: usize,
-        (column, row): (usize, usize),
-        facing: Direction,
-    ) -> Result<usize, FieldError> {
-        let sheet = data.sprite_sheet(sprite)?;
-        self.npcs.push(Npc {
-            column,
-            row,
-            sheet,
-            animation_id: facing.index(),
-            animation: 0,
-            dialogue: None,
-            turns: true,
-            wanders: false,
-            facing,
-            timer: 0,
-            step: 0,
-        });
-        Ok(self.npcs.len() - 1)
-    }
-
-    fn blocked_for_npc(&self, index: usize, column: usize, row: usize) -> bool {
-        let (dx, dy) = if self.player.walking {
-            self.player.facing.delta()
-        } else {
-            (0, 0)
-        };
-        let (fc, fr) = self.player.footing();
-        let player_cells = [
-            (fc, fr),
-            (fc.wrapping_add_signed(dx), fr.wrapping_add_signed(dy)),
-        ];
-        self.scene.blocked(column, row)
-            || self.scene.exit(column, row).is_some()
-            || player_cells.contains(&(column, row))
-            || self
-                .npcs
-                .iter()
-                .enumerate()
-                .any(|(other, npc)| other != index && npc.footing() == (column, row))
-    }
-
-    fn talk(&mut self) -> Option<FieldEvent> {
-        let (dx, dy) = self.player.facing.delta();
-        let (column, row) = self.player.footing();
-        let ahead = (column.checked_add_signed(dx)?, row.checked_add_signed(dy)?);
-        let index = self
-            .npcs
-            .iter()
-            .position(|npc| npc.step == 0 && npc.footing() == ahead)?;
-        let npc = &mut self.npcs[index];
-        if npc.turns {
-            npc.face(self.player.facing.opposite());
-        }
-        npc.dialogue.map(|dialogue| FieldEvent::Talk {
-            npc: index,
-            dialogue,
+        !self.actors.iter().enumerate().any(|(other, actor)| {
+            other != index
+                && actor.visible
+                && actor.behavior != PASSABLE_BEHAVIOR
+                && (actor.footing() == (column, row) || actor.previous_footing() == (column, row))
         })
     }
 
-    fn blocked(&self, column: usize, row: usize) -> bool {
-        self.scene.blocked(column, row)
-            || self.npcs.iter().any(|npc| npc.footing() == (column, row))
-    }
-
-    fn advance_step(&mut self) -> Option<usize> {
-        self.player.step += 1;
-        if self.player.step < METATILE_SIZE {
+    fn talk(&mut self) -> Option<FieldEvent> {
+        let player = &self.actors[0];
+        let (dx, dy) = player.facing.delta();
+        let (column, row) = player.footing();
+        let ahead = (column.checked_add_signed(dx)?, row.checked_add_signed(dy)?);
+        let facing = player.facing;
+        let index = (1..self.actors.len()).find(|&index| {
+            let actor = &self.actors[index];
+            actor.visible && actor.step.is_none() && actor.footing() == ahead
+        })?;
+        let actor = &mut self.actors[index];
+        if let Some(chest) = actor.chest {
+            return Some(FieldEvent::Chest {
+                actor: index,
+                chest,
+            });
+        }
+        if actor.behavior == SILENT_BEHAVIOR {
             return None;
         }
-        let (dx, dy) = self.player.facing.delta();
-        self.player.column = self.player.column.saturating_add_signed(dx);
-        self.player.row = self.player.row.saturating_add_signed(dy);
-        self.player.step = 0;
-        self.player.walking = false;
-        let (column, row) = self.player.footing();
-        self.scene.exit(column, row)
+        if actor.behavior < TURNING_BEHAVIORS {
+            actor.face(facing.opposite());
+        }
+        actor.script.map(|script| FieldEvent::Talk {
+            actor: index,
+            script,
+        })
     }
 
     /// Follows `exit` of the current map: loads the destination with its
-    /// characters and stands the player where the warp says.
+    /// objects and stands the player where the warp says.
     ///
     /// # Errors
     ///
     /// Returns [`FieldError`] when the warp, the map or a sprite cannot be read.
     pub fn warp(&mut self, data: &GameData<'_>, exit: usize) -> Result<Warp, FieldError> {
         let warp = data.warp(self.map, exit)?;
-        let (scene, player_sheet, npcs) = load_map(data, warp.map)?;
+        let scene = map_scene(data, warp.map)?;
+        let objects = data.map_objects(warp.map)?;
+        let mut actors = load_actors(data, &objects)?;
+        for actor in &mut actors {
+            actor.set_cell_size(cell_pixels(&scene));
+        }
+        if let (Some(arriving), Some(player)) = (actors.first_mut(), self.actors.first()) {
+            arriving.facing = player.facing;
+        }
+        self.actors = actors;
         self.enter(scene, warp.map, &warp);
-        self.sheet = player_sheet;
-        self.npcs = npcs;
         Ok(warp)
     }
 
-    /// Replaces the scene, drops the characters and places the player as
-    /// `warp` says.
+    /// Replaces the scene and places the player as `warp` says, keeping the
+    /// actors.
     pub fn enter(&mut self, scene: Scene, map: usize, warp: &Warp) {
         self.palettes = PaletteBank::from_bgr555(&scene.palettes);
+        let size = cell_pixels(&scene);
         self.scene = scene;
         self.map = map;
-        self.npcs.clear();
-        self.player.column = warp.column;
-        self.player.row = warp.row;
-        self.player.step = 0;
-        self.player.walking = false;
-        self.player.animation = 0;
-        if let Some(facing) = warp.facing.and_then(Direction::from_index) {
-            self.player.facing = facing;
+        for actor in &mut self.actors {
+            actor.set_cell_size(size);
         }
+        let player = self.player_mut();
+        player.place((warp.column, warp.row));
+        player.command = Command::Player;
+        let facing = warp
+            .facing
+            .and_then(Direction::from_index)
+            .unwrap_or(player.facing);
+        player.face(facing);
     }
 
     /// Camera scroll in map pixels: the player's anchor sits at the camera
-    /// anchor unless the map edge is closer.
+    /// anchor unless the map edge is closer, moved by the cutscene pan.
     #[must_use]
     pub fn camera(&self) -> (usize, usize) {
         let map_width = self.scene.map.width * TILE_SIZE;
         let map_height = self.scene.map.height * TILE_SIZE;
         let max_x = map_width.saturating_sub(SCREEN_WIDTH);
         let max_y = map_height.saturating_sub(SCREEN_HEIGHT);
-        let (x, y) = self.player.anchor();
+        let (x, y) = self.player().anchor();
         let scroll = |position: isize, anchor: isize, max: usize| {
             usize::try_from(position - anchor).unwrap_or(0).min(max)
         };
+        let panned = |base: usize, pan: i32, max: usize| {
+            let offset = isize::try_from(pan >> FRACTION_BITS).unwrap_or(0);
+            base.saturating_add_signed(offset).min(max)
+        };
         (
-            scroll(x, CAMERA_ANCHOR.0, max_x),
-            scroll(y, CAMERA_ANCHOR.1, max_y),
+            panned(scroll(x, CAMERA_ANCHOR.0, max_x), self.pan.0, max_x),
+            panned(scroll(y, CAMERA_ANCHOR.1, max_y), self.pan.1, max_y),
         )
     }
 
     /// Frame record of the player's sheet for the current animation frame.
     #[must_use]
     pub fn player_frame(&self) -> Option<usize> {
-        current_frame(
-            &self.sheet,
-            self.player.animation_id(),
-            self.player.animation,
-        )
+        self.player().current_frame()
     }
 
-    /// Draws the scene, the characters and the player for the current frame.
+    /// Draws the scene and the visible actors for the current frame.
     pub fn draw(&self, frame: &mut Frame) {
         let scroll = self.camera();
         let tile = |index: usize| self.scene.tiles.tile(index);
@@ -620,18 +892,24 @@ impl Field {
         draw_background(frame, backdrop, tile, &self.palettes, scroll, false);
         let map = |x: usize, y: usize| self.scene.map.wrapping(x, y);
         draw_background(frame, map, tile, &self.palettes, scroll, true);
-        let mut actors = vec![(&self.sheet, self.player_frame(), self.player.anchor())];
-        actors.extend(self.npcs.iter().map(|npc| {
-            let frame = current_frame(&npc.sheet, npc.animation_id, npc.animation);
-            (&npc.sheet, frame, npc.anchor())
-        }));
-        actors.sort_by_key(|(_, _, (_, y))| *y);
-        for (sheet, current, (x, y)) in actors {
-            let Some((record, image)) = current
+        let mut actors: Vec<(usize, &Actor)> = self
+            .actors
+            .iter()
+            .enumerate()
+            .filter(|(_, actor)| actor.visible && actor.sheet.is_some())
+            .collect();
+        actors.sort_by_key(|(index, actor)| (actor.anchor().1, usize::from(*index == 0)));
+        for (_, actor) in actors {
+            let Some(sheet) = actor.sheet.as_ref() else {
+                continue;
+            };
+            let Some((record, image)) = actor
+                .current_frame()
                 .and_then(|index| Some((sheet.frames.get(index)?, sheet.frame_image(index)?)))
             else {
                 continue;
             };
+            let (x, y) = actor.anchor();
             let screen = |position: isize, offset: i16, scroll: usize| {
                 i32::try_from(position + isize::from(offset)).unwrap_or(i32::MAX)
                     - i32::try_from(scroll).unwrap_or(0)
@@ -648,35 +926,41 @@ impl Field {
     }
 }
 
-fn load_map(data: &GameData<'_>, map: usize) -> Result<(Scene, SpriteSheet, Vec<Npc>), FieldError> {
-    let scene = data.scene(data.map_record(map)?.scene)?;
-    let objects = data.map_objects(map)?;
-    let player_sprite = objects
-        .first()
-        .and_then(saga::MapObject::sprite_sheet_id)
-        .unwrap_or(PLAYER_SPRITE);
-    let player_sheet = data.sprite_sheet(player_sprite)?;
-    let npcs = objects
+/// Map `map`'s scene with the attribute grid its record sets.
+fn map_scene(data: &GameData<'_>, map: usize) -> Result<Scene, FieldError> {
+    let record = data.map_record(map)?;
+    Ok(data
+        .scene(record.scene)?
+        .with_cell_tiles(record.metatile_tiles))
+}
+
+fn cell_pixels(scene: &Scene) -> i32 {
+    i32::try_from(scene.cell_tiles * TILE_SIZE).unwrap_or(ROOM_CELL)
+}
+
+fn load_actors(data: &GameData<'_>, objects: &[MapObject]) -> Result<Vec<Actor>, FieldError> {
+    let mut actors = objects
         .iter()
-        .skip(1)
-        .filter_map(|object| {
-            let sprite = object.sprite_sheet_id()?;
-            Some(data.sprite_sheet(sprite).map(|sheet| Npc {
-                column: object.column,
-                row: object.row,
-                sheet,
-                animation_id: object.animation,
-                animation: 0,
-                dialogue: object.event_id().map(usize::from),
-                turns: object.behavior < FURNITURE_BEHAVIOR,
-                wanders: object.kind == WANDER_KIND,
-                facing: Direction::from_index(object.animation).unwrap_or(Direction::Down),
-                timer: 0,
-                step: 0,
-            }))
+        .map(|object| {
+            let sheet = object
+                .sprite_sheet_id()
+                .map(|sprite| data.sprite_sheet(sprite))
+                .transpose()?;
+            Ok(Actor::from_object(sheet, object))
         })
-        .collect::<Result<_, _>>()?;
-    Ok((scene, player_sheet, npcs))
+        .collect::<Result<Vec<_>, FieldError>>()?;
+    if actors.is_empty() {
+        let sheet = data.sprite_sheet(PLAYER_SPRITE)?;
+        let mut player = Actor::new(Some(sheet), (0, 0), Direction::Down);
+        player.command = Command::Player;
+        actors.push(player);
+    }
+    let player = &mut actors[0];
+    if player.sheet.is_none() {
+        player.sheet = Some(data.sprite_sheet(PLAYER_SPRITE)?);
+    }
+    player.script = None;
+    Ok(actors)
 }
 
 /// Draws `scene` with the map's top-left visible pixel at `scroll`.
@@ -703,7 +987,7 @@ pub fn draw_scene(frame: &mut Frame, scene: &Scene, scroll: (usize, usize)) {
 
 #[cfg(test)]
 mod tests {
-    use extraction::saga::{AnimationStep, SpriteFrame};
+    use extraction::saga::{AnimationStep, METATILE_TILES, SpriteFrame};
     use formats::tile::Tileset;
     use formats::tilemap::TileMap;
 
@@ -738,6 +1022,7 @@ mod tests {
                 entries: vec![0; 1024],
             },
             attributes,
+            cell_tiles: METATILE_TILES,
         }
     }
 
@@ -779,29 +1064,37 @@ mod tests {
         Input::default().with(direction.button())
     }
 
-    fn sprite_top_left(player: &Player) -> (isize, isize) {
-        let (x, y) = player.anchor();
-        (x - 16, y - 16)
+    fn character(column: usize, row: usize, script: Option<ObjectScript>, behavior: u16) -> Actor {
+        let mut actor = Actor::new(Some(sheet()), (column, row), Direction::Down);
+        actor.script = script;
+        actor.behavior = behavior;
+        actor
+    }
+
+    fn wanderer(column: usize, row: usize) -> Actor {
+        let mut actor = character(column, row, None, 0);
+        actor.command = Command::Wander;
+        actor
     }
 
     #[test]
     fn steps_a_whole_metatile_once_started() {
         let mut field = field(6, 5);
-        assert_eq!(sprite_top_left(&field.player), (40, 16));
+        assert_eq!(field.player().position(), (40, 16));
         field.update(held(Direction::Right));
-        assert_eq!(sprite_top_left(&field.player), (41, 16));
-        assert!(field.player.walking);
+        assert_eq!(field.player().position(), (41, 16));
+        assert!(field.player().walking());
         for _ in 0..14 {
             field.update(Input::default());
         }
-        assert_eq!(sprite_top_left(&field.player), (55, 16));
-        assert!(field.player.walking);
+        assert_eq!(field.player().position(), (55, 16));
+        assert!(field.player().walking());
         field.update(Input::default());
-        assert_eq!(sprite_top_left(&field.player), (56, 16));
-        assert_eq!((field.player.column, field.player.row), (4, 1));
-        assert!(!field.player.walking);
+        assert_eq!(field.player().position(), (56, 16));
+        assert_eq!((field.player().column, field.player().row), (4, 1));
+        assert!(!field.player().walking());
         field.update(Input::default());
-        assert_eq!(sprite_top_left(&field.player), (56, 16));
+        assert_eq!(field.player().position(), (56, 16));
     }
 
     #[test]
@@ -810,162 +1103,203 @@ mod tests {
         for _ in 0..40 {
             field.update(held(Direction::Right));
         }
-        assert_eq!((field.player.column, field.player.row), (4, 1));
-        assert_eq!(field.player.facing, Direction::Right);
-        assert!(!field.player.walking);
+        assert_eq!((field.player().column, field.player().row), (4, 1));
+        assert_eq!(field.player().facing, Direction::Right);
+        assert!(!field.player().walking());
         field.update(held(Direction::Down));
-        assert_eq!(field.player.facing, Direction::Down);
-        assert!(!field.player.walking);
+        assert_eq!(field.player().facing, Direction::Down);
+        assert!(!field.player().walking());
     }
 
     #[test]
-    fn characters_block_the_player() {
+    fn actors_block_the_player_unless_hidden_or_passable() {
         let mut field = field(6, 5);
-        field.npcs.push(npc(4, 1, Some(7), true));
+        field.actors.push(character(4, 1, None, 0));
         field.update(held(Direction::Right));
-        assert!(!field.player.walking);
-        assert_eq!(field.player.facing, Direction::Right);
-        field.update(held(Direction::Down));
-        assert!(field.player.walking);
+        assert!(!field.player().walking());
+        assert_eq!(field.player().facing, Direction::Right);
+        field.actors[1].visible = false;
+        field.update(held(Direction::Right));
+        assert!(field.player().walking());
+        let mut field = self::field(6, 5);
+        field.actors.push(character(4, 1, None, PASSABLE_BEHAVIOR));
+        field.update(held(Direction::Right));
+        assert!(field.player().walking());
     }
 
-    fn npc(column: usize, row: usize, dialogue: Option<usize>, turns: bool) -> Npc {
-        Npc {
-            column,
-            row,
-            sheet: sheet(),
-            animation_id: 1,
-            animation: 9,
-            dialogue,
-            turns,
-            wanders: false,
-            facing: Direction::Down,
-            timer: 0,
-            step: 0,
+    #[test]
+    fn half_speed_steps_take_32_frames_and_floor_their_pixels() {
+        let mut field = field(8, 8);
+        field.player_mut().place((6, 5));
+        let mut walker = character(3, 3, None, 0);
+        walker.command = Command::WalkTo(Walk {
+            column: 2,
+            row: 3,
+            speed: WANDER_SPEED,
+            animation_shift: 0,
+            through: false,
+        });
+        field.actors.push(walker);
+        field.update(Input::default());
+        assert_eq!(field.actors[1].position(), (39, 48));
+        assert_eq!(field.actors[1].column, 2);
+        assert_eq!(field.actors[1].animation_id, WALK_ANIMATION_BASE + 2);
+        for _ in 0..30 {
+            field.update(Input::default());
         }
+        assert_eq!(field.actors[1].position(), (24, 48));
+        assert!(field.actors[1].walking());
+        field.update(Input::default());
+        assert_eq!(field.actors[1].position(), (24, 48));
+        assert!(!field.actors[1].walking());
+        assert_eq!(field.actors[1].animation_id, 2);
+        assert_eq!(
+            field.actors[1].command,
+            Command::WalkTo(Walk {
+                column: 2,
+                row: 3,
+                speed: WANDER_SPEED,
+                animation_shift: 0,
+                through: false,
+            })
+        );
+        field.update(Input::default());
+        assert!(field.actors[1].idle());
+        let mut right = self::field(8, 8);
+        right.player_mut().place((6, 5));
+        let mut walker = character(2, 3, None, 0);
+        walker.command = Command::WalkTo(Walk {
+            column: 3,
+            row: 3,
+            speed: WANDER_SPEED,
+            animation_shift: 0,
+            through: false,
+        });
+        right.actors.push(walker);
+        right.update(Input::default());
+        assert_eq!(right.actors[1].position(), (24, 48));
+        right.update(Input::default());
+        assert_eq!(right.actors[1].position(), (25, 48));
     }
 
-    fn wanderer(column: usize, row: usize) -> Npc {
-        Npc {
-            wanders: true,
-            ..npc(column, row, None, true)
+    #[test]
+    fn walks_take_the_longer_axis_first_and_horizontal_on_ties() {
+        assert_eq!(toward((5, 4), (2, 8)), Some(Direction::Down));
+        assert_eq!(toward((5, 5), (2, 8)), Some(Direction::Left));
+        assert_eq!(toward((2, 2), (2, 2)), None);
+        assert_eq!(toward((2, 2), (2, 0)), Some(Direction::Up));
+        assert_eq!(toward((2, 2), (4, 2)), Some(Direction::Right));
+    }
+
+    #[test]
+    fn walks_through_ignore_walls() {
+        let mut field = field(6, 5);
+        let mut walker = character(3, 2, None, 0);
+        walker.command = Command::WalkTo(Walk {
+            column: 3,
+            row: 0,
+            speed: PLAYER_SPEED,
+            animation_shift: 1,
+            through: true,
+        });
+        field.player_mut().place((1, 1));
+        field.actors.push(walker);
+        for _ in 0..40 {
+            field.update(Input::default());
         }
+        assert_eq!((field.actors[1].column, field.actors[1].row), (3, 0));
+        assert!(field.actors[1].idle());
     }
 
     #[test]
     fn wandering_characters_step_when_the_cell_ahead_is_free() {
         let mut field = field(8, 8);
-        field.player.column = 6;
-        field.player.row = 5;
+        field.player_mut().place((6, 5));
         let mut walker = wanderer(3, 3);
         walker.timer = 2;
-        field.npcs.push(walker);
+        field.actors.push(walker);
         field.update(Input::default());
         field.update(Input::default());
-        assert_eq!(field.npcs[0].timer, 0);
-        assert_eq!(field.npcs[0].step, 0);
+        assert_eq!(field.actors[1].timer, 0);
+        assert!(!field.actors[1].walking());
         field.update(Input::default());
-        let npc = &field.npcs[0];
-        assert!(npc.step == 1 || npc.timer > 0);
-        let stepped = npc.step == 1;
-        let facing = npc.facing;
-        if stepped {
-            assert_eq!(npc.animation_id, WALK_ANIMATION_BASE + facing.index());
+        let actor = &field.actors[1];
+        assert!(actor.walking() || actor.timer > 0);
+        if actor.walking() {
+            let facing = actor.facing;
+            assert_eq!(actor.animation_id, WALK_ANIMATION_BASE + facing.index());
             let (dx, dy) = facing.delta();
             assert_eq!(
-                (npc.column, npc.row),
+                (actor.column, actor.row),
                 (
                     3usize.wrapping_add_signed(dx),
                     3usize.wrapping_add_signed(dy)
                 )
             );
-            let (ax, ay) = npc.anchor();
-            let (tx, ty) = anchor(npc.column, npc.row);
-            assert_eq!((ax, ay), (tx - dx * 15, ty - dy * 15));
             for _ in 0..31 {
                 field.update(Input::default());
             }
-            let npc = &field.npcs[0];
-            assert_eq!(npc.step, 0);
-            assert_eq!(npc.animation_id, facing.index());
-            assert_eq!(npc.anchor(), anchor(npc.column, npc.row));
-            assert!(npc.timer <= IDLE_TIMER_MASK);
+            let actor = &field.actors[1];
+            assert!(!actor.walking());
+            assert_eq!(actor.animation_id, facing.index());
+            assert!(actor.timer <= IDLE_TIMER_MASK);
         } else {
-            assert_eq!(npc.animation_id, facing.index());
+            assert_eq!(actor.animation_id, actor.facing.index());
         }
     }
 
     #[test]
     fn wandering_characters_only_turn_when_walled_in() {
         let mut field = field(3, 4);
-        field.player.column = 1;
-        field.player.row = 2;
-        field.npcs.push(wanderer(1, 0));
+        field.player_mut().place((1, 2));
+        field.actors.push(wanderer(1, 0));
         for _ in 0..400 {
             field.update(Input::default());
-            let npc = &field.npcs[0];
-            assert_eq!((npc.column, npc.row, npc.step), (1, 0, 0));
+            let actor = &field.actors[1];
+            assert_eq!((actor.column, actor.row), (1, 0));
+            assert!(!actor.walking());
         }
-        let mut furniture = wanderer(1, 0);
-        furniture.wanders = false;
-        field.npcs[0] = furniture;
-        for _ in 0..200 {
-            field.update(Input::default());
-        }
-        assert_eq!(field.npcs[0].facing, Direction::Down);
-        assert_eq!(field.npcs[0].timer, 0);
     }
 
     #[test]
-    fn cutscene_commands_turn_and_step_characters() {
-        let mut field = field(8, 8);
-        field.player.column = 6;
-        field.player.row = 5;
-        field.npcs.push(npc(3, 3, None, true));
-        assert!(field.command_npc(0, NpcCommand::Face(Direction::Left)));
-        assert_eq!(field.npcs[0].facing, Direction::Left);
-        assert!(!field.command_npc(0, NpcCommand::Step(Direction::Up)) || field.npcs[0].step == 1);
-        assert!(field.command_npc(0, NpcCommand::Step(Direction::Right)) || field.npcs[0].step > 0);
-        assert!(!field.npc_idle(0));
-        for _ in 0..NPC_STEP_FRAMES {
-            field.update(Input::default());
-        }
-        assert!(field.npc_idle(0));
-        assert!(!field.command_npc(5, NpcCommand::Face(Direction::Up)));
-        assert!(field.npc_idle(5));
-    }
-
-    #[test]
-    fn a_stepping_character_blocks_its_destination_and_cannot_be_talked_to() {
+    fn a_stepping_actor_blocks_both_cells_and_cannot_be_talked_to() {
         let mut field = field(6, 5);
-        let mut walker = wanderer(4, 1);
-        walker.step = 5;
-        walker.facing = Direction::Down;
-        field.npcs.push(walker);
+        let mut walker = character(4, 1, Some(ObjectScript::Dialogue(1)), 0);
+        walker.command = Command::WalkTo(Walk {
+            column: 4,
+            row: 2,
+            speed: WANDER_SPEED,
+            animation_shift: 0,
+            through: false,
+        });
+        field.actors.push(walker);
+        field.update(Input::default());
+        assert!(field.actors[1].walking());
         field.update(held(Direction::Right));
-        assert!(!field.player.walking);
+        assert!(!field.player().walking());
         assert_eq!(field.update(Input::default().with(Button::A)), None);
     }
 
     #[test]
-    fn pressing_a_toward_a_character_turns_it_and_reports_its_dialogue() {
+    fn pressing_a_toward_an_actor_turns_it_and_reports_its_script() {
         let mut field = field(6, 5);
-        field.npcs.push(npc(4, 1, Some(738), true));
+        field
+            .actors
+            .push(character(4, 1, Some(ObjectScript::Dialogue(738)), 0));
         field.update(held(Direction::Right));
         let a = Input::default().with(Button::A);
         assert_eq!(
             field.update(a),
             Some(FieldEvent::Talk {
-                npc: 0,
-                dialogue: 738
+                actor: 1,
+                script: ObjectScript::Dialogue(738)
             })
         );
-        assert_eq!(field.npcs[0].animation_id, 2);
-        assert_eq!(field.npcs[0].animation, 0);
+        assert_eq!(field.actors[1].animation_id, 2);
         assert_eq!(field.update(a), None);
         assert_eq!(field.update(Input::default()), None);
         field.update(held(Direction::Up));
-        assert!(field.player.walking);
+        assert_eq!(field.player().facing, Direction::Up);
         for _ in 0..16 {
             field.update(Input::default());
         }
@@ -973,22 +1307,25 @@ mod tests {
     }
 
     #[test]
-    fn furniture_and_silent_characters_do_not_talk() {
+    fn furniture_does_not_turn_and_silent_or_scriptless_actors_do_not_talk() {
         let mut field = field(6, 5);
-        field.npcs.push(npc(4, 1, None, true));
+        field.actors.push(character(4, 1, None, 0));
         field.update(held(Direction::Right));
         assert_eq!(field.update(Input::default().with(Button::A)), None);
-        assert_eq!(field.npcs[0].animation_id, 2);
-        field.npcs[0] = npc(4, 1, Some(1), false);
+        assert_eq!(field.actors[1].animation_id, 2);
+        field.actors[1] = character(4, 1, Some(ObjectScript::Code(0x0800_C73C)), 2);
         field.update(Input::default());
         assert_eq!(
             field.update(Input::default().with(Button::A)),
             Some(FieldEvent::Talk {
-                npc: 0,
-                dialogue: 1
+                actor: 1,
+                script: ObjectScript::Code(0x0800_C73C)
             })
         );
-        assert_eq!(field.npcs[0].animation_id, 1);
+        assert_eq!(field.actors[1].animation_id, 1);
+        field.actors[1] = character(4, 1, Some(ObjectScript::Dialogue(1)), SILENT_BEHAVIOR);
+        field.update(Input::default());
+        assert_eq!(field.update(Input::default().with(Button::A)), None);
     }
 
     #[test]
@@ -999,7 +1336,7 @@ mod tests {
             exits.extend(field.update(held(Direction::Left)));
         }
         assert_eq!(exits, [FieldEvent::Exit(1)]);
-        assert_eq!(field.player.footing(), (1, 2));
+        assert_eq!(field.player().footing(), (1, 2));
         assert_eq!(field.update(Input::default()), None);
     }
 
@@ -1016,24 +1353,24 @@ mod tests {
         };
         field.enter(scene(8, 8), 7, &warp);
         assert_eq!(field.map(), 7);
-        assert_eq!(sprite_top_left(&field.player), (24, 32));
-        assert_eq!(field.player.facing, Direction::Right);
-        assert!(!field.player.walking);
+        assert_eq!(field.player().position(), (24, 32));
+        assert_eq!(field.player().facing, Direction::Right);
+        assert!(!field.player().walking());
         let keep = Warp {
             facing: None,
             ..warp
         };
         field.enter(scene(8, 8), 7, &keep);
-        assert_eq!(field.player.facing, Direction::Right);
+        assert_eq!(field.player().facing, Direction::Right);
     }
 
     #[test]
-    fn plays_the_sheet_animations_at_half_speed() {
+    fn plays_the_sheet_animations_counting_the_first_frame() {
         let mut field = field(6, 5);
         assert_eq!(field.player_frame(), Some(3));
         field.update(held(Direction::Right));
         assert_eq!(field.player_frame(), Some(21));
-        for _ in 0..4 {
+        for _ in 0..3 {
             field.update(held(Direction::Right));
         }
         assert_eq!(field.player_frame(), Some(22));
@@ -1042,20 +1379,21 @@ mod tests {
         }
         assert_eq!(field.player_frame(), Some(23));
         let sheet = sheet();
-        assert_eq!(current_frame(&sheet, 2, 16), Some(6));
+        assert_eq!(current_frame(&sheet, 2, 17), Some(6));
         assert_eq!(current_frame(&sheet, 8, 0), None);
+        assert_eq!(frame_at(&sheet, 2, 7, 0), Some(6));
+        assert_eq!(frame_at(&sheet, 2, 8, 0), Some(7));
+        assert_eq!(frame_at(&sheet, 2, 8, -1), Some(6));
     }
 
     #[test]
     fn camera_keeps_the_sprite_at_the_anchor_within_bounds() {
         let mut large = field(40, 20);
         assert_eq!(large.camera(), (0, 0));
-        large.player.column = 13;
-        large.player.row = 7;
-        assert_eq!(sprite_top_left(&large.player), (200, 112));
+        large.player_mut().place((13, 7));
+        assert_eq!(large.player().position(), (200, 112));
         assert_eq!(large.camera(), (96, 48));
-        large.player.column = 1000;
-        large.player.row = 1000;
+        large.player_mut().place((1000, 1000));
         assert_eq!(large.camera(), (640 - 240, 320 - 160));
         assert_eq!(field(6, 5).camera(), (0, 0));
     }

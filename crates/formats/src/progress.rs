@@ -33,6 +33,7 @@ const MESSAGE_SPEED: usize = 0x3618;
 const SONG: usize = 0x3F0E;
 const ZOIDS_SEEN: usize = 0x33E2;
 const CHARACTERS: usize = 0x34A4;
+const DECK_COMMANDS: usize = 0x347B;
 const CHARACTER_LEN: usize = 4;
 const CHARACTER_IN_GUIDE: u16 = 0x20;
 const HALF_WIDTH_FIRST: char = '!';
@@ -167,6 +168,13 @@ pub fn zoid_seen(state: &[u8], id: usize) -> bool {
     state.get(ZOIDS_SEEN + id).is_some_and(|seen| *seen != 0)
 }
 
+/// Marks the Zoid of picture `id` as seen, as `0x08037098` does.
+pub fn see_zoid(state: &mut [u8], id: usize) {
+    if let Some(seen) = state.get_mut(ZOIDS_SEEN + id) {
+        *seen = 1;
+    }
+}
+
 /// Whether character `index` is in the character guide: bit `0x20` of its
 /// half-word in the four-byte records at `+0x34A4`.
 #[must_use]
@@ -175,6 +183,22 @@ pub fn character_known(state: &[u8], index: usize) -> bool {
     state
         .get(at..at + 2)
         .is_some_and(|bits| u16::from_le_bytes([bits[0], bits[1]]) & CHARACTER_IN_GUIDE != 0)
+}
+
+/// Marks deck command `command` as learned: its byte in the table at
+/// `+0x347B` becomes 1, as the routine at `0x080370C0` does.
+pub fn learn_command(state: &mut [u8], command: usize) {
+    if let Some(learned) = state.get_mut(DECK_COMMANDS + command) {
+        *learned = 1;
+    }
+}
+
+/// Whether deck command `command` has been learned.
+#[must_use]
+pub fn command_learned(state: &[u8], command: usize) -> bool {
+    state
+        .get(DECK_COMMANDS + command)
+        .is_some_and(|learned| *learned != 0)
 }
 
 fn check_len(state: &[u8]) -> Result<(), ProgressError> {

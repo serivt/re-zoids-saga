@@ -19,8 +19,11 @@ Early. The workspace and layer boundaries are in place: the launcher identifies 
 string table of Zoids Saga (names, items, dialogue, battle quotes, menus), and the
 original 8×16 font, the text window (LZ77 tiles + palette) and the character
 portraits are extracted and drawn in an SDL3 window, with text wrapped the way the
-game does it. The first room is walkable: arrows move the player with the original
-speed, collision, camera and walking animation.
+game does it. The opening chapter plays from the title to the world map: the castle and
+its conversations, the throne-room cutscene, the gate, the Zoid choice in the hangar
+(which forms the party), and the eastern labyrinth with its chests and the Trinity Liger
+event, with the original timing (see [docs/events.md](docs/events.md)). Battles are
+not implemented yet; cutscenes skip them.
 See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 
 ## Requirements

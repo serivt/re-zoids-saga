@@ -30,11 +30,11 @@ effects. Scripts play effects by song number (`0x3C + n` in the sound opcode).
 Songs the game starts, from the log: 1 on the title (frame 409), effect `0x3D` on
 START, 3 behind the name entry, the empty song 134 when the room loads (silence), 11
 for the opening cutscene, 7 when control begins in the first room, `0x47` on menu
-confirmations, `0x82` on doors. A map's own code may start music with the game's
-routine at `0x80019B4`; `map_music` looks for that call (`movs r0, #n; bl`) in the
-first kilobyte of the map's code and finds one for 166 of the 343 maps. The first room
-has none (the cutscene starts its music), so the port keeps the running song where the
-heuristic finds nothing.
+confirmations, `0x82` on doors. Every map names its song in the word at offset 8 of
+its record (see [formats/map.md](formats/map.md)); the loader starts it unless it is
+already playing, as the traced walk from the first room into `md0154` shows (song 7
+gives way to the castle's 11 while the screen is black). The opening switches the first
+room to song 7 when control begins.
 
 ## Format
 

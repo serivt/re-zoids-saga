@@ -12,13 +12,16 @@ use extraction::saga_guide::{
     self, CHARACTER_ENTRIES, CHARACTER_GUIDE_SCRIPTS, GuidePicture, SYSTEM_SCRIPTS,
     ZOID_GUIDE_SCRIPTS, ZoidPart,
 };
+use extraction::saga_party;
 use extraction::saga_save::{self, SaveDataError};
 use extraction::string_table::StringTableError;
 use formats::SaveLayout;
 use formats::font::{Glyph, GlyphIndex};
 
 use crate::extension::GameSound;
-use crate::translation::{DIALOGUE_TABLE, NAME_ENTRY_TABLE, PAUSE_MENU_TABLE, TITLE_TABLE};
+use crate::translation::{
+    DIALOGUE_TABLE, ITEM_TABLE, NAME_ENTRY_TABLE, PAUSE_MENU_TABLE, TITLE_TABLE,
+};
 
 /// The game's data, keyed by identifier.
 #[derive(Debug, Clone, Copy)]
@@ -66,6 +69,22 @@ impl<'rom> GameData<'rom> {
     /// Returns [`MapError`] when the map does not exist.
     pub fn map_objects(&self, map: usize) -> Result<Vec<MapObject>, MapError> {
         saga::map_objects(self.rom, map)
+    }
+
+    /// What chest `chest` holds.
+    #[must_use]
+    pub fn treasure(&self, chest: usize) -> Option<saga::Treasure> {
+        saga::treasure(self.rom, chest)
+    }
+
+    /// The `count` objects a cutscene places from its own list at ROM
+    /// address `address`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MapError`] when the list is outside the ROM.
+    pub fn objects_at(&self, address: u32, count: usize) -> Result<Vec<MapObject>, MapError> {
+        saga::objects_at(self.rom, address, count)
     }
 
     /// Scene `scene` (tiles, maps, attributes).
@@ -182,6 +201,18 @@ impl<'rom> GameData<'rom> {
         saga_save::new_game_state(self.rom)
     }
 
+    /// Puts the characters of list `list` in `state`'s character guide;
+    /// `None` when the list cannot be read.
+    pub fn meet_characters(&self, state: &mut [u8], list: usize) -> Option<()> {
+        saga_save::meet_characters(self.rom, state, list)
+    }
+
+    /// Forms the party in `state` around the Zoid picked in the hangar;
+    /// `None` when a table cannot be read or no unit slot is free.
+    pub fn form_party(&self, state: &mut [u8], choice: usize) -> Option<()> {
+        saga_party::form_party(self.rom, state, choice)
+    }
+
     /// The picture of Zoid `id` in the guide, if it has one.
     ///
     /// # Errors
@@ -261,7 +292,13 @@ impl<'rom> GameData<'rom> {
             name if name == CHARACTER_GUIDE_SCRIPTS.name => {
                 CHARACTER_GUIDE_SCRIPTS.offsets(self.rom)?
             }
-            DIALOGUE_TABLE => match saga::string_table(DIALOGUE_TABLE) {
+            name if name == saga::BATTLE_MENU_SCRIPTS.name => {
+                saga::BATTLE_MENU_SCRIPTS.offsets(self.rom)?
+            }
+            name if name == saga::BATTLE_TEXT_SCRIPTS.name => {
+                saga::BATTLE_TEXT_SCRIPTS.offsets(self.rom)?
+            }
+            DIALOGUE_TABLE | ITEM_TABLE => match saga::string_table(table) {
                 Some(table) => table.offsets(self.rom)?,
                 None => return Ok(None),
             },

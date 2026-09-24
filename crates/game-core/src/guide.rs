@@ -40,15 +40,18 @@ use crate::sprite::draw_sprite;
 use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
-const OPENING_HOLD_FRAMES: u32 = 8;
-const OPENING_BLACK_FRAMES: u32 = 53;
+const OPENING_HOLD_FRAMES: u32 = 3;
+const OPENING_BLACK_FRAMES: u32 = 23;
 const SCRIPT_HOLD_FRAMES: u32 = 7;
 const POPUP_HOLD_FRAMES: u32 = 6;
 const KEY_HOLD_FRAMES: u32 = 6;
 const FADE_OUT_FRAMES: u32 = 16;
 const FADE_IN_FRAMES: u32 = 8;
-const MENU_FADE_IN_FRAMES: u32 = 16;
-const MENU_BLACK_FRAMES: u32 = 39;
+/// Frames from the menu script's start until the menu is fully bright: it
+/// stays black two frames, then brightens a level a frame from 31, visibly
+/// over the last 16.
+const MENU_FADE_IN_FRAMES: u32 = 33;
+const MENU_BLACK_FRAMES: u32 = 22;
 const EXIT_BLACK_FRAMES: u32 = 44;
 const ZOID_FIRST_BLACK_FRAMES: u32 = 48;
 const ZOID_NEXT_BLACK_FRAMES: u32 = 33;
@@ -568,7 +571,9 @@ impl Guide {
                 frames.saturating_sub(OPENING_HOLD_FRAMES) * u32::from(FADE_STEPS) / FADE_OUT_FRAMES
             }
             Phase::FadingOut { frames, .. } => frames * u32::from(FADE_STEPS) / FADE_OUT_FRAMES,
-            Phase::Menu { fading_in } => fade_in_level(fading_in, MENU_FADE_IN_FRAMES),
+            Phase::Menu { fading_in } => MENU_FADE_IN_FRAMES
+                .saturating_sub(fading_in)
+                .min(u32::from(FADE_STEPS)),
             Phase::FadingIn(frames) => fade_in_level(frames, FADE_IN_FRAMES),
             _ => 0,
         };
