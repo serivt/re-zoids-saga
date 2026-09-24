@@ -2,7 +2,8 @@
 
 Source of knowledge: own analysis of Zoids Saga (Japan, Rev 1) in a reference emulator
 (OAM and OBJ VRAM dumps of the first room while idle and walking, matched against the ROM
-image by image) and a read of the entity spawn code, which indexes the table below.
+image by image), a read of the entity spawn code, which indexes the table below, and of
+the OAM builder, checked against Roman's sprite above Arcana's bar in OAM and OBJ VRAM.
 Implemented in `crates/extraction/src/saga.rs` (`sprite_sheet`, `sprite_sheet_by_tag`).
 
 ## Record table
@@ -14,14 +15,27 @@ ends the table:
 | Offset | Field |
 |---|---|
 | 0 | Pointer to the palette: 32 raw bytes, 16 BGR555 colors |
-| 4 | Pointer to the images: uncompressed 4bpp tiles, `images × tiles per image × 32` bytes |
+| 4 | Pointer to the images: uncompressed 4bpp tiles, 32 bytes per tile |
 | 8 | Pointer to the animation table: pointers to animations, ended by a null word |
 | 12 | Pointer to the frame table: pointers to frame records |
 | 16 | Four ASCII characters: `ch`+number for characters, `mz`+number for map Zoids, `ma`+number for furniture-like sprites |
 | 20 | Image count |
 | 22 | Unknown half-word (0) |
-| 24 | Two half-words, `9` (Zoids) or `8` (characters) and `16`; meaning not modeled |
-| 28 | Tiles per image (16 = 32×32 pixels) |
+| 24 | Unknown half-word: `9` for Zoids, `8` for characters, 1–4 for furniture |
+| 26 | Signed horizontal anchor: where the frames' x offsets start, from the left of the sprite's box (16 for almost every sprite) |
+| 28 | Signed vertical anchor, from the top of the box (16 for almost every sprite) |
+| 30 | Unknown half-word (0 for most sprites) |
+
+The spawn routine copies the anchor to entity `+0x10` and `+0x12` (`0x08008906`), and
+the OAM builder (`0x080009AE`, `0x08000A12`) adds it to the frame's offset: the
+sprite's top-left is its box's top-left plus the anchor plus the frame's offset. A
+flipped frame is placed with the horizontal anchor mirrored around 16. Roman sitting
+above Arcana's bar, `ma22` (`0x105`), has a horizontal anchor of 20, so he sits 4
+pixels right of his metatile's box. Other furniture sprites use 8, 24 or 32, and the
+tallest ones negative values.
+
+The images are the size of the first frame: 16 tiles for the 32×32 frames of
+characters and most furniture, 32 for the 32×64 frames of `ma09`.
 
 The player's map sprite is id `0x98`, `ch00`: 32 images at `0x8202C5C`, palette at
 `0x8202C3C`. The chair beside the player in the first room is id `0xF6`, `ma07`, a furniture sprite;
@@ -62,6 +76,7 @@ with `CpuSet` (the player to `0x06010000`, tiles 0–15) and the palette to an O
 bank; walking replaces the frame in place every four frames. The sprite's anchor is the
 bottom center of the metatile below the one it stands on, so a 32×32 sprite standing on
 metatile `(c, r)` has its top-left at `(16c − 8, 16r)`; the player starts the first room
-at screen (72, 32) and the chair stands at (88, 32). The game orders OAM by y so nearer
-sprites cover farther ones, and on equal y the furniture sprite takes the lower entry:
-the chair covers the player's arm while both stand on row 2.
+at screen (72, 32) and the chair stands at (88, 32). The game orders OAM so nearer
+sprites cover farther ones. Sprites level with each other keep the order earlier sorts
+left, which puts the chair in front of the player at the start (see
+[../field.md](../field.md), Drawing).

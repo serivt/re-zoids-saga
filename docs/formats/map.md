@@ -55,7 +55,7 @@ and a pointer to the list. Each object is 20 bytes:
 | 4 | Metatile column the object stands on |
 | 6 | Metatile row |
 | 8 | Script reference: `0x80000000` for none, bit 31 set with a low half-word = index into the `dialogue` string table (what the character says), otherwise a pointer to code |
-| 12 | Kind: 0 the player, 1 or 2 characters, 4 invisible triggers |
+| 12 | Kind, which the spawn routine stores as the entity's first command: 0 the player, 1 still characters, 2 wandering ones, 3 townsfolk who shy away from a running player (see [../field.md](../field.md)), 4 invisible triggers |
 | 14 | Parameter of the kind, not understood |
 | 16 | Animation the sprite starts with |
 | 18 | Behavior: 0 characters, 1 map Zoids, 2 furniture-like sprites |

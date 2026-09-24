@@ -45,7 +45,9 @@ use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows};
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
 const TALK_START_DELAY: u32 = 3;
-/// Frames between A and a chest opening.
+/// Frames between A and a chest opening. An object whose script is other
+/// code runs it in the frame it is spoken to, from within the player's
+/// update.
 const CHEST_START_DELAY: u32 = 1;
 const CHEST_SOUND: u16 = 0x48;
 const SMALL_CHEST_SOUND: u16 = 0x46;
@@ -77,9 +79,9 @@ const WARP_BLACK_FRAMES: u8 = 10;
 /// The world map, whose load takes the original longer than a room's.
 const WORLD_MAP: usize = 1;
 /// The frames the original's load of the world map takes beyond a room's,
-/// measured on the labyrinth's exit (the level falls from 31 seven frames
+/// measured on the labyrinth's exit (the level falls from 31 six frames
 /// later); its scene is the largest and it has seven objects.
-const WORLD_MAP_LOAD_FRAMES: u8 = 7;
+const WORLD_MAP_LOAD_FRAMES: u8 = 6;
 const WARP_SETTLE_FRAMES: u8 = 1;
 /// Once the name entry's script ends the entry stays this many frames,
 /// then darkens a level a frame (visibly for 16, on to 31), and the first
@@ -233,6 +235,10 @@ pub struct Game<'rom> {
     found: Option<Found>,
     previous: Input,
     latched: Input,
+    /// The brightness the screen shows: the game writes the register from
+    /// its level at the vertical blank, so a frame shows the level of the
+    /// frame before, as it shows the field's sprites and scroll.
+    shown_brightness: u8,
 }
 
 impl<'rom> Game<'rom> {
@@ -345,6 +351,7 @@ impl<'rom> Game<'rom> {
             found: None,
             previous: Input::default(),
             latched: Input::default(),
+            shown_brightness: 0,
         })
     }
 
@@ -387,6 +394,17 @@ impl<'rom> Game<'rom> {
         &self.player_name
     }
 
+    /// Keeps what the field screen shows this frame: the original copies its
+    /// sprite table, scroll, text layers and brightness at the vertical
+    /// blank, so a frame shows them as the frame before left them.
+    fn latch_screen(&mut self) {
+        if let Some(field) = self.field.as_mut() {
+            field.latch();
+        }
+        self.windows.latch();
+        self.shown_brightness = self.events.brightness();
+    }
+
     /// Advances one frame. The game acts on the buttons of the previous
     /// call, as the original reads the keys at the vertical blank before
     /// the frame's logic.
@@ -400,6 +418,7 @@ impl<'rom> Game<'rom> {
         self.previous = input;
         self.frame += 1;
         Self::emit(&self.extensions, &Event::Frame(self.frame));
+        self.latch_screen();
         let rom = self.data.bytes();
         match &mut self.screen {
             Screen::Logo(logo) => {
@@ -865,14 +884,11 @@ impl<'rom> Game<'rom> {
         })
     }
 
-    fn update_field(&mut self, input: Input) -> Result<(), GameError> {
-        if self.field.is_none() {
-            return Ok(());
-        }
-        if self.events.in_battle() {
-            return self.update_battle(input);
-        }
-        if self.events.in_dialogue() {
+    /// A frame of the scripts an event holds the game for. A handler the
+    /// game called directly runs its scripts one after another within the
+    /// call, so the next one starts in the frame the last one ends.
+    fn update_dialogue_hold(&mut self, input: Input) -> Result<(), GameError> {
+        loop {
             let runner = match self.active_script {
                 Some(index) => &mut self.scripts[index],
                 None => &mut self.dialogue,
@@ -881,9 +897,30 @@ impl<'rom> Game<'rom> {
             if done {
                 self.active_script = None;
             }
-            return self.update_events(|events, host| {
+            let direct = !self.events.dialogue_in_task();
+            self.update_events(|events, host| {
                 events.update_hold(done, host);
-            });
+            })?;
+            if !(done && direct && self.events.in_dialogue()) {
+                return Ok(());
+            }
+        }
+    }
+
+    fn update_field(&mut self, input: Input) -> Result<(), GameError> {
+        if self.field.is_none() {
+            return Ok(());
+        }
+        if self.events.in_battle() {
+            return self.update_battle(input);
+        }
+        if self.events.in_dialogue() {
+            if self.events.dialogue_in_task()
+                && let Some(field) = self.field.as_mut()
+            {
+                field.update(input);
+            }
+            return self.update_dialogue_hold(input);
         }
         if self.events.holding() {
             let mut step = HoldStep::Free;
@@ -954,7 +991,7 @@ impl<'rom> Game<'rom> {
                 ..
             }) => {
                 if let Some(program) = story::talk_handler(address) {
-                    self.pending_talk = Some((Talk::Event(program), TALK_START_DELAY));
+                    return self.run_handler(Some(program));
                 }
             }
             None => {}
@@ -1113,8 +1150,8 @@ impl<'rom> Game<'rom> {
                 if let Some(field) = &self.field {
                     field.draw(frame);
                 }
-                self.windows.draw(frame, &self.skin, &self.painter);
-                darken(frame, self.events.brightness());
+                self.windows.draw_shown(frame, &self.skin, &self.painter);
+                darken(frame, self.shown_brightness);
             }
             Screen::OpeningMenu(frames) => {
                 if let Some(field) = &self.field {
@@ -1278,6 +1315,17 @@ impl EventHost for Host<'_, '_> {
 
     fn learn_command(&mut self, command: u8) {
         formats::progress::learn_command(self.state, usize::from(command));
+    }
+
+    fn command_learned(&self, command: u8) -> bool {
+        formats::progress::command_learned(self.state, usize::from(command))
+    }
+
+    fn area(&self) -> u8 {
+        self.field
+            .as_ref()
+            .and_then(|field| self.data.map_record(field.map()).ok())
+            .map_or(NO_AREA, |record| record.id.to_le_bytes()[0])
     }
 
     fn saved_vars(&self) -> [u16; 8] {

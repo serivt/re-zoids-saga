@@ -1028,8 +1028,13 @@ pub struct SpriteSheet {
     pub tag: String,
     /// Number of images.
     pub images: usize,
-    /// Tiles per image, laid out in rows of four (16 tiles = 32×32 pixels).
+    /// Tiles per image, laid out in rows of four (16 tiles = 32×32 pixels),
+    /// the size of the first frame.
     pub tiles_per_image: usize,
+    /// Where the frames' offsets start from, relative to the top-left of
+    /// the metatile-sized box the sprite stands in: `(16, 16)`, its bottom
+    /// center, for most sprites.
+    pub anchor: (i16, i16),
     /// The 16-color BGR555 palette.
     pub palette: [u16; 16],
     /// Every image's tiles, image after image.
@@ -1086,6 +1091,8 @@ impl SpriteSheet {
 }
 
 const SPRITE_TILE_ROWS: usize = 4;
+/// Tiles of a 32×32 image, for a sheet without frames.
+const SPRITE_IMAGE_TILES: usize = 16;
 const TILE_SIDE: usize = 8;
 
 /// Why a sprite sheet could not be read.
@@ -1131,13 +1138,11 @@ pub fn sprite_sheet(rom: &[u8], id: usize) -> Result<SpriteSheet, SpriteSheetErr
     let half = |at: usize| usize::from(u16::from_le_bytes([record[at], record[at + 1]]));
     let tag = String::from_utf8_lossy(&record[16..16 + SPRITE_TAG_LEN]).into_owned();
     let images = half(20);
-    let tiles_per_image = half(28);
+    let signed = |at: usize| i16::from_le_bytes([record[at], record[at + 1]]);
+    let anchor = (signed(26), signed(28));
     let palette = rom
         .get(pointer(0)?..pointer(0)? + PALETTE_LEN)
         .and_then(parse_palette)
-        .ok_or_else(too_short)?;
-    let tile_bytes = rom
-        .get(pointer(4)?..pointer(4)? + images * tiles_per_image * TILE_LEN)
         .ok_or_else(too_short)?;
     let animations = read_animations(rom, pointer(8)?).ok_or_else(too_short)?;
     let frame_count = animations
@@ -1146,13 +1151,20 @@ pub fn sprite_sheet(rom: &[u8], id: usize) -> Result<SpriteSheet, SpriteSheetErr
         .map(|step| step.frame + 1)
         .max()
         .unwrap_or(0);
-    let frames = (0..frame_count)
+    let frames: Vec<SpriteFrame> = (0..frame_count)
         .map(|index| read_frame(rom, pointer(12)? + index * 4).ok_or_else(too_short))
         .collect::<Result<_, _>>()?;
+    let tiles_per_image = frames.first().map_or(SPRITE_IMAGE_TILES, |frame| {
+        (frame.width / TILE_SIDE) * (frame.height / TILE_SIDE)
+    });
+    let tile_bytes = rom
+        .get(pointer(4)?..pointer(4)? + images * tiles_per_image * TILE_LEN)
+        .ok_or_else(too_short)?;
     Ok(SpriteSheet {
         tag,
         images,
         tiles_per_image,
+        anchor,
         palette,
         tiles: Tileset::from_4bpp(tile_bytes),
         frames,
@@ -1251,6 +1263,7 @@ pub fn zoid_status_sprite(rom: &[u8], zoid: usize) -> Result<SpriteSheet, Sprite
         tag: String::new(),
         images: 1,
         tiles_per_image: ZOID_SPRITE_TILES,
+        anchor: (0, 0),
         palette,
         tiles: Tileset::from_4bpp(tile_bytes),
         frames,
@@ -1476,6 +1489,7 @@ mod tests {
             tag: "ch00".to_owned(),
             images,
             tiles_per_image,
+            anchor: (16, 16),
             palette: [0; 16],
             tiles: Tileset::from_pixels(tiles),
             frames: vec![
@@ -1556,7 +1570,8 @@ mod tests {
         put(&mut rom, record + 12, &pointer(frames + 100));
         put(&mut rom, record + 16, b"ch01");
         put(&mut rom, record + 20, &3u16.to_le_bytes());
-        put(&mut rom, record + 28, &16u32.to_le_bytes());
+        put(&mut rom, record + 26, &20u16.to_le_bytes());
+        put(&mut rom, record + 28, &16u16.to_le_bytes());
         rom[palette + 2] = 0x7F;
         rom[tiles + 512] = 0x21;
         rom[tiles + 1024] = 0x02;
@@ -1593,6 +1608,7 @@ mod tests {
         let sheet = sprite_sheet(&rom, 2).unwrap();
         assert_eq!(sheet.tag, "ch01");
         assert_eq!((sheet.images, sheet.tiles_per_image), (3, 16));
+        assert_eq!(sheet.anchor, (20, 16));
         assert_eq!(sheet.palette[1], 0x7F);
         assert_eq!(sheet.image(1).unwrap().indices[0], 1);
         assert_eq!(

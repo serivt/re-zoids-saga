@@ -13,12 +13,15 @@
 //! half for characters); its first frame already moves. Steps are blocked
 //! by the scene's attributes under the footing (the metatile below the
 //! standing one) and by other visible actors' footings, both the one they
-//! stand on and, while stepping, the one they left; a walk through
+//! stand on and, for the first half of a step, the one they left (the
+//! stepping command `0x0800B764` moves the previous cell to the new one
+//! halfway); a walk through
 //! (command 11) ignores both. Animations come from the sprite sheet: idle
 //! animation = facing, walking = facing + 4, restarted by every step and
 //! turn, each tick shortened by the actor's animation shift (1 halves them:
-//! the player's steps last one walking cycle). Actors are drawn in
-//! back-to-front order of their anchor, the bottom center of the footing.
+//! the player's steps last one walking cycle). Actors are drawn nearer over
+//! farther, in the order the game's own sort leaves them, and the screen
+//! shows the positions of the frame before with the current pictures.
 //! Completing a step onto an exit reports it; pressing A while standing and
 //! facing an actor turns it toward the player (characters only) and reports
 //! what it runs.
@@ -59,7 +62,20 @@ const PASSABLE_BEHAVIOR: u16 = 3;
 const SILENT_BEHAVIOR: u16 = 5;
 const PLAYER_KIND: u16 = 0;
 const WANDER_KIND: u16 = 2;
+const SHY_KIND: u16 = 3;
 const IDLE_TIMER_MASK: u16 = 0x7F;
+/// A sprite off the screen by more than this (its top-left 56 pixels left
+/// or 32 above) or whose top-left is past the span from there is skipped
+/// by the OAM builder (`0x080005CA`) and left out of the sort.
+const CULL_MARGIN: (isize, isize) = (0x38, 0x20);
+const CULL_SPAN: (isize, isize) = (320, 192);
+/// How near, in cells along each axis, a running player makes a shy
+/// character step away (`0x0800AA60`).
+const SHY_RADIUS: usize = 3;
+/// Draws up to this make a shy character step a random way instead.
+const SHY_RANDOM_LIMIT: u16 = 0x0FFF;
+/// The draw's bit that picks the vertical axis when both are as far.
+const SHY_VERTICAL_BIT: u16 = 0x8000;
 
 /// Where an actor faces, in the order the sprite sheet uses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,6 +192,9 @@ pub enum Command {
     Idle,
     /// Walks around at random (command 2).
     Wander,
+    /// Walks around at random, and steps away from the player while B is
+    /// held within three cells (command 3).
+    Shy,
     /// Heads for a metatile, the longer axis first, horizontally on ties.
     WalkTo(Walk),
 }
@@ -185,6 +204,8 @@ struct Step {
     direction: Direction,
     frames: i32,
     speed: i32,
+    /// Frames left when the cell left stops blocking others.
+    halfway: i32,
 }
 
 /// Someone or something standing on the map: the player or an object of
@@ -272,6 +293,7 @@ impl Actor {
         actor.command = match object.kind {
             PLAYER_KIND => Command::Player,
             WANDER_KIND => Command::Wander,
+            SHY_KIND => Command::Shy,
             _ => Command::Idle,
         };
         actor
@@ -386,10 +408,12 @@ impl Actor {
         self.facing = direction;
         self.play(WALK_ANIMATION_BASE + direction.index());
         self.animation_shift = PLAYER_ANIMATION_SHIFT;
+        let frames = self.size * PIXEL / speed.max(1);
         self.step = Some(Step {
             direction,
-            frames: self.size * PIXEL / speed.max(1),
+            frames,
             speed,
+            halfway: frames / 2 - 1,
         });
         self.advance_step();
     }
@@ -403,6 +427,9 @@ impl Actor {
         self.x += delta(dx);
         self.y += delta(dy);
         step.frames -= 1;
+        if step.frames == step.halfway {
+            self.previous = (self.column, self.row);
+        }
         if step.frames > 0 {
             return false;
         }
@@ -562,6 +589,12 @@ pub struct Field {
     previous: Input,
     frame: u16,
     rng: Rng,
+    /// The actors from front to back, the order the game gives OAM.
+    order: Vec<usize>,
+    /// The actors the last frame's sprites left out as off the screen.
+    culled: Vec<bool>,
+    /// What the screen shows, kept by [`Field::latch`].
+    shown: Option<Shown>,
 }
 
 impl Field {
@@ -582,6 +615,9 @@ impl Field {
             previous: Input::default(),
             frame: 0,
             rng: Rng::default(),
+            order: vec![0],
+            culled: vec![false],
+            shown: None,
         }
     }
 
@@ -628,8 +664,12 @@ impl Field {
             previous: Input::default(),
             frame: 0,
             rng: Rng::default(),
+            order: Vec::new(),
+            culled: Vec::new(),
+            shown: None,
         };
         field.player_mut().place((column, row));
+        field.sort_actors();
         Ok(field)
     }
 
@@ -690,14 +730,48 @@ impl Field {
         for actor in &mut self.actors {
             actor.animation = actor.animation.saturating_add(1);
         }
+        self.sort_actors();
         event
+    }
+
+    /// Orders the actors front to back as the game orders its sprites
+    /// (`0x08000468`, before each frame's OAM): the list starts in object
+    /// order when a scene loads and is sorted in place by a selection sort,
+    /// each visible actor swapping places with a later visible, on-screen
+    /// one lower on the map. Actors level with each other are not swapped,
+    /// so their order is whatever earlier swaps left: in the first room the
+    /// maid, lower down, sends the prince behind the chair at his desk.
+    fn sort_actors(&mut self) {
+        if self.order.len() != self.actors.len() {
+            self.order = (0..self.actors.len()).collect();
+            self.culled = vec![false; self.actors.len()];
+        }
+        for first in 0..self.order.len() {
+            if !self.actors[self.order[first]].visible {
+                continue;
+            }
+            for later in first + 1..self.order.len() {
+                let (front, back) = (self.order[first], self.order[later]);
+                let (front_y, back) = (self.actors[front].y, &self.actors[back]);
+                if back.visible && !self.culled[self.order[later]] && front_y < back.y {
+                    self.order.swap(first, later);
+                }
+            }
+        }
+        let camera = self.camera();
+        for (culled, actor) in self.culled.iter_mut().zip(&self.actors) {
+            let (x, y) = actor.position();
+            let x = x - isize::try_from(camera.0).unwrap_or(0) + CULL_MARGIN.0;
+            let y = y - isize::try_from(camera.1).unwrap_or(0) + CULL_MARGIN.1;
+            *culled = !((0..=CULL_SPAN.0).contains(&x) && (0..=CULL_SPAN.1).contains(&y));
+        }
     }
 
     fn update_actor(&mut self, index: usize, input: Input, pressed_a: bool) -> Option<FieldEvent> {
         let actor = &mut self.actors[index];
         if actor.step.is_some() {
             let finished = actor.advance_step();
-            if finished && actor.command == Command::Wander {
+            if finished && matches!(actor.command, Command::Wander | Command::Shy) {
                 actor.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
             }
             if finished && index == 0 && actor.command == Command::Player {
@@ -714,6 +788,14 @@ impl Field {
             Command::Idle => None,
             Command::Wander => {
                 self.wander(index);
+                None
+            }
+            Command::Shy => {
+                if input.is_held(Button::B) {
+                    self.shy(index);
+                } else {
+                    self.wander(index);
+                }
                 None
             }
             Command::WalkTo(walk) => self.walk(index, walk),
@@ -771,6 +853,54 @@ impl Field {
         actor.face(direction);
         if free {
             actor.start_step(direction, WANDER_SPEED);
+        } else {
+            actor.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
+        }
+    }
+
+    /// A shy character with B held (`0x0800A5E4` fleeing the player within
+    /// three cells): mostly a step away along the axis the player is
+    /// farther on, a random draw picking the axis on ties, and one draw in
+    /// sixteen a random way; at a pixel a frame, and every frame it can.
+    /// Farther away it wanders.
+    fn shy(&mut self, index: usize) {
+        let (player, actor) = (&self.actors[0], &self.actors[index]);
+        let across = player.column.abs_diff(actor.column);
+        let along = player.row.abs_diff(actor.row);
+        if across > SHY_RADIUS || along > SHY_RADIUS {
+            self.wander(index);
+            return;
+        }
+        let away_across = if player.column < actor.column {
+            Direction::Right
+        } else {
+            Direction::Left
+        };
+        let away_along = if player.row < actor.row {
+            Direction::Down
+        } else {
+            Direction::Up
+        };
+        let draw = self.rng.next(self.frame);
+        let direction = if draw <= SHY_RANDOM_LIMIT {
+            self.rng.seed(self.frame);
+            random_direction(self.rng.next(self.frame))
+        } else if across == along {
+            if draw & SHY_VERTICAL_BIT == 0 {
+                away_across
+            } else {
+                away_along
+            }
+        } else if across > along {
+            away_across
+        } else {
+            away_along
+        };
+        let free = self.free(index, direction, true);
+        let actor = &mut self.actors[index];
+        actor.face(direction);
+        if free {
+            actor.start_step(direction, PIXEL);
         } else {
             actor.timer = self.rng.next(self.frame) & IDLE_TIMER_MASK;
         }
@@ -889,7 +1019,11 @@ impl Field {
             arriving.facing = player.facing;
         }
         self.actors = actors;
+        self.order.clear();
+        self.culled.clear();
+        self.shown = None;
         self.enter(scene, warp.map, &warp);
+        self.sort_actors();
         Ok(warp)
     }
 
@@ -943,44 +1077,103 @@ impl Field {
 
     /// Draws the scene and the visible actors for the current frame.
     pub fn draw(&self, frame: &mut Frame) {
-        let scroll = self.camera();
+        let current;
+        let shown = if let Some(shown) = &self.shown {
+            shown
+        } else {
+            current = self.showing();
+            &current
+        };
+        let scroll = shown.camera;
         let tile = |index: usize| self.scene.tiles.tile(index);
         let backdrop = |x: usize, y: usize| self.scene.backdrop.wrapping(x, y);
         draw_background(frame, backdrop, tile, &self.palettes, scroll, false);
         let map = |x: usize, y: usize| self.scene.map.wrapping(x, y);
         draw_background(frame, map, tile, &self.palettes, scroll, true);
-        let mut actors: Vec<(usize, &Actor)> = self
-            .actors
-            .iter()
-            .enumerate()
-            .filter(|(_, actor)| actor.visible && actor.sheet.is_some())
-            .collect();
-        actors.sort_by_key(|(index, actor)| (actor.anchor().1, usize::from(*index == 0)));
-        for (_, actor) in actors {
+        for sprite in shown.sprites.iter().rev() {
+            let Some(actor) = self.actors.get(sprite.actor) else {
+                continue;
+            };
             let Some(sheet) = actor.sheet.as_ref() else {
                 continue;
             };
-            let Some((record, image)) = actor
-                .current_frame()
-                .and_then(|index| Some((sheet.frames.get(index)?, sheet.frame_image(index)?)))
+            let picture = actor.current_frame().unwrap_or(sprite.frame);
+            let Some((record, image)) = sheet
+                .frames
+                .get(sprite.frame)
+                .zip(sheet.frame_image(picture))
             else {
                 continue;
             };
-            let (x, y) = actor.anchor();
-            let screen = |position: isize, offset: i16, scroll: usize| {
-                i32::try_from(position + isize::from(offset)).unwrap_or(i32::MAX)
+            let (x, y) = sprite.position;
+            let (anchor_x, anchor_y) = sheet.anchor;
+            let anchor_x = if record.mirrored {
+                2 * i16::try_from(ANCHOR_FROM_ORIGIN.0).unwrap_or(0) - anchor_x
+            } else {
+                anchor_x
+            };
+            let screen = |position: isize, offset: i16, anchor: i16, scroll: usize| {
+                i32::try_from(position + isize::from(offset) + isize::from(anchor))
+                    .unwrap_or(i32::MAX)
                     - i32::try_from(scroll).unwrap_or(0)
             };
             draw_sprite(
                 frame,
-                screen(x, record.x, scroll.0),
-                screen(y, record.y, scroll.1),
+                screen(x, record.x, anchor_x, scroll.0),
+                screen(y, record.y, anchor_y, scroll.1),
                 &image,
                 &sheet.palette,
                 record.mirrored,
             );
         }
     }
+
+    /// Keeps what the screen will show until the next call: the game copies
+    /// its sprite table and scroll registers at the vertical blank, so a
+    /// frame shows the positions, order, flips and camera of the frame
+    /// before, while each sprite's picture, copied straight into video
+    /// memory, is already the current one. Called once a frame, before the
+    /// frame's update.
+    pub fn latch(&mut self) {
+        self.shown = Some(self.showing());
+    }
+
+    fn showing(&self) -> Shown {
+        let sprites = self
+            .order
+            .iter()
+            .filter_map(|&index| {
+                let actor = self.actors.get(index)?;
+                if !actor.visible || actor.sheet.is_none() {
+                    return None;
+                }
+                Some(ShownSprite {
+                    actor: index,
+                    position: actor.position(),
+                    frame: actor.current_frame()?,
+                })
+            })
+            .collect();
+        Shown {
+            camera: self.camera(),
+            sprites,
+        }
+    }
+}
+
+/// The sprites and camera a frame shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Shown {
+    camera: (usize, usize),
+    /// Front to back.
+    sprites: Vec<ShownSprite>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ShownSprite {
+    actor: usize,
+    position: (isize, isize),
+    frame: usize,
 }
 
 /// Map `map`'s scene with the attribute grid its record sets.
@@ -1105,6 +1298,7 @@ mod tests {
             tag: "ch00".to_owned(),
             images: 0,
             tiles_per_image: 16,
+            anchor: (16, 16),
             palette: [0; 16],
             tiles: Tileset::from_4bpp(&[]),
             frames,
@@ -1176,6 +1370,77 @@ mod tests {
         }
         assert_eq!(field.player().position(), (56, 16));
         assert!(!field.player().walking());
+    }
+
+    #[test]
+    fn level_sprites_keep_the_order_earlier_swaps_left() {
+        let mut field = field(8, 20);
+        field.player_mut().place((5, 2));
+        for cell in [(2, 4), (5, 2), (7, 2), (4, 16)] {
+            field.actors.push(character(cell.0, cell.1, None, 0));
+        }
+        field.sort_actors();
+        assert_eq!(field.order, [4, 1, 2, 3, 0]);
+    }
+
+    #[test]
+    fn the_screen_shows_the_positions_of_the_frame_before() {
+        let mut field = field(6, 5);
+        field.latch();
+        field.update(held(Direction::Right));
+        assert_eq!(field.player().position(), (41, 16));
+        field.latch();
+        let shown = field.shown.as_ref().map(|shown| shown.sprites[0].position);
+        field.update(Input::default());
+        assert_eq!(shown, Some((41, 16)));
+        assert_eq!(field.player().position(), (42, 16));
+    }
+
+    #[test]
+    fn the_cell_left_stops_blocking_halfway_through_a_step() {
+        let mut field = field(6, 5);
+        field.update(held(Direction::Right));
+        for _ in 0..7 {
+            field.update(Input::default());
+        }
+        assert_eq!(field.player().previous, (3, 1));
+        field.update(Input::default());
+        assert_eq!(field.player().previous, (4, 1));
+        assert!(field.player().walking());
+    }
+
+    #[test]
+    fn a_shy_character_steps_away_from_a_running_player() {
+        let mut field = field(8, 8);
+        field.player_mut().place((5, 3));
+        let mut shy = character(3, 3, None, 0);
+        shy.command = Command::Shy;
+        shy.timer = 50;
+        field.actors.push(shy);
+        field.update(Input::default().with(Button::B));
+        let actor = &field.actors[1];
+        assert!(actor.walking());
+        assert_eq!(
+            (actor.column, actor.row, actor.facing),
+            (2, 3, Direction::Left)
+        );
+        for _ in 0..15 {
+            field.update(Input::default().with(Button::B));
+        }
+        assert!(!field.actors[1].walking());
+    }
+
+    #[test]
+    fn a_shy_character_only_wanders_while_b_is_up() {
+        let mut field = field(8, 8);
+        field.player_mut().place((5, 3));
+        let mut shy = character(3, 3, None, 0);
+        shy.command = Command::Shy;
+        shy.timer = 50;
+        field.actors.push(shy);
+        field.update(Input::default());
+        assert!(!field.actors[1].walking());
+        assert_eq!(field.actors[1].timer, 49);
     }
 
     #[test]

@@ -101,20 +101,29 @@ const FLASH: &[Op] = &[
     Op::Wait(60),
 ];
 
-/// The king teaches the prince's encouragement, deck command 19
-/// (`0x080378F0`): the message box, the battle system's lines around the
-/// command's name, then the key.
-const PRINCES_ENCOURAGEMENT: &[Op] = &[
-    Op::Dialogue(0x1F),
-    Op::Script("battle-menu", 6),
-    Op::Script("battle-menu", 7),
-    Op::Script("battle-text", 0x39),
-    Op::Script("item", 77 + 19),
-    Op::Script("battle-text", 0x3A),
-    Op::Script("battle-menu", 5),
-    Op::LearnCommand(19),
-    Op::Dialogue(0x22),
-];
+/// Where the item table's strings for the deck commands start.
+const COMMAND_NAMES: u16 = 77;
+/// 王子のはげまし, the prince's encouragement.
+const PRINCES_ENCOURAGEMENT_COMMAND: u8 = 19;
+
+/// Learning deck command `command` (`0x080378F0`): the message box, the
+/// battle system's lines around the command's name, then the key.
+const fn learn(command: u8) -> [Op; 9] {
+    [
+        Op::Dialogue(0x1F),
+        Op::Script("battle-menu", 6),
+        Op::Script("battle-menu", 7),
+        Op::Script("battle-text", 0x39),
+        Op::Script("item", COMMAND_NAMES + command as u16),
+        Op::Script("battle-text", 0x3A),
+        Op::Script("battle-menu", 5),
+        Op::LearnCommand(command),
+        Op::Dialogue(0x22),
+    ]
+}
+
+/// The king teaches the prince's encouragement.
+const PRINCES_ENCOURAGEMENT: &[Op] = &learn(PRINCES_ENCOURAGEMENT_COMMAND);
 
 /// One blast at the gate (tasks at `0x0800DEA4`, `0x0800DF0C`, `0x0800DF74`,
 /// `0x0800DFDC`): the explosion sprite plays once with its sound, then
@@ -867,6 +876,400 @@ const WORLD_MAP: &[Op] = &[Op::IfFlags {
     otherwise: &[],
 }];
 
+/// Set when the party first walks into Arcana.
+pub const ARCANA_ARRIVED: u16 = 0x128;
+/// Set by Dr. T's first talk with Regina, in his lab.
+pub const DR_T_MET: u16 = 0x13F;
+const ARCANA: usize = 24;
+const ARCANA_MUSIC: u16 = 6;
+const BAR: usize = 28;
+const BAR_UPSTAIRS: usize = 29;
+/// Characters of the arrival: 1 Regina, 2 Ace, 3 Jack, 4 Roman, 5–7 the
+/// soldiers (the list at ROM `0x0832AC54`); upstairs the same three and
+/// Roman (`0x0832ACF4`).
+const ACE: usize = 2;
+const JACK: usize = 3;
+const ROMAN: usize = 4;
+const CAPTAIN: usize = 5;
+const FIRST_SOLDIER: usize = 6;
+const SECOND_SOLDIER: usize = 7;
+/// The bar's door, where the party goes in.
+const BAR_FRONT: (usize, usize) = (23, 10);
+const BAR_DOOR: (usize, usize) = (23, 9);
+/// The top of the stairs, where the party leaves the room above the bar.
+const STAIRS_TOP: (usize, usize) = (14, 2);
+
+/// Jack looks around town (task at `0x0800FBA0`).
+const JACK_LOOKS_AROUND: &[Op] = &[
+    stride(JACK, (17, 25)),
+    Op::AwaitArrival(JACK),
+    stride(JACK, (17, 26)),
+    Op::AwaitArrival(JACK),
+    stride(JACK, (2, 26)),
+    Op::AwaitArrival(JACK),
+    stride(JACK, (2, 18)),
+    Op::AwaitArrival(JACK),
+    stride(JACK, (17, 18)),
+    Op::AwaitArrival(JACK),
+    stride(JACK, (17, 13)),
+    Op::AwaitArrival(JACK),
+    stride(JACK, (20, 11)),
+    Op::AwaitArrival(JACK),
+    stride(JACK, (22, 11)),
+    Op::AwaitArrival(JACK),
+    Op::Face(JACK, Direction::Right),
+    Op::End,
+];
+
+/// Ace looks around (`0x0800FE14`).
+const ACE_LOOKS_AROUND: &[Op] = &[
+    stride(ACE, (17, 24)),
+    Op::AwaitArrival(ACE),
+    stride(ACE, (17, 18)),
+    Op::AwaitArrival(ACE),
+    stride(ACE, (8, 18)),
+    Op::AwaitArrival(ACE),
+    stride(ACE, (8, 7)),
+    Op::AwaitArrival(ACE),
+    through(ACE, (17, 7), PIXEL, 1),
+    Op::AwaitArrival(ACE),
+    stride(ACE, (17, 12)),
+    Op::AwaitArrival(ACE),
+    stride(ACE, (17, 12)),
+    Op::AwaitArrival(ACE),
+    stride(ACE, (23, 12)),
+    Op::AwaitArrival(ACE),
+    Op::Face(ACE, Direction::Up),
+    Op::End,
+];
+
+/// Regina looks around (`0x08010088`).
+const REGINA_LOOKS_AROUND: &[Op] = &[
+    stride(REGINA, (27, 24)),
+    Op::AwaitArrival(REGINA),
+    stride(REGINA, (27, 10)),
+    Op::AwaitArrival(REGINA),
+    stride(REGINA, (28, 10)),
+    Op::AwaitArrival(REGINA),
+    stride(REGINA, (28, 9)),
+    Op::AwaitArrival(REGINA),
+    stride(REGINA, (38, 8)),
+    Op::AwaitArrival(REGINA),
+    stride(REGINA, (45, 8)),
+    Op::AwaitArrival(REGINA),
+    stride(REGINA, (30, 8)),
+    Op::AwaitArrival(REGINA),
+    stride(REGINA, (28, 10)),
+    Op::AwaitArrival(REGINA),
+    stride(REGINA, (24, 11)),
+    Op::AwaitArrival(REGINA),
+    Op::Face(REGINA, Direction::Left),
+    Op::End,
+];
+
+/// One of the party goes into the bar and out of sight.
+const fn into_the_bar(actor: usize) -> [Op; 5] {
+    [
+        stride(actor, BAR_FRONT),
+        Op::AwaitArrival(actor),
+        through(actor, BAR_DOOR, PIXEL, 1),
+        Op::AwaitArrival(actor),
+        Op::Hide(actor),
+    ]
+}
+
+const PRINCE_INTO_THE_BAR: &[Op] = &into_the_bar(PLAYER);
+const REGINA_INTO_THE_BAR: &[Op] = &into_the_bar(REGINA);
+const ACE_INTO_THE_BAR: &[Op] = &into_the_bar(ACE);
+const JACK_INTO_THE_BAR: &[Op] = &into_the_bar(JACK);
+
+/// Arriving in Arcana (task at `0x0800E8B8`): the party splits up to look
+/// around, the prince finds the bar, soldiers enforcing a curfew stop the
+/// party, the old Roman passes them off as his relatives and bribes the
+/// captain away, then takes everyone into the bar.
+const ARCANA_ARRIVAL: &[Op] = &[
+    Op::Wait(60),
+    stride(PLAYER, (23, 26)),
+    Op::AwaitArrival(PLAYER),
+    Op::Place(REGINA, (23, 26)),
+    Op::Place(ACE, (23, 26)),
+    Op::Place(JACK, (23, 26)),
+    through(JACK, (22, 25), PIXEL, 1),
+    through(ACE, (23, 24), PIXEL, 1),
+    through(REGINA, (24, 25), PIXEL, 1),
+    Op::AwaitArrival(REGINA),
+    Op::Face(JACK, Direction::Right),
+    Op::Face(ACE, Direction::Down),
+    Op::Face(REGINA, Direction::Left),
+    Op::Wait(60),
+    Op::Dialogue(0x49),
+    Op::Wait(60),
+    Op::Spawn(HELPER_TASK, JACK_LOOKS_AROUND),
+    Op::Spawn(HELPER_TASK + 1, ACE_LOOKS_AROUND),
+    Op::Spawn(HELPER_TASK + 2, REGINA_LOOKS_AROUND),
+    Op::Wait(60),
+    Op::Wait(60),
+    stride(PLAYER, (23, 23)),
+    Op::AwaitArrival(PLAYER),
+    stride(PLAYER, (27, 23)),
+    Op::AwaitArrival(PLAYER),
+    stride(PLAYER, (27, 10)),
+    Op::AwaitArrival(PLAYER),
+    Op::Face(PLAYER, Direction::Right),
+    Op::Wait(30),
+    Op::Face(PLAYER, Direction::Left),
+    Op::Wait(30),
+    stride(PLAYER, (21, 10)),
+    Op::AwaitArrival(PLAYER),
+    Op::Face(PLAYER, Direction::Up),
+    Op::Wait(60),
+    stride(PLAYER, BAR_FRONT),
+    Op::AwaitArrival(PLAYER),
+    Op::Face(PLAYER, Direction::Up),
+    Op::Wait(30),
+    Op::Face(PLAYER, Direction::Right),
+    Op::Wait(30),
+    Op::Face(PLAYER, Direction::Left),
+    Op::Wait(30),
+    Op::Wait(60),
+    Op::Wait(60),
+    Op::Face(PLAYER, Direction::Right),
+    Op::Wait(30),
+    Op::AwaitArrival(REGINA),
+    Op::Face(PLAYER, Direction::Down),
+    Op::Wait(30),
+    Op::Wait(60),
+    Op::Dialogue(0x4A),
+    Op::Wait(60),
+    Op::Call(SOLDIERS_ARRIVE),
+];
+
+/// The soldiers march up and surround the party.
+const SOLDIERS_ARRIVE: &[Op] = &[
+    stride(CAPTAIN, (17, 9)),
+    stride(FIRST_SOLDIER, (17, 8)),
+    stride(SECOND_SOLDIER, (17, 7)),
+    Op::AwaitArrival(CAPTAIN),
+    stride(CAPTAIN, (17, 11)),
+    Op::AwaitArrival(FIRST_SOLDIER),
+    stride(FIRST_SOLDIER, (17, 12)),
+    Op::AwaitArrival(SECOND_SOLDIER),
+    stride(SECOND_SOLDIER, (17, 10)),
+    Op::AwaitArrival(CAPTAIN),
+    stride(CAPTAIN, (20, 11)),
+    Op::AwaitArrival(FIRST_SOLDIER),
+    stride(FIRST_SOLDIER, (19, 12)),
+    Op::AwaitArrival(SECOND_SOLDIER),
+    stride(SECOND_SOLDIER, (19, 10)),
+    Op::AwaitArrival(SECOND_SOLDIER),
+    Op::Wait(10),
+    Op::Face(JACK, Direction::Left),
+    Op::Wait(10),
+    Op::Face(ACE, Direction::Left),
+    Op::Wait(10),
+    Op::Face(PLAYER, Direction::Left),
+    Op::Wait(10),
+    Op::Face(REGINA, Direction::Left),
+    Op::Wait(60),
+    Op::Dialogue(0x4B),
+    Op::Wait(60),
+    Op::Call(ROMAN_STEPS_IN),
+];
+
+/// Roman comes out, talks the captain round and the soldiers leave.
+const ROMAN_STEPS_IN: &[Op] = &[
+    through(ROMAN, (26, 11), PIXEL, 1),
+    Op::AwaitArrival(ROMAN),
+    stride(ROMAN, (26, 13)),
+    Op::AwaitArrival(ROMAN),
+    stride(ROMAN, (22, 13)),
+    Op::AwaitArrival(ROMAN),
+    stride(ROMAN, (22, 12)),
+    Op::AwaitArrival(ROMAN),
+    Op::Face(ROMAN, Direction::Up),
+    Op::Wait(10),
+    Op::Face(JACK, Direction::Down),
+    Op::Wait(60),
+    Op::Dialogue(0x4C),
+    Op::Wait(60),
+    stride(ROMAN, (20, 12)),
+    Op::Wait(10),
+    Op::Face(JACK, Direction::Left),
+    Op::AwaitArrival(ROMAN),
+    Op::Face(ROMAN, Direction::Up),
+    Op::Wait(10),
+    Op::Face(CAPTAIN, Direction::Down),
+    Op::Wait(60),
+    Op::Dialogue(0x4D),
+    Op::Wait(60),
+    stride(CAPTAIN, (17, 11)),
+    Op::AwaitArrival(CAPTAIN),
+    stride(CAPTAIN, (17, 9)),
+    stride(SECOND_SOLDIER, (17, 10)),
+    stride(FIRST_SOLDIER, (17, 12)),
+    Op::AwaitArrival(CAPTAIN),
+    stride(CAPTAIN, (4, 9)),
+    Op::AwaitArrival(SECOND_SOLDIER),
+    stride(SECOND_SOLDIER, (17, 9)),
+    stride(FIRST_SOLDIER, (17, 9)),
+    Op::AwaitArrival(SECOND_SOLDIER),
+    stride(SECOND_SOLDIER, (5, 9)),
+    Op::AwaitArrival(FIRST_SOLDIER),
+    stride(FIRST_SOLDIER, (5, 9)),
+    stride(ROMAN, (20, 10)),
+    Op::AwaitArrival(ROMAN),
+    stride(ROMAN, (22, 10)),
+    Op::AwaitArrival(ROMAN),
+    Op::Face(JACK, Direction::Up),
+    Op::Wait(10),
+    Op::Face(ACE, Direction::Up),
+    Op::Wait(60),
+    Op::Dialogue(0x4E),
+    Op::Wait(60),
+    stride(PLAYER, (24, 10)),
+    Op::Wait(10),
+    stride(ROMAN, BAR_FRONT),
+    Op::AwaitArrival(ROMAN),
+    Op::Face(PLAYER, Direction::Left),
+    through(ROMAN, BAR_DOOR, PIXEL, 1),
+    Op::AwaitArrival(ROMAN),
+    Op::Hide(ROMAN),
+    Op::Call(PRINCE_INTO_THE_BAR),
+    Op::Call(REGINA_INTO_THE_BAR),
+    Op::Call(ACE_INTO_THE_BAR),
+    Op::Call(JACK_INTO_THE_BAR),
+    Op::Spawn(HELPER_TASK, FADE_OUT),
+    Op::Wait(60),
+    Op::Wait(1),
+    Op::LoadMap {
+        map: BAR_UPSTAIRS,
+        player: (4, 3),
+        objects: 0x0832_ACF4,
+        count: 5,
+    },
+    Op::Wait(1),
+    Op::Spawn(HELPER_TASK, FADE_IN),
+    Op::Wait(60),
+    Op::Wait(60),
+    Op::Call(ABOVE_THE_BAR),
+];
+
+/// In the room above the bar: Roman tells what he knows of the castle, the
+/// prince storms off with Regina behind him, the camera follows them to
+/// the stairs, and Jack and Ace go after them; the prince comes down into
+/// the bar.
+const ABOVE_THE_BAR: &[Op] = &[
+    Op::Dialogue(0x4F),
+    Op::Wait(60),
+    stride(PLAYER, (8, 3)),
+    Op::AwaitArrival(PLAYER),
+    stride(REGINA, (6, 3)),
+    stride(PLAYER, (8, 2)),
+    Op::AwaitArrival(PLAYER),
+    through(PLAYER, STAIRS_TOP, PIXEL, 1),
+    stride(REGINA, (8, 3)),
+    Op::AwaitArrival(REGINA),
+    stride(REGINA, (8, 2)),
+    Op::AwaitArrival(REGINA),
+    through(REGINA, STAIRS_TOP, PIXEL, 1),
+    Op::AwaitArrival(PLAYER),
+    Op::Hide(PLAYER),
+    Op::AwaitArrival(REGINA),
+    Op::Hide(REGINA),
+    Op::Repeat(32, PAN_LEFT),
+    Op::Wait(60),
+    Op::Dialogue(0x50),
+    Op::Wait(60),
+    through(ACE, STAIRS_TOP, PIXEL, 1),
+    through(JACK, STAIRS_TOP, PIXEL, 1),
+    Op::AwaitArrival(ACE),
+    Op::Hide(ACE),
+    Op::AwaitArrival(JACK),
+    Op::Hide(JACK),
+    Op::Spawn(HELPER_TASK, FADE_OUT),
+    Op::Wait(60),
+    Op::Warp {
+        map: BAR,
+        cell: (13, 12),
+        facing: Some(Direction::Left),
+    },
+    Op::Spawn(HELPER_TASK, FADE_IN),
+    Op::Wait(60),
+    Op::End,
+];
+
+/// Arcana's handler (`0x0800E850`): the first time, the town reloads with
+/// the arrival's cast and its song, and the arrival starts.
+const ARCANA_STREETS: &[Op] = &[Op::IfFlags {
+    all: &[],
+    none: &[ARCANA_ARRIVED],
+    then: &[
+        Op::Flag(ARCANA_ARRIVED, true),
+        Op::LoadMap {
+            map: ARCANA,
+            player: (23, 29),
+            objects: 0x0832_AC54,
+            count: 8,
+        },
+        Op::Music(ARCANA_MUSIC),
+        Op::Spawn(MAP_TASK, ARCANA_ARRIVAL),
+    ],
+    otherwise: &[],
+}];
+
+/// Dr. T in his lab (`0x0802AB08`). In area 1 he first talks with Regina
+/// about the Trinity Liger, then repeats his advice; areas 9 and 10 have a
+/// line each.
+const DR_T: &[Op] = &[Op::IfArea {
+    area: 1,
+    then: &[Op::IfFlags {
+        all: &[],
+        none: &[DR_T_MET],
+        then: &[Op::Dialogue(0x2C1), Op::Flag(DR_T_MET, true)],
+        otherwise: &[Op::Dialogue(0x2C2)],
+    }],
+    otherwise: &[Op::IfArea {
+        area: 9,
+        then: &[Op::Dialogue(0x2C9)],
+        otherwise: &[Op::IfArea {
+            area: 10,
+            then: &[Op::Dialogue(0x2CA)],
+            otherwise: &[],
+        }],
+    }],
+}];
+
+/// データ収集, Data Compare.
+const DATA_COMPARE: u8 = 0;
+/// 節電, Brown-Out.
+const BROWN_OUT: u8 = 22;
+/// 包囲攻撃, Enveloping Attack.
+const ENVELOPING_ATTACK: u8 = 26;
+
+const LEARN_DATA_COMPARE: &[Op] = &learn(DATA_COMPARE);
+const LEARN_BROWN_OUT: &[Op] = &learn(BROWN_OUT);
+const LEARN_ENVELOPING_ATTACK: &[Op] = &learn(ENVELOPING_ATTACK);
+
+/// The teachers of deck commands (`0x08009430`, one entry `0x08009480 +
+/// 12 × n` a command): the first time the teacher's pitch and the lesson,
+/// later a reminder. The two lines of each come from the table at ROM
+/// `0x08328EC4`.
+const LAB_ASSISTANT: &[Op] = &[Op::IfCommand {
+    command: DATA_COMPARE,
+    then: &[Op::Dialogue(0x2CC)],
+    otherwise: &[Op::Dialogue(0x2CB), Op::Call(LEARN_DATA_COMPARE)],
+}];
+const OLD_MAN_IN_THE_SHOP: &[Op] = &[Op::IfCommand {
+    command: BROWN_OUT,
+    then: &[Op::Dialogue(0x3E5)],
+    otherwise: &[Op::Dialogue(0x3D0), Op::Call(LEARN_BROWN_OUT)],
+}];
+const ROMAN_TEACHES: &[Op] = &[Op::IfCommand {
+    command: ENVELOPING_ATTACK,
+    then: &[Op::Dialogue(0x2F2)],
+    otherwise: &[Op::Dialogue(0x2F3), Op::Call(LEARN_ENVELOPING_ATTACK)],
+}];
+
 /// Searching a chest (entity command 21 at `0x0800B938` and the reward
 /// routine at `0x080376A8`): it opens, half a second later it counts as
 /// opened, and money is announced in the message box.
@@ -897,6 +1300,7 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
         4 => Some(FIRST_ROOM),
         10 => Some(LONG_TUNNEL),
         11 => Some(TUNNEL_EXIT),
+        ARCANA => Some(ARCANA_STREETS),
         _ => None,
     }
 }
@@ -915,6 +1319,10 @@ pub fn talk_handler(address: u32) -> Option<&'static [Op]> {
         0x0800_CBEC => Some(REGINA_OFFER),
         0x0800_CC24 => Some(ACE_OFFER),
         0x0800_CC5C => Some(JACK_OFFER),
+        0x0802_AB08 => Some(DR_T),
+        0x0800_9480 => Some(LAB_ASSISTANT),
+        0x0800_9588 => Some(OLD_MAN_IN_THE_SHOP),
+        0x0800_95B8 => Some(ROMAN_TEACHES),
         _ => None,
     }
 }

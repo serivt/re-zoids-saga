@@ -117,6 +117,26 @@ pub enum Op {
     Script(&'static str, u16),
     /// Marks deck command `n` as learned (`0x080370C0`).
     LearnCommand(u8),
+    /// Runs `then` when deck command `command` has been learned
+    /// (`0x080370DC`), `otherwise` else.
+    IfCommand {
+        /// The deck command.
+        command: u8,
+        /// Program run when it has.
+        then: &'static [Op],
+        /// Program run when it has not.
+        otherwise: &'static [Op],
+    },
+    /// Runs `then` when the current map's area, the low byte of its record
+    /// id (RAM `0x0200000C`), is `area`, `otherwise` else.
+    IfArea {
+        /// The area.
+        area: u8,
+        /// Program run in it.
+        then: &'static [Op],
+        /// Program run elsewhere.
+        otherwise: &'static [Op],
+    },
     /// Darkens the screen a level a frame to black, holding the game
     /// (`0x08001524`).
     FadeOutHolding,
@@ -223,6 +243,10 @@ pub trait EventHost {
     fn start_script(&mut self, table: &'static str, index: u16);
     /// Marks deck command `command` as learned.
     fn learn_command(&mut self, command: u8);
+    /// Whether deck command `command` has been learned.
+    fn command_learned(&self, command: u8) -> bool;
+    /// The area of the map being walked.
+    fn area(&self) -> u8;
     /// The variables the last script saved.
     fn saved_vars(&self) -> [u16; 8];
     /// Forms the party around the Zoid picked in the hangar.
@@ -373,6 +397,15 @@ impl Events {
     #[must_use]
     pub fn in_dialogue(&self) -> bool {
         matches!(self.hold, Some(Hold::Dialogue(_)))
+    }
+
+    /// Whether the running dialogue was started by a task: the original
+    /// runs it inside the task, after the actors' update, so they go on
+    /// moving. A handler the game calls directly runs its dialogue inside
+    /// that call, and nothing moves.
+    #[must_use]
+    pub fn dialogue_in_task(&self) -> bool {
+        matches!(self.hold, Some(Hold::Dialogue(slot)) if slot < IMMEDIATE)
     }
 
     /// Whether a battle scene an event started is running.
@@ -600,6 +633,8 @@ impl Events {
             | Op::LoadMap { .. }
             | Op::Warp { .. } => self.wait(slot, op, host),
             Op::IfFlags { .. }
+            | Op::IfCommand { .. }
+            | Op::IfArea { .. }
             | Op::IfChoice { .. }
             | Op::IfChestMoney { .. }
             | Op::Call(_)
@@ -723,14 +758,19 @@ impl Events {
         Flow::Yield
     }
 
-    /// Holds the game while a map loads; a handler the game calls directly
-    /// loads within the entry that called it, which already waits.
+    /// Holds the game while a map loads. A handler the game calls directly
+    /// loads within the entry that called it: a map's handler run by a
+    /// warp delays the warp's fade in by the load instead.
     fn hold_loading(&mut self, slot: usize, count: usize) -> Flow {
+        let frames = LOAD_FRAMES + u32::try_from(count).unwrap_or(u32::MAX);
         if slot == IMMEDIATE {
+            if let Some(Hold::FadeIn { delay, settle }) = self.hold {
+                let delay = delay.saturating_add(u8::try_from(frames).unwrap_or(u8::MAX));
+                self.hold = Some(Hold::FadeIn { delay, settle });
+            }
             return Flow::Next;
         }
         self.advance(slot);
-        let frames = LOAD_FRAMES + u32::try_from(count).unwrap_or(u32::MAX);
         self.hold = Some(Hold::Loading { frames, slot });
         Flow::Yield
     }
@@ -750,6 +790,16 @@ impl Events {
                 then,
                 otherwise,
             ),
+            Op::IfCommand {
+                command,
+                then,
+                otherwise,
+            } => taken(host.command_learned(command), then, otherwise),
+            Op::IfArea {
+                area,
+                then,
+                otherwise,
+            } => taken(host.area() == area, then, otherwise),
             Op::IfChoice { then, otherwise } => {
                 let vars = host.saved_vars();
                 taken(vars[1] == 0 && vars[0] != 0, then, otherwise)
@@ -961,6 +1011,14 @@ mod tests {
             self.log.push(format!("command {command}"));
         }
 
+        fn command_learned(&self, command: u8) -> bool {
+            self.log.contains(&format!("command {command}"))
+        }
+
+        fn area(&self) -> u8 {
+            1
+        }
+
         fn saved_vars(&self) -> [u16; 8] {
             [0; 8]
         }
@@ -1065,6 +1123,69 @@ mod tests {
         host.log.clear();
         events.run_now(CHOOSING, &mut host);
         assert_eq!(host.log, ["music 6", "sound 1"]);
+    }
+
+    const TEACHING: &[Op] = &[Op::IfCommand {
+        command: 26,
+        then: &[Op::Sound(2)],
+        otherwise: &[Op::Sound(1), Op::LearnCommand(26)],
+    }];
+
+    #[test]
+    fn a_lesson_runs_until_the_command_is_learned() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.run_now(TEACHING, &mut host);
+        events.run_now(TEACHING, &mut host);
+        assert_eq!(host.log, ["sound 1", "command 26", "sound 2"]);
+    }
+
+    const BY_AREA: &[Op] = &[Op::IfArea {
+        area: 9,
+        then: &[Op::Sound(9)],
+        otherwise: &[Op::Sound(1)],
+    }];
+
+    #[test]
+    fn branches_on_the_map_area() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.run_now(BY_AREA, &mut host);
+        assert_eq!(host.log, ["sound 1"]);
+    }
+
+    #[test]
+    fn only_a_task_dialogue_lets_the_actors_move() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.spawn(MAP_TASK, TALKING);
+        events.update(&mut host);
+        assert!(events.dialogue_in_task());
+        let mut direct = Events::new();
+        direct.run_now(TALKING, &mut host);
+        assert!(direct.in_dialogue() && !direct.dialogue_in_task());
+    }
+
+    const RELOADING: &[Op] = &[Op::LoadMap {
+        map: 24,
+        player: (23, 29),
+        objects: 0,
+        count: 8,
+    }];
+
+    #[test]
+    fn a_load_in_a_warps_handler_delays_its_fade_in() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.set_brightness(BLACK);
+        events.fade_in_after(10, 0);
+        events.run_now(RELOADING, &mut host);
+        let held = (0..24)
+            .take_while(|_| events.update_hold(false, &mut host) == HoldStep::Held)
+            .count();
+        assert_eq!(events.brightness(), BLACK);
+        assert_eq!(held, 24);
+        assert_eq!(host.log, ["map 24"]);
     }
 
     const TWICE: &[Op] = &[

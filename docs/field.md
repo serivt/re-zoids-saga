@@ -33,11 +33,32 @@ images 21, 22, 21, 23 of `ch00`, which is exactly its animation 7.
 
 The map's object list places the other characters; each starts on its metatile playing
 its starting animation, blocks the metatile below it like the player's footing, and is
-drawn together with the player in order of anchor y so nearer sprites cover farther
-ones, in front of the player when level with it (the game re-sorts OAM the same way when
-the player walks past, and the chair `ma07` covers the player's arm at the start). That
-chair at (6, 2) is what stops a step right from the start; the desk above the player is
-a blocked attribute.
+drawn together with the player so nearer sprites cover farther ones (see Drawing
+below). The chair `ma07` at (6, 2) stops a step right from the start; the desk above the
+player is a blocked attribute.
+
+## Drawing
+
+Source: the OAM builder (`0x08000A90`, `0x08000554`), its sort (`0x08000468`), the
+entity reset (`0x08000D1C`), and screenshots of the original compared with the port's
+frame by frame in the first room, in Arcana and above its bar.
+
+- **Order.** The game keeps a list of entities that orders its sprites, front first.
+  Each scene load resets it to object order. Before each frame's sprites, a selection
+  sort goes through it in place: an entity trades places with a later one that is
+  visible, not off the screen, and lower on the map (larger y). Entities level with
+  each other never trade, so their order is whatever the earlier trades left. When the
+  first room loads, the maid far below sends the prince to the end of the list, so the
+  chair at his desk covers him. A sprite whose top-left is more than 56 pixels left of
+  the screen or 32 above it, or beyond 320 and 192 from there, is left out of OAM
+  (`0x080005CA`). That flag only takes effect in the next frame's sort.
+- **One frame late.** The game copies its sprite table, the scroll registers, the
+  text layers and the brightness at the vertical blank. A frame therefore shows
+  positions, order, flips, camera, windows and fade level as the frame before left
+  them. Each sprite's picture is copied straight into video memory, so it is the
+  current one. A walking sprite's new step shows one frame before it moves. The port
+  keeps the screen state at the start of each frame (`Field::latch`,
+  `ScriptWindows::latch`) and draws it with the current pictures.
 
 ### Wandering
 
@@ -52,10 +73,35 @@ of kind 2 walk around on their own:
 | Step | If the metatile ahead of the footing is free (not blocked, not an exit, not another character or the player, including the cell the player is stepping into) the character faces it and walks at half the player's speed: 16 pixels in 32 frames, its metatile being the destination from the first frame |
 | Blocked | The character only turns; either way the next wait is `rng & 0x7F` frames (0–127; 3–123 observed) |
 | Talking | A stepping character cannot be spoken to; a conversation freezes everyone |
+| A cutscene's dialogue | Characters go on walking and animating while it shows (see [events.md](events.md)) |
+
+A stepping entity's previous metatile (entity `+0x52`, `+0x54`) blocks other steps like
+its own for the first half of the step. The stepping command (`0x0800B764`) counts the
+step's frames down at `+0x4C` and, when the count reaches the halfway mark at `+0x58`
+(half the step's frames less one: 7 of 16, 15 of 32), makes the previous metatile the
+new one. In Arcana a soldier waiting behind the captain steps into the metatile the
+captain is leaving eight frames into the captain's step, as in the original.
 
 The step end also writes the character's metatile into the saved object state at RAM
 `0x02000B5C + 0x50 + index × 16` (`+2` x, `+3` y), which the loader reads back for maps
 whose record id has bit 15; that persistence is not modeled yet.
+
+### Shy townsfolk
+
+Source: command 3 (`0x0800AA60`), its flight routine (`0x0800A5E4`) and a trace of a
+townsperson in Arcana with B held. Objects of kind 3, the people of Arcana's streets,
+wander like kind 2 while B is up. While B is held (the keys at RAM `0x03002358`) and the
+player stands within three metatiles along both axes:
+
+| Aspect | Original |
+|---|---|
+| Direction | One draw from the RNG. A draw of `0xFFF` or less picks a random direction, as a wanderer does. Otherwise the character steps away from the player along the axis the player is farther on. When both are as far, bit 15 of the draw picks the vertical axis |
+| Step | At the player's speed, a pixel a frame; tried every frame the character is not stepping, with no wait between |
+| Blocked | The character turns and tries again the next frame |
+
+Farther away it wanders. The trace showed a townsperson three metatiles to the right of
+the player trying to step left into a wall every frame until a random draw moved it.
+The RNG's calls differ between the original and the port (below), so the paths differ.
 
 ## Random numbers
 

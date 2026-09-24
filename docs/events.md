@@ -15,11 +15,21 @@ map's own event and slots 4–7 its helpers (fades, flicker, walks that run besi
 main event). Each frame the entities update first, then every task runs in slot order
 until it yields. A task spawned into a later slot runs in the same frame.
 
-Some calls hold the whole game until they finish: a dialogue, a blocking fade and a
-scene load. Nothing moves during the hold, and the task that started it continues in
-the frame the hold ends. Handlers the game calls directly (the code an object runs when
-spoken to, the code a map runs when it loads) run at once, until they yield or end. A
-scene load started from such a handler does not hold the game.
+Some calls hold the tasks until they finish: a dialogue, a blocking fade and a scene
+load. The task that started it continues in the frame the hold ends. A fade or a load
+holds the whole game. A task's dialogue runs inside the task, after the entities'
+update, so the entities go on walking and animating while it shows: in Arcana the
+soldiers leave during dialogue `0x4E`.
+
+Handlers the game calls directly run at once, until they yield or end. Those handlers
+are the code an object runs when spoken to and the code a map runs when it loads.
+
+- An object's code runs from within the player's update, in the frame it is spoken to,
+  and nothing moves while it runs. Its scripts follow one another within the call: the
+  next starts in the frame the last one ends.
+- A map's handler runs within the loader. A scene load it starts adds its frames to the
+  black before the fade in: six plus one per object. Arcana's handler reloads the town
+  with eight objects, and the town brightens 14 frames later than a plain door.
 
 The port writes each task as a program of `Op`s, one per call of the original, and
 keeps the slot order, the holds and the frame costs.
@@ -32,8 +42,10 @@ events use:
 | Offset | Field |
 |---|---|
 | `+0x08`, `+0x0C` | Position, 16.16 fixed point |
+| `+0x10`, `+0x12` | The sprite's anchor, from its record (see [formats/sprite.md](formats/sprite.md)) |
 | `+0x30`, `+0x34`, `+0x38` | Animation, frame, animation shift |
-| `+0x4E`, `+0x50` | Cell; `+0x52`, `+0x54` the previous cell |
+| `+0x4C` | Frames left in a step, or a wanderer's wait |
+| `+0x4E`, `+0x50` | Cell; `+0x52`, `+0x54` the previous cell, which blocks others until it becomes the cell halfway through a step (`+0x58`) |
 | `+0x60` | Command |
 | `+0x6A`, `+0x6C` | Walk target cell |
 | `+0x7C` | Speed |
@@ -45,6 +57,7 @@ Commands come from the table at ROM `0x08666EA8`:
 | 0 | The player's input |
 | 1 | Idle |
 | 2 | Wander (see [field.md](field.md)) |
+| 3 | Wander, and step away from the player while B is held (see [field.md](field.md)) |
 | 10 | Walk to the target: the longer axis first, the horizontal one on ties (`0x0800A864`) |
 | 11 | The same, through anything: collision (`0x080084D4`) reports free for it |
 | 21 | A chest opening (`0x0800B938`) |
@@ -66,6 +79,8 @@ Flag `0x400` plays the animation once, and flag `0x4` marks that it ended.
 | `0x08009938` | Flash the screen |
 | `0x08008E4C` | Stage a battle scene (descriptors at ROM `0x0866429C`; see [battle.md](battle.md)) |
 | `0x080378F0` | Learn a deck command: byte `+0x347B + n` of the game state |
+| `0x080370DC` | Whether deck command `n` is learned (its byte is 1) |
+| `0x08009430` | A teacher of deck command `n` (see below) |
 | `0x08037858` | Meet the characters of a list at ROM `0x0866C8D0` |
 | `0x08037098` | See a Zoid: byte `+0x33E2 + id` |
 
@@ -80,8 +95,9 @@ frames.
 | Entering a map | Held at 31 for a frame, then one level less each frame; the world runs in the frame the level reaches 0 |
 | Taking an exit, arrival at frame R | Level 1 at R+2 … level 31 and the load at R+32; black until R+42; level 30 at R+43 … 0 at R+73; the world runs at R+74 |
 | Cutscene load, event warp | 6 frames plus one per object |
-| Exit onto the world map (map 1) | Level 30 seven frames later than a room's: the load takes longer |
+| Exit onto the world map (map 1) | Level 30 six frames later than a room's: the load takes longer |
 | Input | The game acts on the buttons of the frame before |
+| Display | A frame shows the field, the windows and the brightness as the frame before left them (see [field.md](field.md), Drawing) |
 
 Script operations cost frames too (see [formats/script-text.md](formats/script-text.md)).
 The original's real costs vary with the CPU time each frame takes. For example, a window
@@ -122,10 +138,38 @@ A map load shows chests whose flag is set already open.
 | Labyrinth chests | Chest 0: 4200 G (map `mq0158`, cell (18, 5)). Chest 1: 1400 G (`mq0159`, (4, 5)) | `0x1E`, `0x1F` |
 | Map 11, the exit | Reaching column 2 on row 2 or 3 walks the Gustav to (1, 3), plays dialogue `0x2C0` and sees the Trinity Liger (Zoid `0x8F`) | `0x127` |
 | Map 1, the world map | The first time (handler `0x08010358`) the Gustav faces right and stands still; its task (`0x080103B4`) waits 60 frames from the end of the fade in, plays dialogue `0x44` (Regina: to the nearby town of Arcana), walks the Gustav at a pixel a frame to (11, 6), then (11, 7), then toward (14, 7), and ends 60 frames after starting that walk. The Gustav runs into the town's door at (14, 7) and takes it into map 24 at (23, 29) | `0x11E` |
+| Map 24, Arcana | The first time (handler `0x0800E850`) the town reloads with the arrival's objects (ROM `0x0832AC54`: the prince, Regina, Ace, Jack, Roman and three soldiers), song 6 plays, and the arrival task (`0x0800E8B8`) starts: the party splits up (dialogue `0x49`; helper tasks `0x0800FBA0`, `0x0800FE14`, `0x08010088` walk Jack, Ace and Regina around town), the prince finds the bar (`0x4A`), the soldiers surround the party (`0x4B`), Roman comes out (`0x4C`, `0x4D`), the soldiers leave and everyone goes into the bar (`0x4E`) | `0x128` |
+| Map 29, above the bar | The same task loads the room with its own list (ROM `0x0832ACF4`): Roman's account (`0x4F`); the prince and Regina leave by the stairs, the camera pans 64 pixels left, Jack and Ace follow (`0x50`); the task warps to map 28, the bar, at (13, 12) facing left | |
+| Map 29, Roman | Teaches 包囲攻撃, deck command 26 | |
+| Map 26, armaments shop | The old man teaches 節電, deck command 22 | |
+| Map 27, Dr. T's lab | Dr. T (`0x0802AB08`) talks with Regina about rebuilding the Trinity Liger (dialogue `0x2C1`), later `0x2C2`; the assistant on the left teaches データ収集, deck command 0 | `0x13F` |
 
 The map record's byte `+8` names the map's song (11 for the castle, 22 for the
 labyrinth). On maps with 32-pixel cells (the Zoid maps) the player is the carrier `mz10`
 (sprite 0). Each cell has a single attribute, and the player's footing is its own cell.
+
+Arcana's townsfolk are objects of kind 3 (see [field.md](field.md)).
+
+## Teachers
+
+The objects that teach deck commands run `0x08009430` with the command `n` (their code
+is at `0x08009480 + 12n`). The routine reads a pair of dialogue indices at ROM
+`0x08328EC4 + 4n`. While the command is not learned, it runs the first line, then the
+learning message of `0x080378F0`:
+
+- dialogue `0x1F`;
+- battle-menu strings 6 and 7;
+- battle-text string `0x39`;
+- the command's name (string 77 + `n` of the item table);
+- battle-text string `0x3A`;
+- battle-menu string 5;
+- dialogue `0x22`.
+
+Once the command is learned, it runs the second line. Command 16 takes another path
+(`0x0803795C`).
+
+Dr. T's code reads the area (the low byte of the map record's id, RAM `0x0200000C`).
+Area 1 is the talk above; areas 9 and 10 have a line each (`0x2C9`, `0x2CA`).
 
 ## The party
 
@@ -166,15 +210,32 @@ formation.
   floor, the gate, the hangar, the choice, the departure, and the arrival in `mq0157`
   at pixel (128, 32).
 - `mq0157` has no random battles.
+- Arcana's arrival matches as a sequence of entity states from the door to the warp
+  into the bar. It also matches pixel for pixel on frames sampled every 100, and on
+  every frame of a walk, of the fade into the bar and of the warp back down. Roman's
+  lesson matches frame by frame.
+- The first room's opening matches pixel for pixel on 327 of 343 frames sampled every
+  7; before the drawing order and the frame of display delay were modeled, 64 did
+  (279 differed).
+- The drive to Arcana runs a frame late after dialogue `0x44` closes, and the town
+  brightens a frame early.
+- The black after an exit's load depends on the scene. The port uses one length for
+  every room: leaving Arcana's bar for the streets, the original stays black six frames
+  longer, and going up to the room above, two frames shorter.
 
 ## Not modeled yet
 
 - The battle engine itself (see [battle.md](battle.md)).
-- Arcana's arrival event (map 24): the town loads for a cutscene, the prince walks up
-  and the party meets; the port stands the prince at the gate instead.
-- The world map's handler also swaps the field's per-frame hooks (RAM `0x02000000`,
-  `0x02000004`) for empty ones during the drive and leaves the second one empty; what
-  those hooks run (random battles, most likely) is not modeled.
+- Arcana's shops: the item shop (`0x080090A0`), the armaments shop (`0x080090B4`) and
+  Dr. T's Zoid construction shop (`0x080090C8`); speaking to their keepers does
+  nothing yet.
+- Dr. T in the other areas: whether the party has the Zoids `0x90` or `0x8F`, and the
+  game-state byte `+0x3320` (flags `0x140`, `0x141`).
+- The field's per-frame hooks (RAM `0x02000000`, `0x02000004`), which the world map's
+  and Arcana's handlers set; what they run (random battles, most likely) is not
+  modeled. The world map's handler swaps them for empty ones during the drive and
+  leaves the second one empty. Arcana's arrival sets its own and puts the field's back
+  when it ends; after it, Arcana's handler (`0x0800BEE4`) only sets them.
 - The port runs the tasks a map handler spawns two frames after its fade in ends,
   where the original runs them in that frame; the drive to Arcana makes up for it.
 - The CPU-time variance of script operations.

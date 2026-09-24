@@ -19,10 +19,13 @@ Early. The workspace and layer boundaries are in place: the launcher identifies 
 string table of Zoids Saga (names, items, dialogue, battle quotes, menus), and the
 original 8×16 font, the text window (LZ77 tiles + palette) and the character
 portraits are extracted and drawn in an SDL3 window, with text wrapped the way the
-game does it. The opening chapter plays from the title to the gate of Arcana: the castle
+game does it. The opening chapter plays from the title into the town of Arcana: the castle
 and its conversations, the throne-room cutscene, the gate, the Zoid choice in the hangar
 (which forms the party), the eastern labyrinth with its chests and the Trinity Liger
-event, and the drive across the world map into the town, with the original timing (see [docs/events.md](docs/events.md)). The throne
+event, the drive across the world map, and Arcana's arrival (the soldiers, Roman and the
+room above the bar), its townsfolk, Dr. T and the teachers of deck commands, with the
+original timing (see [docs/events.md](docs/events.md)); the town's shops are not
+implemented yet. The throne
 room's two battle scenes play as in the original, shots included (see
 [docs/battle.md](docs/battle.md)); the battle system itself is not implemented yet. The
 pause menu shows the party, each Zoid's status and parts, the stocked weapons, and

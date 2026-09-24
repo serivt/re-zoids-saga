@@ -288,6 +288,8 @@ pub struct ScriptWindows<'rom> {
     opened: u64,
     extensions: SharedExtensions,
     metrics: TextMetrics,
+    /// The windows the screen shows, kept by [`ScriptWindows::latch`].
+    shown: Option<Vec<Option<Window>>>,
 }
 
 impl<'rom> ScriptWindows<'rom> {
@@ -303,6 +305,7 @@ impl<'rom> ScriptWindows<'rom> {
             opened: 0,
             extensions: SharedExtensions::default(),
             metrics: TextMetrics::default(),
+            shown: None,
         }
     }
 
@@ -404,8 +407,34 @@ impl<'rom> ScriptWindows<'rom> {
     /// Draws every presented window over `frame`, in the order they were
     /// opened so later windows cover earlier ones, as one tilemap would.
     pub fn draw(&self, frame: &mut Frame, skin: &WindowPainter, painter: &TextPainter) {
-        let mut order: Vec<(usize, &Window)> = self
-            .windows
+        Self::draw_set(&self.windows, frame, skin, painter);
+    }
+
+    /// Keeps the windows as they are for [`ScriptWindows::draw_shown`]: on
+    /// the field the game's text layers reach the screen a frame late, as
+    /// its sprites do (see [`crate::field::Field::latch`]).
+    pub fn latch(&mut self) {
+        self.shown = Some(self.windows.clone());
+    }
+
+    /// Draws the windows kept by the last [`ScriptWindows::latch`], or the
+    /// current ones before any.
+    pub fn draw_shown(&self, frame: &mut Frame, skin: &WindowPainter, painter: &TextPainter) {
+        Self::draw_set(
+            self.shown.as_deref().unwrap_or(&self.windows),
+            frame,
+            skin,
+            painter,
+        );
+    }
+
+    fn draw_set(
+        windows: &[Option<Window>],
+        frame: &mut Frame,
+        skin: &WindowPainter,
+        painter: &TextPainter,
+    ) {
+        let mut order: Vec<(usize, &Window)> = windows
             .iter()
             .enumerate()
             .filter_map(|(index, window)| Some((index, window.as_ref()?)))
@@ -421,7 +450,7 @@ impl<'rom> ScriptWindows<'rom> {
                 window.height,
                 window.frame_style(),
             );
-            if self.shares_left_border(index, window) {
+            if Self::shares_left_border(windows, index, window) {
                 skin.draw_divider(frame, window.x, window.y, window.height);
             }
             let origin = (pixels(window.x + window.margin()), pixels(window.y + 1));
@@ -483,10 +512,9 @@ impl<'rom> ScriptWindows<'rom> {
     /// Whether `window`'s left border lies on another window's right
     /// border, where the story skin joins them with the divider tiles; a
     /// light-framed window (the status screens') keeps its own border.
-    fn shares_left_border(&self, index: usize, window: &Window) -> bool {
+    fn shares_left_border(windows: &[Option<Window>], index: usize, window: &Window) -> bool {
         window.frame_style() == FrameStyle::Standard
-            && self
-                .windows
+            && windows
                 .iter()
                 .enumerate()
                 .filter(|(other, _)| *other != index)
@@ -855,12 +883,24 @@ mod tests {
         assert!(!host.windows()[0].as_ref().unwrap().visible);
         host.present(None);
         assert!(host.windows()[0].as_ref().unwrap().visible);
-        assert!(host.shares_left_border(1, host.windows()[1].as_ref().unwrap()));
-        assert!(!host.shares_left_border(0, host.windows()[0].as_ref().unwrap()));
+        assert!(ScriptWindows::shares_left_border(
+            host.windows(),
+            1,
+            host.windows()[1].as_ref().unwrap()
+        ));
+        assert!(!ScriptWindows::shares_left_border(
+            host.windows(),
+            0,
+            host.windows()[0].as_ref().unwrap()
+        ));
         host.open_window(2, 0x20, (0, 0, 18, 12), 4);
         host.open_window(3, 0x21, (17, 0, 13, 12), 4);
         host.present(None);
-        assert!(!host.shares_left_border(3, host.windows()[3].as_ref().unwrap()));
+        assert!(!ScriptWindows::shares_left_border(
+            host.windows(),
+            3,
+            host.windows()[3].as_ref().unwrap()
+        ));
         host.put_char(1, 'x');
         host.prompt(1, true);
         host.clear_window(1);
