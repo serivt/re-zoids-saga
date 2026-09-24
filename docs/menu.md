@@ -352,9 +352,28 @@ logo that scrolls one pixel left and one down per frame:
 
 The backdrop color is `0x7240`.
 
+## Opening and closing
+
+The game keeps a fade level (IWRAM `0x03002356`), 0 to 31, that the screen shows from
+16 down. It was traced per frame together with the wallpaper's scroll registers.
+
+- **Opening**, counted from START:
+  - the field goes on (its actors keep moving) while the level climbs one a frame from
+    the third frame, so the screen is black from the 18th;
+  - on the 33rd frame the menu is built. The wallpaper holds for five frames, then
+    scrolls; the menu's scripts stop it for two frames;
+  - the level falls one a frame from the ninth frame after the build, but for those two
+    frames, so the menu brightens over the last 16;
+  - the main list's menu runs on the 43rd frame after the build.
+- **Closing**, counted from B on the main list: sound `0x3F`, then the menu, its
+  wallpaper still moving, darkens a level a frame from the fourth frame. On the 34th
+  frame the map is loaded again, so the actors' animations start over. The field stays
+  black 14 frames, then brightens a level a frame, and the player moves once it is
+  bright.
+
 ## Flows
 
-START on the field opens the menu; B on the main list closes it. ステータス opens the
+START on the field opens the menu; B on the main list closes it (see above). ステータス opens the
 status list: 部隊 shows the unit list, which A or B leaves; キャラクター the character
 screen; 武器 the weapons list; Ｚｉデータ and Ｚｉデータ用アイテム print their notices;
 図鑑 asks ゾイド or キャラ and opens that guide (see [guide.md](guide.md)). 武装 shows the
@@ -375,9 +394,8 @@ port draws a screen at once, then counts the frames its scripts would have cost 
 holds the menu for that long. The key waits and the blinking then start within a frame
 of the original's.
 
-The menu's opening is not modeled. The original fades the field out and shows the menu
-about 33 frames after START, and its wallpaper starts to move 6 frames later; the port
-shows it at once, so the wallpaper's phase differs by a constant.
+The menu's wallpaper in the screens after the main list still drifts from the
+original's: the frames each transition stops it for are only approximated.
 
 The discard question and the characters that keep their equipment (flag `0x08`, which
 the game sets at runtime) follow the code but were not seen in the original.

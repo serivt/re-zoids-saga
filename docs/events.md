@@ -169,6 +169,5 @@ formation.
 
 - The battle engine itself (see [battle.md](battle.md)).
 - The CPU-time variance of script operations.
-- Doors taken with A (`0xC000` attributes).
 - The object-state overlay.
 - A one-frame drift of the backdrop.

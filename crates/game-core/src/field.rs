@@ -129,6 +129,8 @@ impl Direction {
 pub enum FieldEvent {
     /// The player finished a step onto this exit.
     Exit(usize),
+    /// The player pushed against this door (a `0xC000` exit).
+    Door(usize),
     /// The player faced chest `chest` (actor `actor`) and pressed A.
     Chest {
         /// Index into the field's actors.
@@ -661,6 +663,14 @@ impl Field {
         self.actors.get_mut(index)
     }
 
+    /// Restarts every actor's animation `elapsed` frames in, as reloading
+    /// the map does when the pause menu closes.
+    pub fn restart_animations(&mut self, elapsed: u32) {
+        for actor in &mut self.actors {
+            actor.animation = elapsed;
+        }
+    }
+
     /// Advances one frame with the buttons held; reports an exit reached or
     /// an actor spoken to.
     pub fn update(&mut self, input: Input) -> Option<FieldEvent> {
@@ -726,8 +736,13 @@ impl Field {
         }
         if self.free(0, direction, false) {
             self.actors[0].start_step(direction, PLAYER_SPEED);
+            return None;
         }
-        None
+        let (dx, dy) = direction.delta();
+        let (column, row) = self.actors[0].footing();
+        let column = column.checked_add_signed(dx)?;
+        let row = row.checked_add_signed(dy)?;
+        self.scene.door(column, row).map(FieldEvent::Door)
     }
 
     fn wander(&mut self, index: usize) {
@@ -1075,6 +1090,19 @@ mod tests {
         let mut actor = character(column, row, None, 0);
         actor.command = Command::Wander;
         actor
+    }
+
+    #[test]
+    fn pushing_against_a_door_takes_it_without_a_step() {
+        let mut field = field(6, 5);
+        field.scene.attributes[2 * 6 + 4] = 0xC003;
+        assert_eq!(
+            field.update(held(Direction::Right)),
+            Some(FieldEvent::Door(3))
+        );
+        assert_eq!((field.player().column, field.player().row), (3, 1));
+        assert!(!field.player().walking());
+        assert_eq!(field.player().facing, Direction::Right);
     }
 
     #[test]

@@ -320,6 +320,20 @@ impl Scene {
             .filter(|attribute| *attribute & EXIT_KIND_MASK == EXIT_WALK)
             .map(|attribute| usize::from(attribute & EXIT_INDEX_MASK))
     }
+
+    /// The door on attribute cell (`column`, `row`), if any: an attribute
+    /// with both bits 15 and 14 set (`0xC000 | n`) is exit `n`, taken by
+    /// pushing against the cell, which blocks walking.
+    #[must_use]
+    pub fn door(&self, column: usize, row: usize) -> Option<usize> {
+        if column >= self.attribute_columns() {
+            return None;
+        }
+        self.attributes
+            .get(row * self.attribute_columns() + column)
+            .filter(|attribute| *attribute & EXIT_KIND_MASK == EXIT_KIND_MASK)
+            .map(|attribute| usize::from(attribute & EXIT_INDEX_MASK))
+    }
 }
 
 /// Why a scene could not be read.
@@ -1936,6 +1950,9 @@ mod tests {
         assert_eq!(scene.exit(1, 0), Some(1));
         assert_eq!(scene.exit(0, 1), None);
         assert_eq!(scene.exit(1, 1), None);
+        assert_eq!(scene.door(0, 1), Some(2));
+        assert_eq!(scene.door(1, 0), None);
+        assert_eq!(scene.door(1, 1), None);
         assert_eq!(scene.exit(2, 0), None);
         assert_eq!(scene.exit(1, 5), None);
     }

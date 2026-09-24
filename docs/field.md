@@ -3,8 +3,11 @@
 Source of knowledge: per-frame traces of Zoids Saga (Japan, Rev 1) in a reference
 emulator while holding and tapping each direction in the first room (OAM entry of the
 player, the game's scroll shadow at IWRAM `0x03004BAE`, and the `CpuSet` log of sprite
-frames), plus the traces of walking through the room's exit. Implemented in
-`crates/game-core/src/field.rs`.
+frames), plus the traces of walking through the room's exit. For doors: a read of the
+movement check and the warp routines named below, and a door taken from a save placed
+next to it, with breakpoints on those routines, the fade level traced per frame and
+screenshots every other frame compared with the port's. Implemented in
+`crates/game-core/src/field.rs` and `game.rs`.
 
 ## Measured behavior
 
@@ -93,13 +96,33 @@ door sound before the load and back in after it, at the timings in
 first room's lower exit lands in map 5 at metatile (8, 16): sprite (120, 256), camera
 (16, 160), as in the original.
 
+## Doors
+
+Doors are exits the player takes by pushing against them. Each frame the player pushes
+toward a cell it cannot enter, the movement check (`0x0800AE7C`) reads that cell's
+attribute (`0x080084D4`). A door (`0xC000 | n`) then:
+
+1. turns the player toward it;
+2. looks up exit `n` in the map's warp table and plays its sound (`0x080083B8`);
+3. warps with the table's facing (`0x08007188`), where a walked exit keeps the player's.
+
+Traced on the door of map 30 (`mq0200`) at (14, 8), leading to map 34 at (12, 20):
+
+- **The push:** starts on frame 0. The turn and the sound (`0x82`, the Gustav's) come on
+  frame 1.
+- **The fade out:** the screen darkens a level a frame from frame 3 and is black from
+  frame 18.
+- **The warp:** loads the map on frame 33.
+- **The fade in:** the new map brightens a level a frame from frame 65, 15 black frames
+  later than a room's exit, since this load takes longer.
+
 ## Pause menu
 
 START opens the menu described in [menu.md](menu.md); the field waits underneath it.
 
 ## Not modeled yet
 
-Doors taken by pressing A (`0xC000` attributes), the code-driven scripts of characters
+The black after a door for loads other than the one measured, the code-driven scripts of characters
 beyond the opening chapter, the saved-state overlay of object lists, objects that show
 the party's Zoid, and the diagonal input priority of the original (this engine takes the
 first held direction in the order up, down, left, right).

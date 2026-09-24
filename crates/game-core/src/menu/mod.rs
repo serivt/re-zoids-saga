@@ -139,6 +139,16 @@ const STATUS_BOOK: u16 = 5;
 const SPEED_CHOICES: u16 = 5;
 const EQUIP_IMAGE_PIXELS: usize = 128;
 const GUIDE_RETURN_FRAMES: u32 = 45;
+/// Frames from the menu's building until its first choice runs.
+const INTRO_FRAMES: u32 = 43;
+const INTRO_STILL: u32 = 5;
+const INTRO_HOLD: u32 = 8;
+const INTRO_STALL: u32 = 10;
+const INTRO_STALL_FRAMES: u32 = 2;
+/// Frames from B on the main list until the field returns, the screen
+/// darkening a level a frame from the fourth.
+const CLOSE_FRAMES: u32 = 34;
+const CLOSE_DELAY: u32 = 3;
 const GUIDE_FADE_TOP: u32 = 31;
 const GUIDE_FADE_HOLD: u32 = 12;
 const SCREEN_WIDTH: usize = 240;
@@ -318,6 +328,8 @@ enum MenuState {
     /// Whether to throw away a part the stock has no room for.
     Discard,
     Notice(Return),
+    /// Darkening after B on the main list, frames since.
+    Closing(u32),
     Closed,
 }
 
@@ -333,6 +345,8 @@ pub struct PauseMenu {
     guide: Option<Box<Guide>>,
     book_line: usize,
     returning: Option<u32>,
+    /// Frames since the menu was built, while it brightens.
+    intro: Option<u32>,
     /// Frames the original would still spend drawing what the port drew
     /// at once: its interpreter blocks the game on each window it opens,
     /// clears or presents, so the wallpaper and the blinking stand still
@@ -409,6 +423,7 @@ impl PauseMenu {
             guide: None,
             book_line: 0,
             returning: None,
+            intro: None,
             busy: 0,
             party,
             roster,
@@ -443,6 +458,9 @@ impl PauseMenu {
         self.runner.start(SCRIPT_MENU)?;
         self.state = MenuState::Main;
         self.scroll = 0;
+        windows.present(None);
+        self.busy = 0;
+        self.intro = Some(0);
         Ok(())
     }
 
@@ -560,25 +578,8 @@ impl PauseMenu {
         input: Input,
         windows: &mut ScriptWindows<'_>,
     ) -> Result<MenuStep, GuideError> {
-        if let Some(guide) = &mut self.guide {
-            guide.update(&GameData::new(rom), input, windows)?;
-            if guide.is_closed() {
-                self.guide = None;
-                self.return_from_guide(rom, windows)?;
-            }
-            return Ok(MenuStep::Open);
-        }
-        if let Some(frames) = self.returning {
-            self.scroll += 1;
-            if frames + 1 < GUIDE_RETURN_FRAMES {
-                self.returning = Some(frames + 1);
-                return Ok(MenuStep::Open);
-            }
-            self.returning = None;
-            windows.clear_window(HELP_WINDOW);
-            self.runner.start(SCRIPT_BOOK_MENU)?;
-            self.state = MenuState::Book;
-            return Ok(MenuStep::Open);
+        if let Some(step) = self.update_phases(rom, input, windows)? {
+            return Ok(step);
         }
         if self.busy > 0 {
             self.busy -= 1;
@@ -648,7 +649,7 @@ impl PauseMenu {
             }
             MenuState::Stock => self.stock_choice(rom, code, choice, windows)?,
             MenuState::Notice(back) => self.return_to(rom, back, windows)?,
-            MenuState::Saving | MenuState::Closed => {}
+            MenuState::Saving | MenuState::Closing(_) | MenuState::Closed => {}
         }
         self.load_equip_image(rom);
         Ok(if self.state == MenuState::Closed {
@@ -656,6 +657,55 @@ impl PauseMenu {
         } else {
             MenuStep::Open
         })
+    }
+
+    /// The frames the menu spends outside its menus: darkening to close,
+    /// brightening after it was built, the guide and the way back from it.
+    fn update_phases(
+        &mut self,
+        rom: &[u8],
+        input: Input,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<Option<MenuStep>, GuideError> {
+        if let MenuState::Closing(frames) = self.state {
+            self.scroll += 1;
+            if frames + 1 < CLOSE_FRAMES {
+                self.state = MenuState::Closing(frames + 1);
+                return Ok(Some(MenuStep::Open));
+            }
+            windows.close_window(None);
+            self.state = MenuState::Closed;
+            return Ok(Some(MenuStep::Closed));
+        }
+        if let Some(frames) = self.intro {
+            let frames = frames + 1;
+            if frames < INTRO_FRAMES {
+                self.scroll = intro_scroll(frames);
+            }
+            self.intro = (frames < INTRO_FRAMES).then_some(frames);
+            return Ok(Some(MenuStep::Open));
+        }
+        if let Some(guide) = &mut self.guide {
+            guide.update(&GameData::new(rom), input, windows)?;
+            if guide.is_closed() {
+                self.guide = None;
+                self.return_from_guide(rom, windows)?;
+            }
+            return Ok(Some(MenuStep::Open));
+        }
+        if let Some(frames) = self.returning {
+            self.scroll += 1;
+            if frames + 1 < GUIDE_RETURN_FRAMES {
+                self.returning = Some(frames + 1);
+                return Ok(Some(MenuStep::Open));
+            }
+            self.returning = None;
+            windows.clear_window(HELP_WINDOW);
+            self.runner.start(SCRIPT_BOOK_MENU)?;
+            self.state = MenuState::Book;
+            return Ok(Some(MenuStep::Open));
+        }
+        Ok(None)
     }
 
     /// Tells the player whether the save was written: セーブしました, or
@@ -1013,8 +1063,8 @@ impl PauseMenu {
         windows: &mut ScriptWindows<'_>,
     ) -> Result<(), ScriptError> {
         if !confirmed {
-            windows.close_window(None);
-            self.state = MenuState::Closed;
+            windows.play_sound(LEAVE_SOUND);
+            self.state = MenuState::Closing(0);
             return Ok(());
         }
         self.main_line = usize::from(choice);
@@ -1216,6 +1266,15 @@ impl PauseMenu {
         if let Some(frames) = self.returning {
             darken(frame, return_darkness(frames));
         }
+        if let Some(frames) = self.intro {
+            darken(frame, intro_darkness(frames));
+        }
+        if let MenuState::Closing(frames) = self.state {
+            let level = frames
+                .saturating_sub(CLOSE_DELAY)
+                .min(u32::from(FADE_STEPS));
+            darken(frame, u8::try_from(level).unwrap_or(FADE_STEPS));
+        }
     }
 
     fn draw_menu(
@@ -1357,6 +1416,33 @@ fn half_and_half(top: Rgb, below: Rgb) -> Rgb {
         channel(top.g, below.g),
         channel(top.b, below.b),
     )
+}
+
+/// The wallpaper's scroll `frames` after the menu was built: still for
+/// five frames, then a pixel a frame but for two frames the menu's
+/// scripts take.
+fn intro_scroll(frames: u32) -> i32 {
+    let scroll = match frames {
+        0..=INTRO_STILL => 0,
+        _ if frames <= INTRO_STALL => frames - INTRO_STILL,
+        _ if frames <= INTRO_STALL + INTRO_STALL_FRAMES => INTRO_STALL - INTRO_STILL,
+        _ => frames - INTRO_STILL - INTRO_STALL_FRAMES,
+    };
+    i32::try_from(scroll).unwrap_or(0)
+}
+
+/// How dark the menu is `frames` after it was built: the game's fade
+/// level holds at 31, falls a level a frame but for the same two frames,
+/// and shows from 16 down.
+fn intro_darkness(frames: u32) -> u8 {
+    let fallen = frames.saturating_sub(INTRO_HOLD);
+    let fallen = if frames > INTRO_STALL + INTRO_STALL_FRAMES {
+        fallen - INTRO_STALL_FRAMES
+    } else {
+        fallen.min(INTRO_STALL - INTRO_HOLD)
+    };
+    let level = GUIDE_FADE_TOP.saturating_sub(fallen);
+    u8::try_from(level.min(u32::from(FADE_STEPS))).unwrap_or(FADE_STEPS)
 }
 
 /// How dark the menu is `frames` after the guide closed: the game's fade

@@ -36,7 +36,7 @@ list of 12-byte entries indexed by the exit number carried in the scene attribut
 | 2 | Destination map record |
 | 4 | Arrival metatile column |
 | 6 | Arrival metatile row |
-| 8 | Sound: `0` plays the default door sound, `0x44` plays nothing, anything else is a sound id |
+| 8 | Sound: `0` plays the default, `0x45` when the player walks on foot (sprite `0x98`) and `0x82` otherwise; `0x44` plays nothing; anything else is a sound id (`0x080083B8`) |
 | 10 | Facing on arrival in sprite sheet order (0 up, 1 down, 2 left, 3 right), `0xFFFF` keeps the current one |
 
 The tables have no length field; the number of entries is whatever the attributes
@@ -73,8 +73,9 @@ is not modeled.
 ## Exit attributes
 
 A scene attribute whose bits 15–14 are `01` (`0x4000 | n`) is exit `n`: finishing a step
-onto that metatile warps. Attributes with both bits set (`0xC000 | n`) are doors the game
-only takes when the player presses A facing them; those are not modeled yet.
+onto that metatile warps. Attributes with both bits set (`0xC000 | n`) are doors: bit 15
+blocks walking, and pushing against the cell takes exit `n` (see
+[../field.md](../field.md)). The world map's places (the castle, the towns) are doors.
 
 ## How the game warps
 

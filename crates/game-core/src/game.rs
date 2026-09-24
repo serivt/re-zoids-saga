@@ -54,6 +54,23 @@ const CHEST_OPEN_ANIMATION: usize = 1;
 const MONEY_WINDOW: u8 = 1;
 /// Frames between the step onto an exit and the first darker level.
 const EXIT_FADE_DELAY: u8 = 1;
+/// Frames between pushing against a door and the screen darkening.
+const DOOR_FADE_DELAY: u8 = 2;
+/// Black frames after a door before the new map brightens, measured on a
+/// door from a Zoid map into a town (the original's load takes longer
+/// than a room's).
+const DOOR_BLACK_FRAMES: u8 = 15;
+const ON_FOOT_SPRITE: u16 = 0x98;
+const ON_FOOT_DOOR_SOUND: u16 = 0x45;
+const NO_DOOR_SOUND: u16 = 0x44;
+/// Frames from START on the field until the pause menu is built; the
+/// field darkens a level a frame from the fourth.
+const MENU_OPEN_FRAMES: u32 = 33;
+const MENU_OPEN_DELAY: u32 = 2;
+/// Black frames before the field brightens again after the menu.
+const MENU_RETURN_BLACK_FRAMES: u8 = 14;
+/// Where the actors' animations stand when the field returns.
+const MENU_RETURN_ANIMATION: u32 = 1;
 /// Frames the destination stays black once loaded, and frames the game
 /// stays held once it is bright again.
 const WARP_BLACK_FRAMES: u8 = 10;
@@ -135,6 +152,9 @@ enum Screen {
     Loading,
     LeavingNameEntry(Box<NameEntry>, u32),
     Field,
+    /// START on the field: frames while the field darkens before the
+    /// pause menu is built.
+    OpeningMenu(u32),
     Menu(Box<PauseMenu>),
     Continuing(Continuing),
     Guide(Box<Guide>),
@@ -195,6 +215,8 @@ pub struct Game<'rom> {
     screen: Screen,
     pending_talk: Option<(Talk, u32)>,
     exit_taken: Option<usize>,
+    /// The door the exit being taken is, when it is one.
+    door_taken: Option<usize>,
     warped: Option<usize>,
     chest: Option<(usize, u16)>,
     player_name: String,
@@ -306,6 +328,7 @@ impl<'rom> Game<'rom> {
             screen: Screen::Loading,
             pending_talk: None,
             exit_taken: None,
+            door_taken: None,
             warped: None,
             chest: None,
             player_name: DEFAULT_PLAYER_NAME.to_owned(),
@@ -327,7 +350,7 @@ impl<'rom> Game<'rom> {
             Screen::Title(_) => Stage::Title,
             Screen::NameEntry(_) => Stage::NameEntry,
             Screen::Loading | Screen::LeavingNameEntry(..) => Stage::Loading,
-            Screen::Field => Stage::Field,
+            Screen::Field | Screen::OpeningMenu(_) => Stage::Field,
             Screen::Menu(_) => Stage::Menu,
             Screen::Continuing(_) => Stage::Continuing,
             Screen::Guide(_) => Stage::Guide,
@@ -408,13 +431,23 @@ impl<'rom> Game<'rom> {
             Screen::Loading => {}
             Screen::Field => {
                 if start && self.player_in_control() {
+                    self.screen = Screen::OpeningMenu(0);
+                } else {
+                    self.update_field(input)?;
+                }
+            }
+            Screen::OpeningMenu(frames) => {
+                if let Some(field) = &mut self.field {
+                    field.update(Input::default());
+                }
+                let frames = *frames + 1;
+                self.screen = Screen::OpeningMenu(frames);
+                if frames >= MENU_OPEN_FRAMES {
                     let mut menu =
                         PauseMenu::new(&self.data, self.party.clone(), self.state.clone())?;
                     menu.open(rom, &mut self.windows)?;
                     self.screen = Screen::Menu(Box::new(menu));
                     Self::emit(&self.extensions, &Event::MenuOpened);
-                } else {
-                    self.update_field(input)?;
                 }
             }
             Screen::Menu(menu) => match menu.update(rom, input, &mut self.windows)? {
@@ -431,6 +464,11 @@ impl<'rom> Game<'rom> {
                     self.party = menu.party();
                     self.state.clone_from_slice(menu.state());
                     self.screen = Screen::Field;
+                    self.events.set_brightness(BLACK);
+                    self.events.fade_in_after(MENU_RETURN_BLACK_FRAMES, 0);
+                    if let Some(field) = &mut self.field {
+                        field.restart_animations(MENU_RETURN_ANIMATION);
+                    }
                     Self::emit(&self.extensions, &Event::MenuClosed);
                 }
             },
@@ -848,7 +886,12 @@ impl<'rom> Game<'rom> {
                 HoldStep::Held => return Ok(()),
                 HoldStep::Darkened => {
                     if let Some(exit) = self.exit_taken.take() {
-                        self.warp(exit)?;
+                        let black = if self.door_taken.take().is_some() {
+                            DOOR_BLACK_FRAMES
+                        } else {
+                            WARP_BLACK_FRAMES
+                        };
+                        self.warp(exit, black)?;
                     }
                     return Ok(());
                 }
@@ -877,17 +920,8 @@ impl<'rom> Game<'rom> {
         }
         let event = self.field.as_mut().and_then(|field| field.update(input));
         match event {
-            Some(FieldEvent::Exit(exit)) => {
-                self.exit_taken = Some(exit);
-                self.events.fade_out_holding(EXIT_FADE_DELAY);
-                Self::play(
-                    &mut self.sound,
-                    &self.data,
-                    &self.extensions,
-                    GameSound::Door,
-                )?;
-                return Ok(());
-            }
+            Some(FieldEvent::Exit(exit)) => return self.take_exit(exit, false),
+            Some(FieldEvent::Door(exit)) => return self.take_exit(exit, true),
             Some(FieldEvent::Talk {
                 actor,
                 script: ObjectScript::Dialogue(id),
@@ -946,7 +980,7 @@ impl<'rom> Game<'rom> {
 
     /// Follows `exit` once the screen is black: loads the destination, runs
     /// its handler and starts its song, then holds black and brightens.
-    fn warp(&mut self, exit: usize) -> Result<(), GameError> {
+    fn warp(&mut self, exit: usize, black: u8) -> Result<(), GameError> {
         let Some(field) = self.field.as_mut() else {
             return Ok(());
         };
@@ -970,10 +1004,61 @@ impl<'rom> Game<'rom> {
             },
         );
         self.play_map_music(arrived)?;
-        self.events
-            .fade_in_after(WARP_BLACK_FRAMES, WARP_SETTLE_FRAMES);
+        self.events.fade_in_after(black, WARP_SETTLE_FRAMES);
         self.events.end(MAP_TASK);
         self.run_handler(story::map_handler(arrived))
+    }
+
+    /// Starts leaving by exit `exit`, a door when `door`: the screen
+    /// darkens with the door's sound, then the warp loads the next map.
+    fn take_exit(&mut self, exit: usize, door: bool) -> Result<(), GameError> {
+        self.exit_taken = Some(exit);
+        if door {
+            self.door_taken = Some(exit);
+            self.events.fade_out_holding(DOOR_FADE_DELAY);
+            return self.play_door_sound(exit);
+        }
+        self.events.fade_out_holding(EXIT_FADE_DELAY);
+        Self::play(
+            &mut self.sound,
+            &self.data,
+            &self.extensions,
+            GameSound::Door,
+        )
+    }
+
+    /// The sound a door plays (`0x080083B8`): its warp's own, none for
+    /// `0x44`, or by default `0x45` when the player is on foot (sprite
+    /// `0x98`) and the door sound otherwise.
+    fn play_door_sound(&mut self, exit: usize) -> Result<(), GameError> {
+        let Some(map) = self.field.as_ref().map(Field::map) else {
+            return Ok(());
+        };
+        let Ok(warp) = self.data.warp(map, exit) else {
+            return Ok(());
+        };
+        let on_foot = self
+            .data
+            .map_objects(map)
+            .ok()
+            .and_then(|objects| objects.first().map(|player| player.sprite))
+            == Some(ON_FOOT_SPRITE);
+        let sound = match warp.sound {
+            NO_DOOR_SOUND => return Ok(()),
+            0 if on_foot => usize::from(ON_FOOT_DOOR_SOUND),
+            0 => {
+                return Self::play(
+                    &mut self.sound,
+                    &self.data,
+                    &self.extensions,
+                    GameSound::Door,
+                );
+            }
+            sound => usize::from(sound),
+        };
+        Self::emit(&self.extensions, &Event::SoundRequested(sound));
+        self.sound.play(sound)?;
+        Ok(())
     }
 
     /// Starts the song map `map` names unless it is already playing.
@@ -1019,6 +1104,14 @@ impl<'rom> Game<'rom> {
                 }
                 self.windows.draw(frame, &self.skin, &self.painter);
                 darken(frame, self.events.brightness());
+            }
+            Screen::OpeningMenu(frames) => {
+                if let Some(field) = &self.field {
+                    field.draw(frame);
+                }
+                self.windows.draw(frame, &self.skin, &self.painter);
+                let level = frames.saturating_sub(MENU_OPEN_DELAY).min(u32::from(BLACK));
+                darken(frame, u8::try_from(level).unwrap_or(BLACK));
             }
             Screen::Menu(menu) => menu.draw(frame, &self.windows, &self.skin, &self.painter),
             Screen::Guide(guide) => guide.draw(frame, &self.windows, &self.skin, &self.painter),
