@@ -30,7 +30,7 @@ use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
 mod equipment;
-mod formation;
+pub(crate) mod formation;
 mod parts;
 mod shop;
 
@@ -52,6 +52,9 @@ const SCRIPT_NOT_DONE: usize = 63;
 const SCRIPT_UNIT_LIST: usize = 68;
 const SCRIPT_UNIT_EMPTY: usize = 69;
 const SCRIPT_CHARACTER_WINDOWS: usize = 70;
+/// The help line alone, window 0 at (0, 14) 30×6, for the battle's
+/// character screen.
+const SCRIPT_BATTLE_HELP_WINDOW: usize = 79;
 const SCRIPT_STAT_LABELS: [usize; CHARACTER_STATS] = [71, 72, 73, 74, 75];
 const SCRIPT_ZOID_HELP_BEFORE: usize = 76;
 const SCRIPT_ZOID_HELP_AFTER: usize = 77;
@@ -403,6 +406,9 @@ pub struct PauseMenu {
     main_line: usize,
     status_line: usize,
     to_next: u32,
+    /// Whether the battle's ステータス opened it: the character screen alone,
+    /// over black, which B leaves.
+    battle: bool,
 }
 
 impl PauseMenu {
@@ -486,7 +492,38 @@ impl PauseMenu {
             main_line: 0,
             status_line: 0,
             to_next,
+            battle: false,
         })
+    }
+
+    /// The character screen the battle's ステータス shows (`0x0805224C`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BootError`] when a block cannot be read.
+    pub fn battle_status(data: &GameData<'_>, state: Vec<u8>) -> Result<Self, BootError> {
+        let mut menu = Self::new(data, Party::default(), state)?;
+        menu.battle = true;
+        Ok(menu)
+    }
+
+    /// Builds the battle's character screen on `windows` (`0x0804E4A8`):
+    /// the help line, the first member, and the list's menu.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScriptError`] when a script cannot run.
+    pub fn open_battle_status(
+        &mut self,
+        rom: &[u8],
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        self.held = Input::default();
+        windows.close_window(None);
+        self.run_now(rom, SCRIPT_BATTLE_HELP_WINDOW, windows)?;
+        self.open_character(rom, windows)?;
+        self.busy = 0;
+        Ok(())
     }
 
     /// Opens the menu on `windows`: the windows, the party panel and the
@@ -1032,6 +1069,11 @@ impl PauseMenu {
                     None => self.show_member(rom, false, windows),
                 };
             }
+            _ if self.battle => {
+                windows.play_sound(LEAVE_SOUND);
+                self.state = MenuState::Closed;
+                return Ok(());
+            }
             _ => {
                 windows.play_sound(LEAVE_SOUND);
                 return self.rebuild_status(rom, windows);
@@ -1411,14 +1453,8 @@ impl PauseMenu {
         }
     }
 
-    fn draw_menu(
-        &self,
-        frame: &mut Frame,
-        windows: &ScriptWindows<'_>,
-        skin: &WindowPainter,
-        painter: &TextPainter,
-    ) {
-        frame.fill(Rgb::default());
+    /// The wallpaper: its texture, and the logo drifting over it.
+    fn draw_wallpaper(&self, frame: &mut Frame) {
         draw_background_256(
             frame,
             |x, y| self.wallpaper.texture.wrapping(x, y),
@@ -1438,6 +1474,19 @@ impl PauseMenu {
             (scroll_x, scroll_y),
             true,
         );
+    }
+
+    fn draw_menu(
+        &self,
+        frame: &mut Frame,
+        windows: &ScriptWindows<'_>,
+        skin: &WindowPainter,
+        painter: &TextPainter,
+    ) {
+        frame.fill(Rgb::default());
+        if !self.battle {
+            self.draw_wallpaper(frame);
+        }
         if let Some((_, image)) = &self.equip_image
             && self.equipment_picture().is_some()
         {

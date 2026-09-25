@@ -355,6 +355,7 @@ mod tests {
             parts: [NO_PART; 6],
             size: 0,
             face: 0,
+            character: 0,
         }
     }
 

@@ -64,18 +64,21 @@ const SPARK_DELAY: u32 = 1;
 pub(super) const SPARK: usize = 6;
 const SPARK_OFFSET: (i32, i32) = (8, -16);
 /// The glow a unit a support part raised shows on its anchor (the battle
-/// screen's effect record 2, `0x0802CBBC`).
+/// screen's effect record 2, `0x0802CBBC`), and a repaired one's (record 4,
+/// `0x0802C588`).
 pub(super) const GLOW: usize = 2;
-/// The glow's sound (`0x0802CA54`).
+pub(super) const MEND: usize = 4;
+/// The glows' sounds (`0x0802CA54`, `0x0802C420`).
 const GLOW_SOUND: u16 = 0x57;
-/// The glow's frames: the unit's red brightens from 8 by 2 a frame to 30,
+const MEND_SOUND: u16 = 0x55;
+/// A glow's frames: the unit's colors change from 8 by 2 a frame to 30,
 /// then back to 0; the glow hides once both it and its animation are done,
-/// and its task reports a frame later (`0x0802CBBC`).
+/// and its task reports a frame later (`0x0802CBBC`). A repair's starts a
+/// frame later (`0x0802C588` writes no colors in its first frame).
 const GLOW_FIRST: u32 = 8;
 const GLOW_STEP: u32 = 2;
 const GLOW_RISE: u32 = 12;
 const GLOW_FALL_END: u32 = 27;
-const GLOW_DONE: u32 = 29;
 /// The glow display's frames once its glows are done (`0x0802CA54`,
 /// states 100 to `0x38E`).
 const GLOW_TAIL: u32 = 2;
@@ -127,6 +130,9 @@ const EXPIRED_PARTS: usize = 36;
 /// report (states `0x514` and `0x44C` or `0x2328`).
 const EXPIRY_GAP: u32 = 1;
 const TEXT_ROSE: u16 = 72;
+/// A repair's message (`0x0802C708`): ＨＰが, then 回復した.
+const TEXT_HIT_POINTS: u16 = 69;
+const TEXT_REPAIRED: u16 = 74;
 const TEXT_FELL: u16 = 73;
 /// What changed, by the first of the effect's bits the message finds:
 /// 攻撃力, 命中率, 総合防御, 物理防御, レーザー防御, スピード, 回避率.
@@ -147,10 +153,11 @@ const ROUND_RETREAT: u16 = 2;
 /// The action menu's lines.
 const ACTION_ATTACK: u16 = 0;
 const ACTION_DEFEND: u16 = 1;
+const ACTION_ITEM: u16 = 2;
 /// The unit is defending: it takes half the damage until its next action.
 const DEFENDING: u16 = 0x100;
 /// The unit is paralysed: it can't act.
-const PARALYSED: u16 = 0x4000;
+pub(super) const PARALYSED: u16 = 0x4000;
 /// How much the units that don't act are darkened.
 const DIM_OTHERS: u8 = 12;
 const DIM_PARALYSED: u8 = 24;
@@ -192,6 +199,10 @@ pub(super) enum Stage {
     StartScene,
     /// 0x10CC: the scene plays.
     Scene,
+    /// 0x157C and 0x15E0: an item (the task `0x08038FC4`); once used the
+    /// actor's turn ends, given up it acts again.
+    Item,
+    AwaitItem,
     /// 0x1130 and 0x113A: the aim was given up; the screen comes back and
     /// the actor chooses again.
     Rebuild,
@@ -229,6 +240,8 @@ impl Stage {
             Stage::AwaitAttackFade => 0x1004,
             Stage::StartScene => 0x1068,
             Stage::Scene => 0x10CC,
+            Stage::Item => 0x157C,
+            Stage::AwaitItem => 0x15E0,
             Stage::Rebuild => 0x1130,
             Stage::AwaitRebuild => 0x113A,
             Stage::Return => 0x1388,
@@ -256,6 +269,8 @@ pub(super) enum Task {
     Action(ActionStep),
     /// The return to the screen (`0x0802BCA4`).
     Return(u32),
+    /// The item task (`0x08038FC4`).
+    Item(super::items::ItemStep),
     /// A task's result, until the controller takes it.
     Reported,
 }
@@ -279,6 +294,10 @@ pub(super) enum Report {
     Target(usize),
     /// The message of a support part's target `n`.
     Support(usize),
+    /// The message of a repaired target `n`.
+    Repair(usize),
+    /// An item's message, waiting for its wait.
+    Item,
     Destroyed(usize),
     /// The frames after the last wait.
     Tail(u32),
@@ -296,14 +315,17 @@ pub(super) struct Display {
     tail: Option<u32>,
 }
 
-/// A hit unit's spark (`0x0802D9A4`), or a raised one's glow
-/// (`0x0802CBBC`).
+/// A hit unit's spark (`0x0802D9A4`), or a raised or repaired one's glow
+/// (`0x0802CBBC`, `0x0802C588`).
 #[derive(Clone)]
 pub(super) struct Spark {
     pub(super) side: usize,
     pub(super) slot: usize,
-    /// For a glow, the frames since its display started.
-    pub(super) glow: Option<u32>,
+    /// For a glow, its kind and the frames since its display started.
+    pub(super) glow: Option<(Glow, u32)>,
+    /// The frame a glow hid in, once both its colors and its animation
+    /// were done; its task reports the frame after.
+    hidden: Option<u32>,
     /// Frames until the display's task first runs it.
     delay: u32,
     frame: u32,
@@ -311,6 +333,25 @@ pub(super) struct Spark {
     ticks: u32,
     ended: bool,
     shown: bool,
+}
+
+/// What a glow shows (`0x08031E90`'s flags).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Glow {
+    /// A raised statistic: red raised then lowered (6, then 5).
+    Raise,
+    /// A repair: blue raised, red and green lowered (`0x12`, then `0xD`).
+    Mend,
+}
+
+impl Glow {
+    /// Frames its task takes before its first colors.
+    fn lead(self) -> u32 {
+        match self {
+            Glow::Raise => 0,
+            Glow::Mend => 1,
+        }
+    }
 }
 
 impl Spark {
@@ -340,12 +381,10 @@ impl Spark {
         }
     }
 
-    /// How much a glow takes the red of the unit's colors to its top and
-    /// back (`0x08031E90` with flags 6, then 5).
-    pub(super) fn tint(&self) -> u8 {
-        let Some(frame) = self.glow else {
-            return 0;
-        };
+    /// A glow's change of the unit's colors this frame (`0x08031E90`).
+    pub(super) fn tint(&self) -> Option<(Glow, u8)> {
+        let (glow, frame) = self.glow?;
+        let frame = frame.checked_sub(glow.lead())?;
         let amount = if frame < GLOW_RISE {
             GLOW_FIRST + GLOW_STEP * frame
         } else if frame <= GLOW_FALL_END {
@@ -353,19 +392,20 @@ impl Spark {
         } else {
             0
         };
-        u8::try_from(amount).unwrap_or(0)
+        Some((glow, u8::try_from(amount).unwrap_or(0)))
     }
 
     /// Whether its task has reported.
     fn done(&self) -> bool {
-        match self.glow {
-            Some(frame) => frame >= GLOW_DONE,
-            None => !self.shown && self.delay == 0,
+        match (self.glow, self.hidden) {
+            (Some((_, frame)), Some(hidden)) => frame > hidden,
+            (Some(_), None) => false,
+            (None, _) => !self.shown && self.delay == 0,
         }
     }
 
     fn advance(&mut self, sprite: &EffectSprite) {
-        if let Some(frame) = self.glow.as_mut() {
+        if let Some((_, frame)) = self.glow.as_mut() {
             *frame += 1;
         }
         if self.delay > 0 {
@@ -489,6 +529,7 @@ impl Combat {
                 let next = match self.fight.action {
                     Some(ACTION_DEFEND) => Stage::Defend,
                     Some(ACTION_ATTACK) => Stage::Attack,
+                    Some(ACTION_ITEM) => Stage::Item,
                     _ => Stage::Next,
                 };
                 self.take_task().then_some(next)
@@ -505,6 +546,7 @@ impl Combat {
                 Some(Stage::AwaitDefend)
             }
             Stage::AwaitCannotAct | Stage::AwaitDefend => self.wait_done().then_some(Stage::Next),
+            Stage::Item | Stage::AwaitItem => self.step_item_stage(stage),
             Stage::Attack
             | Stage::AwaitAttackFade
             | Stage::StartScene
@@ -1040,6 +1082,7 @@ impl Combat {
             }
             Task::Action(step) => self.step_action(step),
             Task::Return(frame) => self.step_return(frame),
+            Task::Item(step) => self.step_item(step),
             other => other,
         };
     }
@@ -1141,49 +1184,96 @@ impl Combat {
     /// The display and the first message the first blow's kind picks
     /// (`0x0802BCA4`, the table at `0x0802BEB0`): after damage the hit
     /// display (`0x0802D36C`, `0x0802C084`); after a raised or lowered
-    /// statistic the glows and their messages (`0x0802CA54`, `0x0802CE98`).
+    /// statistic the glows and their messages (`0x0802CA54`, `0x0802CE98`);
+    /// after a repair its glows and messages (`0x0802C420`, `0x0802C708`).
     fn start_report(&mut self) {
         match self.fight.blows.first().map(|blow| blow.kind) {
-            Some(attack::RAISED | attack::LOWERED) => self.start_support_report(),
+            Some(attack::RAISED) => {
+                self.start_glows(Glow::Raise);
+                self.report_support(0);
+            }
+            Some(attack::LOWERED) => self.report_support(0),
+            Some(attack::REPAIRED) => {
+                self.start_glows(Glow::Mend);
+                self.report_repair(0);
+            }
             Some(attack::DAMAGE) | None => self.start_hit_report(),
             Some(_) => self.fight.report = Some(Report::Tail(0)),
         }
     }
 
-    /// A raised unit's glow and sound (`0x0802CA54`); after a lowered one
-    /// the original's own display is not modeled.
-    fn start_support_report(&mut self) {
-        let raised = self.fight.blows.first().map(|blow| blow.kind) == Some(attack::RAISED);
+    /// The sprite a spark or a glow shows.
+    pub(super) fn spark_sprite(&self, spark: &Spark) -> Option<&EffectSprite> {
+        match spark.glow {
+            Some((Glow::Raise, _)) => self.glow.as_ref(),
+            Some((Glow::Mend, _)) => self.mend.as_ref(),
+            None => self.spark.as_ref(),
+        }
+    }
+
+    /// Each unit the blows landed on glows, with the display's sound
+    /// (`0x0802CA54`, `0x0802C420`).
+    pub(super) fn start_glows(&mut self, glow: Glow) {
+        let sprite = match glow {
+            Glow::Raise => self.glow.as_ref(),
+            Glow::Mend => self.mend.as_ref(),
+        };
+        let ticks = sprite
+            .and_then(|sprite| sprite.animation.first())
+            .map_or(1, |step| step.duration.max(1));
         let sparks: Vec<Spark> = self
             .fight
             .blows
             .iter()
-            .filter(|blow| raised && blow.landed())
+            .filter(|blow| blow.landed())
             .map(|blow| Spark {
                 side: blow.side,
                 slot: blow.slot,
-                glow: Some(0),
+                glow: Some((glow, 0)),
+                hidden: None,
                 delay: SPARK_DELAY,
                 frame: 0,
                 step: 0,
-                ticks: self
-                    .glow
-                    .as_ref()
-                    .and_then(|sprite| sprite.animation.first())
-                    .map_or(1, |step| step.duration.max(1)),
+                ticks,
                 ended: false,
                 shown: false,
             })
             .collect();
         if !sparks.is_empty() {
-            self.sounds.push(GLOW_SOUND);
+            self.sounds.push(match glow {
+                Glow::Raise => GLOW_SOUND,
+                Glow::Mend => MEND_SOUND,
+            });
             self.fight.display = Some(Display {
                 sparks,
                 frames: 0,
                 tail: None,
             });
         }
-        self.report_support(0);
+    }
+
+    /// The message of blow `index` of a repair, or of the next that landed
+    /// (`0x0802C708`): the unit, ＨＰが, the points given back, 回復した; a
+    /// party unit's panel follows.
+    pub(super) fn report_repair(&mut self, index: usize) {
+        let Some(offset) = self.fight.blows[index.min(self.fight.blows.len())..]
+            .iter()
+            .position(Blow::landed)
+        else {
+            self.fight.report = Some(Report::Tail(0));
+            return;
+        };
+        let index = index + offset;
+        let blow = self.fight.blows[index];
+        let mut calls = self.unit_name(Some((blow.side, blow.slot)));
+        calls.extend([Call::Text(TEXT_OF), Call::Text(TEXT_HIT_POINTS)]);
+        calls.extend(number(blow.damage));
+        calls.push(Call::Text(TEXT_REPAIRED));
+        self.message_then(
+            &calls,
+            (blow.side == PARTY).then_some(Act::Panel(blow.slot)),
+        );
+        self.fight.report = Some(Report::Repair(index));
     }
 
     /// The message of blow `index` of a support part, or of the next that
@@ -1225,6 +1315,7 @@ impl Combat {
                 side: blow.side,
                 slot: blow.slot,
                 glow: None,
+                hidden: None,
                 delay: SPARK_DELAY,
                 frame: 0,
                 step: 0,
@@ -1278,14 +1369,20 @@ impl Combat {
         self.fight.report = Some(Report::Target(index));
     }
 
-    fn step_report(&mut self) {
+    pub(super) fn step_report(&mut self) {
         self.step_display();
         let busy = self.running.is_some() || !self.acts.is_empty();
         let report = self.fight.report;
         let waited = !busy
             && matches!(
                 report,
-                Some(Report::Target(_) | Report::Destroyed(_) | Report::Support(_))
+                Some(
+                    Report::Target(_)
+                        | Report::Destroyed(_)
+                        | Report::Support(_)
+                        | Report::Repair(_)
+                        | Report::Item
+                )
             )
             && self.wait_done();
         match report {
@@ -1304,6 +1401,8 @@ impl Combat {
                 }
             }
             Some(Report::Support(index)) if waited => self.report_support(index + 1),
+            Some(Report::Repair(index)) if waited => self.report_repair(index + 1),
+            Some(Report::Item) if waited => self.fight.report = Some(Report::Tail(0)),
             Some(Report::Destroyed(index)) if waited => {
                 if index + 1 < self.fight.blows.len() {
                     self.report_target(index + 1);
@@ -1340,6 +1439,23 @@ impl Combat {
                 };
             }
         }
+    }
+
+    /// The item's stages (`0x157C`, `0x15E0`): its task, then the next
+    /// actor once an item was used, or the actions again.
+    fn step_item_stage(&mut self, stage: Stage) -> Option<Stage> {
+        if stage == Stage::Item {
+            self.task = Task::Item(super::items::ItemStep::Open);
+            return Some(Stage::AwaitItem);
+        }
+        self.take_task().then(|| {
+            if self.item_used.take() == Some(true) {
+                self.restore_units();
+                Stage::Next
+            } else {
+                Stage::Act
+            }
+        })
     }
 
     /// The units' own colors again, the paralysed ones darkened
@@ -1389,20 +1505,22 @@ impl Combat {
         };
         display.frames += 1;
         for spark in &mut display.sparks {
-            let sprite = if spark.glow.is_some() {
-                self.glow.as_ref()
-            } else {
-                self.spark.as_ref()
-            };
-            if let Some(sprite) = sprite {
+            if let Some(sprite) = self.spark_sprite(spark) {
                 spark.advance(sprite);
             }
+
             let over = match spark.glow {
-                Some(frame) => frame > GLOW_FALL_END,
+                Some((glow, frame)) => frame > GLOW_FALL_END + glow.lead(),
                 None => spark.frame >= SHAKES * 4,
             };
-            if spark.ended && over {
+            if spark.ended && over && spark.shown {
                 spark.shown = false;
+                spark.hidden = spark.glow.map(|(_, frame)| frame);
+                // A glow writes the Zoid's own colors, so the unit stays
+                // undarkened once it is over (`0x0802CBBC`, `0x0802C588`).
+                if spark.glow.is_some() {
+                    self.dims[spark.side][spark.slot] = 0;
+                }
             }
         }
         if display.tail.is_none() && display.sparks.iter().all(Spark::done) {

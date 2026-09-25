@@ -45,6 +45,7 @@ The fields this port reads and writes; everything else is kept as the save had i
 
 | Offset | Size | Field |
 |---|---|---|
+| `+0x00` | 2 | Options: bit `0x1000` shows the party's hit points and energy over its units in battle (L toggles it) |
 | `+0x02` | 1 | Area: low byte of the current map record's id, written on entering a map |
 | `+0x04` | 2 | Map record |
 | `+0x06` | 2 | Metatile column of the player |
@@ -62,6 +63,7 @@ The fields this port reads and writes; everything else is kept as the save had i
 | `+0x334C` | 150 | Parts in stock, one count per part id (at most 9); the equipment screen moves parts between the stock and the units |
 | `+0x33E2` | 1 each | Zoids seen, by picture id: the Zoid guide shows an entry whose byte is not zero |
 | `+0x347B` | 1 each | Deck commands learned, by command number |
+| `+0x349C` | 6 | The deck of deck commands, a command number a slot, `0xFF` when empty; the battle menu's コマンド作成 writes it (`0x0803B7B8`) |
 | `+0x34A4` | 87 × 4 | Character table: a flag half-word (bit `0x01`: set whenever the game adds the character, `0x02`: a party member the status screens list, `0x08`: the equipment screen refuses to change the character's parts, `0x10`: in the formation, `0x20`: in the character guide), then the character's unit, `0xFF` when none |
 | `+0x3600` | 6 × 4 | Formation slots: the unit, then its character, `0xFF` when empty |
 | `+0x3618` | 1 | Battle message speed − 1 |

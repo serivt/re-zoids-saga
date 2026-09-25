@@ -387,7 +387,8 @@ The game keeps a fade level (IWRAM `0x03002356`), 0 to 31, that the screen shows
 ## Formation screen
 
 部隊編成 hands over to a task of its own (`0x08037B84`); the menu's code waits for it
-(`0x0805203C`). Its windows and texts are scripts of the `battle-menu` and
+(`0x0805203C`). The battle's menu opens the same task, and its ステータス the character
+screen; their frames there are in [combat.md](combat.md#the-menus-other-screens). Its windows and texts are scripts of the `battle-menu` and
 `battle-text` tables (see [formats/script-text.md](formats/script-text.md)):
 
 | Script | Content |

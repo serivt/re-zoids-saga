@@ -203,6 +203,68 @@ pub fn zoid_icon(rom: &[u8], zoid: u16) -> Option<EffectSprite> {
     sprite_record(rom, at, Packing::Plain(ZOID_ICON_TILE_BYTES))
 }
 
+/// The slots to go to from each slot, up, down, left and right, the first
+/// with a unit taken (ROM `0x66BA90`, `0x08032390`: for each slot four
+/// pointers to lists ended by `0xFF`).
+const NEIGHBOURS: usize = 0x0066_BA90;
+const NEIGHBOUR_WAYS: usize = 4;
+const SIDE_SLOTS: usize = 6;
+const LIST_END: u8 = 0xFF;
+
+/// The slots the item's marker tries from each slot, by way.
+#[must_use]
+pub fn neighbours(rom: &[u8]) -> Vec<Vec<Vec<u8>>> {
+    (0..SIDE_SLOTS)
+        .map(|slot| {
+            (0..NEIGHBOUR_WAYS)
+                .map(|way| {
+                    let at = NEIGHBOURS + (slot * NEIGHBOUR_WAYS + way) * 4;
+                    rom.get(at..at + 4)
+                        .and_then(rom_offset)
+                        .and_then(|start| rom.get(start..))
+                        .map(|bytes| {
+                            bytes
+                                .iter()
+                                .take_while(|&&slot| slot != LIST_END)
+                                .take(SIDE_SLOTS)
+                                .copied()
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// The figures the battle screen shows over the party's units with L
+/// (`0x08031FB4`): 21 plain 4bpp tiles at ROM `0x3664EC`, the hit points'
+/// digits 0–9, the energy's 10–19 and a slash, with the palette at ROM
+/// `0x366238`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnitLabels {
+    /// The tiles.
+    pub tiles: Tileset,
+    /// The 16-color BGR555 palette.
+    pub palette: [u16; 16],
+}
+
+const LABEL_TILES: usize = 0x0036_64EC;
+const LABEL_TILE_COUNT: usize = 21;
+const LABEL_PALETTE: usize = 0x0036_6238;
+const TILE_BYTES: usize = 32;
+
+/// The figures' tiles and palette.
+#[must_use]
+pub fn unit_labels(rom: &[u8]) -> Option<UnitLabels> {
+    let tiles = rom.get(LABEL_TILES..LABEL_TILES + LABEL_TILE_COUNT * TILE_BYTES)?;
+    let palette = parse_palette(rom.get(LABEL_PALETTE..LABEL_PALETTE + TILE_BYTES)?)?;
+    Some(UnitLabels {
+        tiles: Tileset::from_4bpp(tiles),
+        palette,
+    })
+}
+
 /// The battle screen's effects (ROM `0x66B99C`, 7 records like the
 /// shots' but with a plain palette): the spark a hit unit shows is 6.
 const SCREEN_EFFECTS: usize = 0x0066_B99C;
@@ -245,7 +307,41 @@ fn sprite_record(rom: &[u8], at: usize, packing: Packing) -> Option<EffectSprite
     } else {
         parse_palette(rom.get(pointer(4)?..pointer(4)? + 32)?)?
     };
-    let table = pointer(8)?;
+    sprite_parts(rom, &tile_bytes, palette, pointer(8)?, pointer(12)?)
+}
+
+/// The battle screen's own sprites (0x2C-byte records at ROM `0x66B5F8`,
+/// `0x08031B70`): record 0 the item's target marker, 1–6 the party slots'
+/// figures. A record gives the palette and its size, the plain tiles and
+/// their size, and the animation and frame tables.
+const SCREEN_SPRITES: usize = 0x0066_B5F8;
+const SCREEN_SPRITE_LEN: usize = 0x2C;
+const SCREEN_SPRITE_COUNT: usize = 7;
+
+/// Record `id` of the battle screen's own sprites.
+#[must_use]
+pub fn screen_sprite(rom: &[u8], id: usize) -> Option<EffectSprite> {
+    if id >= SCREEN_SPRITE_COUNT {
+        return None;
+    }
+    let at = SCREEN_SPRITES + id * SCREEN_SPRITE_LEN;
+    let record = rom.get(at..at + SCREEN_SPRITE_LEN)?;
+    let pointer = |at: usize| rom_offset(&record[at..at + 4]);
+    let size =
+        |at: usize| usize::try_from(u32::from_le_bytes(record[at..at + 4].try_into().ok()?)).ok();
+    let palette = parse_palette(rom.get(pointer(0)?..pointer(0)? + 32)?)?;
+    let tiles = rom.get(pointer(0xC)?..pointer(0xC)? + size(0x14)?)?;
+    sprite_parts(rom, tiles, palette, pointer(0x18)?, pointer(0x1C)?)
+}
+
+/// A sprite from its tiles, palette, and animation and frame tables.
+fn sprite_parts(
+    rom: &[u8],
+    tile_bytes: &[u8],
+    palette: [u16; 16],
+    table: usize,
+    frame_table: usize,
+) -> Option<EffectSprite> {
     let first_animation = rom_offset(rom.get(table..table + 4)?)?;
     let animation = read_steps(rom, first_animation)?;
     let mut animations = vec![animation.clone()];
@@ -261,7 +357,6 @@ fn sprite_record(rom: &[u8], at: usize, packing: Packing) -> Option<EffectSprite
         };
         animations.push(steps);
     }
-    let frame_table = pointer(12)?;
     let frame_count = animation
         .iter()
         .map(|step| step.frame + 1)
@@ -289,7 +384,7 @@ fn sprite_record(rom: &[u8], at: usize, packing: Packing) -> Option<EffectSprite
         frames.push(pieces);
     }
     Some(EffectSprite {
-        tiles: Tileset::from_4bpp(&tile_bytes),
+        tiles: Tileset::from_4bpp(tile_bytes),
         palette,
         frames,
         animation,

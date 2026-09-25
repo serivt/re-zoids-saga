@@ -20,6 +20,8 @@ pub const NAME_PADDING: u16 = 0x8140;
 /// The full-width question mark written for a character Shift-JIS lacks.
 pub const NAME_UNKNOWN: u16 = 0x8148;
 
+const OPTIONS: usize = 0x00;
+const BATTLE_LABELS: u16 = 0x1000;
 const AREA: usize = 0x02;
 const MAP: usize = 0x04;
 const COLUMN: usize = 0x06;
@@ -315,6 +317,29 @@ pub fn remove_object(state: &mut [u8], index: usize) {
     }
 }
 
+/// Whether the battle screen shows the party's hit points and energy over
+/// its units (bit `0x1000` of the half-word at `+0`, which L toggles,
+/// `0x0802F8F8`).
+#[must_use]
+pub fn battle_labels(state: &[u8]) -> bool {
+    state
+        .get(OPTIONS..OPTIONS + 2)
+        .is_some_and(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]) & BATTLE_LABELS != 0)
+}
+
+/// Sets or clears [`battle_labels`].
+pub fn set_battle_labels(state: &mut [u8], on: bool) {
+    if let Some(bytes) = state.get_mut(OPTIONS..OPTIONS + 2) {
+        let word = u16::from_le_bytes([bytes[0], bytes[1]]);
+        let word = if on {
+            word | BATTLE_LABELS
+        } else {
+            word & !BATTLE_LABELS
+        };
+        bytes.copy_from_slice(&word.to_le_bytes());
+    }
+}
+
 /// Counts a battle won against a roaming enemy: the half-word at `+0x0A`
 /// (`0x0800B9CC`).
 pub fn count_battle(state: &mut [u8]) {
@@ -396,6 +421,18 @@ mod tests {
         state[0x3F0E] = 7;
         state[0x100] = 0xAB;
         state
+    }
+
+    #[test]
+    fn the_battle_labels_bit_keeps_the_rest_of_its_word() {
+        let mut state = vec![0; STATE_LEN];
+        state[0] = 0x05;
+        assert!(!battle_labels(&state));
+        set_battle_labels(&mut state, true);
+        assert!(battle_labels(&state));
+        assert_eq!(&state[..2], &[0x05, 0x10]);
+        set_battle_labels(&mut state, false);
+        assert_eq!(&state[..2], &[0x05, 0x00]);
     }
 
     #[test]

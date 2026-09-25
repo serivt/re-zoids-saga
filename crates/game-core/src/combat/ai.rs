@@ -3,10 +3,13 @@
 //! Source of knowledge: own reading of Zoids Saga (Japan, Rev 1): the turn
 //! order (`0x08032410` with the sorts at `0x08032564`, `0x080325C8` and
 //! `0x0803262C`), the table of what each weapon can reach (`0x08038B00`),
-//! the enemies' first way of choosing (`0x0805959C`, with `0x08059528`,
-//! `0x08059A98`, `0x08059C80`, `0x08059D10`, `0x08059D60` and the support
-//! filters `0x0805AA3C`, `0x0805AC1C`, `0x0805AE2C`); checked against the
-//! order and the choices of a battle on the world map.
+//! the enemies' seventeen ways of choosing (the table at `0x0875C048`,
+//! `0x0805959C` to `0x080599FC`, with `0x08059528`, `0x08059A98`,
+//! `0x08059C80`, `0x08059D10`, `0x08059D60`, the filters `0x08059DB0`,
+//! `0x08059E78`, `0x0805A284`, `0x0805AF68`, `0x0805B068`, `0x0805B0BC` and
+//! the support filters `0x0805AA3C`, `0x0805AC1C`, `0x0805AE2C`); the first
+//! way checked against the order and the choices of a battle on the world
+//! map.
 
 use extraction::saga_combat::SLOTS;
 
@@ -194,11 +197,12 @@ fn reach(
     })
 }
 
-/// The enemies' first way of choosing (`0x0805959C`): one time in two it
-/// looks for a support part worth using on its own side; otherwise it
-/// picks one of its weapons that reach the party at random, and one of the
-/// weapon's groups at random. With nothing to use it takes a support part
-/// after all, or defends.
+/// How an enemy chooses its action (`0x0875C048[U+0xCD]`, 17 ways, each a
+/// chain of filters on the list of what its weapons can do): the list is
+/// narrowed step by step, the next step taken only when a step leaves
+/// nothing, and the last list picks the weapon and the group at random
+/// (`0x08059C80`). A way that tries support first (`0x08059528`) does so one
+/// time in two.
 pub fn choose(
     sides: &Sides,
     side: usize,
@@ -208,36 +212,199 @@ pub fn choose(
     frame: u16,
 ) -> Choice {
     let all = candidates(sides, side, slot, terrain);
-    let own: Vec<Candidate> = all.iter().filter(|c| c.side == side).cloned().collect();
-    let other: Vec<Candidate> = all.iter().filter(|c| c.side != side).cloned().collect();
-    if rng.next(frame) & 1 == 0 {
-        let support = worth_supporting(sides, side, slot, &own);
-        if !support.is_empty() {
-            return pick(&support, rng, frame);
+    let Some(unit) = sides[side][slot].as_ref() else {
+        return Choice::Defend;
+    };
+    let ways = Ways {
+        sides,
+        side,
+        unit,
+        all: &all,
+    };
+    let list = match unit.ai {
+        1 => ways.support(rng, frame).unwrap_or_else(|| {
+            let lethal = lethal(ways.offensive());
+            if lethal.is_empty() {
+                most_targets(ways.offensive())
+            } else {
+                or_else(flagged(lethal, unit, SKIMMING), || {
+                    most_targets(ways.offensive())
+                })
+            }
+        }),
+        2 => or_else(ways.repair(ways.own()), || {
+            or_else(ways.buff(ways.own()), || ways.offensive())
+        }),
+        3 => or_else(ways.buff(ways.own()), || {
+            or_else(flagged(ways.offensive(), unit, SURE), || ways.offensive())
+        }),
+        5 | 10 | 13 => ways.support(rng, frame).unwrap_or_else(|| {
+            or_else(lethal(ways.offensive()), || most_targets(ways.offensive()))
+        }),
+        6 | 7 | 11 => {
+            let character = match unit.ai {
+                6 => 0x13,
+                7 => 0x12,
+                _ => 0x1C,
+            };
+            if ways.own().is_empty() {
+                ways.offensive()
+            } else {
+                or_else(ways.repair(ways.piloted(ways.own(), character)), || {
+                    or_else(ways.buff(ways.piloted(ways.own(), character)), || {
+                        ways.offensive()
+                    })
+                })
+            }
         }
+        8 => ways.support(rng, frame).unwrap_or_else(|| {
+            or_else(carrying(ways.offensive(), unit, MISSILE_POD), || {
+                strongest(ways.offensive())
+            })
+        }),
+        9 => or_else(ways.buff(ways.own()), || {
+            or_else(lethal(ways.offensive()), || ways.offensive())
+        }),
+        12 => ways
+            .support(rng, frame)
+            .unwrap_or_else(|| most_targets(ways.offensive())),
+        14 => ways.support(rng, frame).unwrap_or_else(|| {
+            or_else(flagged(ways.offensive(), unit, PIERCING), || {
+                ways.offensive()
+            })
+        }),
+        _ => ways.support(rng, frame).unwrap_or_else(|| ways.offensive()),
+    };
+    if !list.is_empty() {
+        return pick(&list, rng, frame);
     }
-    if !other.is_empty() {
-        return pick(&other, rng, frame);
+    let own = ways.own();
+    if own.is_empty() {
+        Choice::Defend
+    } else {
+        pick(&own, rng, frame)
     }
-    if !own.is_empty() {
-        return pick(&own, rng, frame);
-    }
-    Choice::Defend
 }
 
-/// The support parts worth using, in order of preference, each filter on
-/// its own: restoring (`0x0805AC1C`) an ally that lacks four fifths of both
-/// its hit points and its energy, repairing (`0x0805AA3C`) one that lacks
-/// two thirds of its hit points, each on the one that lacks the most; then
-/// other support (`0x0805AE2C`) on allies not all under that part's effect.
-fn worth_supporting(sides: &Sides, side: usize, slot: usize, own: &[Candidate]) -> Vec<Candidate> {
-    let Some(unit) = sides[side][slot].as_ref() else {
-        return Vec::new();
-    };
-    let flags =
-        |candidate: &Candidate| unit.weapons[candidate.weapon].map_or(0, |weapon| weapon.flags);
-    let lacking = |target: &Target| {
-        sides[side][target.slot]
+/// Weapon flags some ways look for: `0x100`, a weapon that always lands
+/// (`0x800`), a piercing one (`0x400`).
+const SKIMMING: u32 = 0x100;
+const SURE: u32 = 0x800;
+const PIERCING: u32 = 0x400;
+/// The part way 8 looks for first (`0x0805B0BC` with `0x224`).
+const MISSILE_POD: u16 = 0x224;
+/// Parts that restore or repair, which the other support filter leaves out
+/// (`0x0805AE2C`).
+const HEALS: u32 = RESTORES | REPAIRS;
+
+/// `list`, or what `next` gives when it is empty.
+fn or_else(list: Vec<Candidate>, next: impl FnOnce() -> Vec<Candidate>) -> Vec<Candidate> {
+    if list.is_empty() { next() } else { list }
+}
+
+/// Keeps the groups that `keep` accepts, and the candidates left with any
+/// (`0x08059BA0` removes the rest).
+fn keep_groups(
+    list: Vec<Candidate>,
+    keep: impl Fn(&Candidate, &[Target]) -> bool,
+) -> Vec<Candidate> {
+    list.into_iter()
+        .filter_map(|candidate| {
+            let groups: Vec<Vec<Target>> = candidate
+                .groups
+                .iter()
+                .filter(|group| keep(&candidate, group))
+                .cloned()
+                .collect();
+            (!groups.is_empty()).then_some(Candidate {
+                groups,
+                ..candidate
+            })
+        })
+        .collect()
+}
+
+/// The groups with a target the weapon would beat (`0x08059DB0`).
+fn lethal(list: Vec<Candidate>) -> Vec<Candidate> {
+    keep_groups(list, |_, group| group.iter().any(|target| target.lethal))
+}
+
+/// The groups with a target taking the most damage any takes
+/// (`0x08059E78`).
+fn strongest(list: Vec<Candidate>) -> Vec<Candidate> {
+    let most = list
+        .iter()
+        .flat_map(|candidate| candidate.groups.iter().flatten())
+        .map(|target| target.damage)
+        .fold(0, i32::max);
+    keep_groups(list, |_, group| {
+        group.iter().any(|target| target.damage == most)
+    })
+}
+
+/// The groups with as many targets as any (`0x0805A284`).
+fn most_targets(list: Vec<Candidate>) -> Vec<Candidate> {
+    let most = list
+        .iter()
+        .flat_map(|candidate| candidate.groups.iter())
+        .map(Vec::len)
+        .max()
+        .unwrap_or(0);
+    keep_groups(list, |_, group| group.len() == most)
+}
+
+/// The weapons with all the flags of `mask` (`0x0805B068`).
+fn flagged(list: Vec<Candidate>, unit: &BattleUnit, mask: u32) -> Vec<Candidate> {
+    list.into_iter()
+        .filter(|candidate| {
+            unit.weapons[candidate.weapon].is_some_and(|weapon| weapon.flags & mask == mask)
+        })
+        .collect()
+}
+
+/// The weapons of part `part` (`0x0805B0BC`).
+fn carrying(list: Vec<Candidate>, unit: &BattleUnit, part: u16) -> Vec<Candidate> {
+    list.into_iter()
+        .filter(|candidate| unit.parts.get(candidate.weapon) == Some(&part))
+        .collect()
+}
+
+/// What the ways of choosing work on: the sides, the chooser and the list
+/// of what its weapons can do.
+struct Ways<'a> {
+    sides: &'a Sides,
+    side: usize,
+    unit: &'a BattleUnit,
+    all: &'a [Candidate],
+}
+
+impl Ways<'_> {
+    /// The weapons aimed at the other side (`0x08059A98`, `0x08059D10`).
+    fn offensive(&self) -> Vec<Candidate> {
+        self.all
+            .iter()
+            .filter(|candidate| candidate.side != self.side)
+            .cloned()
+            .collect()
+    }
+
+    /// The weapons for its own side (`0x08059A98`, `0x08059D60`).
+    fn own(&self) -> Vec<Candidate> {
+        self.all
+            .iter()
+            .filter(|candidate| candidate.side == self.side)
+            .cloned()
+            .collect()
+    }
+
+    fn flags(&self, candidate: &Candidate) -> u32 {
+        self.unit.weapons[candidate.weapon].map_or(0, |weapon| weapon.flags)
+    }
+
+    /// What a target on the own side lacks: hit points, energy, and their
+    /// full amounts.
+    fn lacking(&self, target: &Target) -> (i32, i32, i32, i32) {
+        self.sides[self.side][target.slot]
             .as_ref()
             .map_or((0, 0, 0, 0), |ally| {
                 (
@@ -247,81 +414,98 @@ fn worth_supporting(sides: &Sides, side: usize, slot: usize, own: &[Candidate]) 
                     ally.max_ep,
                 )
             })
-    };
-    let keep = |candidates: Vec<Candidate>, wanted: &dyn Fn(&Candidate, &[Target]) -> bool| {
-        candidates
-            .into_iter()
-            .filter_map(|candidate| {
-                let groups: Vec<Vec<Target>> = candidate
-                    .groups
-                    .iter()
-                    .filter(|group| wanted(&candidate, group))
-                    .cloned()
-                    .collect();
-                (!groups.is_empty()).then_some(Candidate {
-                    groups,
-                    ..candidate
+    }
+
+    /// Support first (`0x08059528`), one time in two: a restoring part for
+    /// an ally badly hurt, else a repair, else other support.
+    fn support(&self, rng: &mut Rng, frame: u16) -> Option<Vec<Candidate>> {
+        if rng.next(frame) & 1 != 0 {
+            return None;
+        }
+        let found = or_else(self.restore(self.own()), || {
+            or_else(self.repair(self.own()), || self.buff(self.own()))
+        });
+        (!found.is_empty()).then_some(found)
+    }
+
+    /// Restoring (`0x0805AC1C`): the restoring parts' groups with the ally
+    /// that lacks the most, of those that lack four fifths of both their
+    /// hit points and their energy.
+    fn restore(&self, list: Vec<Candidate>) -> Vec<Candidate> {
+        let mut best = (0, 0);
+        for candidate in list.iter().filter(|c| self.flags(c) & RESTORES != 0) {
+            for target in candidate.groups.iter().flatten() {
+                let (hp, energy, full_hp, full_energy) = self.lacking(target);
+                if full_hp * 4 / 5 <= hp
+                    && full_energy * 4 / 5 <= energy
+                    && best.0 < hp
+                    && best.1 < energy
+                {
+                    best = (hp, energy);
+                }
+            }
+        }
+        keep_groups(list, |candidate, group| {
+            self.flags(candidate) & RESTORES != 0
+                && best != (0, 0)
+                && group.iter().any(|target| {
+                    let (hp, energy, ..) = self.lacking(target);
+                    (hp, energy) == best
                 })
-            })
-            .collect::<Vec<_>>()
-    };
-    let restoring: Vec<Candidate> = own
-        .iter()
-        .filter(|c| flags(c) & RESTORES != 0)
-        .cloned()
-        .collect();
-    let mut best = (0, 0);
-    for target in restoring.iter().flat_map(|c| c.groups.iter().flatten()) {
-        let (hp, energy, full_hp, full_energy) = lacking(target);
-        if full_hp * 4 / 5 <= hp && full_energy * 4 / 5 <= energy && best.0 < hp && best.1 < energy
-        {
-            best = (hp, energy);
+        })
+    }
+
+    /// Repairing (`0x0805AA3C`): the repairing parts' groups with the ally
+    /// that lacks the most hit points, of those that lack two thirds.
+    fn repair(&self, list: Vec<Candidate>) -> Vec<Candidate> {
+        let mut best = 0;
+        for candidate in list.iter().filter(|c| self.flags(c) & REPAIRS != 0) {
+            for target in candidate.groups.iter().flatten() {
+                let (hp, _, full_hp, _) = self.lacking(target);
+                if full_hp * 2 / 3 <= hp && best < hp {
+                    best = hp;
+                }
+            }
         }
+        keep_groups(list, |candidate, group| {
+            self.flags(candidate) & REPAIRS != 0
+                && best != 0
+                && group.iter().any(|target| self.lacking(target).0 == best)
+        })
     }
-    let found = keep(restoring, &|_, group| {
-        best != (0, 0)
-            && group.iter().any(|target| {
-                let (hp, ep, ..) = lacking(target);
-                (hp, ep) == best
-            })
-    });
-    if !found.is_empty() {
-        return found;
-    }
-    let repairing: Vec<Candidate> = own
-        .iter()
-        .filter(|c| flags(c) & REPAIRS != 0)
-        .cloned()
-        .collect();
-    let mut best = 0;
-    for target in repairing.iter().flat_map(|c| c.groups.iter().flatten()) {
-        let (hp, _, max_hp, _) = lacking(target);
-        if max_hp * 2 / 3 <= hp && best < hp {
-            best = hp;
-        }
-    }
-    let found = keep(repairing, &|_, group| {
-        best != 0 && group.iter().any(|target| lacking(target).0 == best)
-    });
-    if !found.is_empty() {
-        return found;
-    }
-    let other: Vec<Candidate> = own
-        .iter()
-        .filter(|c| flags(c) & (RESTORES | REPAIRS) == 0)
-        .cloned()
-        .collect();
-    keep(other, &|candidate, group| {
-        let part = unit.weapons[candidate.weapon].map_or(0, |weapon| weapon.part);
-        group.iter().any(|target| {
-            sides[side][target.slot].as_ref().is_some_and(|ally| {
-                !ally
-                    .effects
-                    .iter()
-                    .any(|effect| effect.turns > 0 && effect.part == part)
+
+    /// Other support (`0x0805AE2C`): the parts that neither restore nor
+    /// repair, on groups with an ally not under that part's effect.
+    fn buff(&self, list: Vec<Candidate>) -> Vec<Candidate> {
+        let list: Vec<Candidate> = list
+            .into_iter()
+            .filter(|candidate| self.flags(candidate) & HEALS == 0)
+            .collect();
+        keep_groups(list, |candidate, group| {
+            let part = self.unit.weapons[candidate.weapon].map_or(0, |weapon| weapon.part);
+            group.iter().any(|target| {
+                self.sides[self.side][target.slot]
+                    .as_ref()
+                    .is_some_and(|ally| {
+                        !ally
+                            .effects
+                            .iter()
+                            .any(|effect| effect.turns > 0 && effect.part == part)
+                    })
             })
         })
-    })
+    }
+
+    /// The groups with a unit that `character` pilots (`0x0805AF68`).
+    fn piloted(&self, list: Vec<Candidate>, character: u8) -> Vec<Candidate> {
+        keep_groups(list, |candidate, group| {
+            group.iter().any(|target| {
+                self.sides[candidate.side][target.slot]
+                    .as_ref()
+                    .is_some_and(|unit| unit.character == character)
+            })
+        })
+    }
 }
 
 /// Picks one of `candidates` and one of its groups, each a draw scaled to
@@ -369,6 +553,7 @@ mod tests {
             parts: [0xFFFF; 6],
             size: 0,
             face: 0,
+            character: 0,
         }
     }
 
@@ -421,6 +606,66 @@ mod tests {
         assert!(matches!(
             choose(&sides, ENEMY, 1, 0, &mut Rng::default(), 0),
             Choice::Weapon { targets, .. } if targets == vec![0]
+        ));
+    }
+
+    /// Two party units in the front row, the first nearly beaten; the
+    /// enemy in front of them has a gun for one and a spread for two.
+    fn standoff(ai: u8) -> Sides {
+        let mut sides: Sides = Default::default();
+        let mut weak = unit(100, None);
+        weak.hp = 5;
+        sides[PARTY][0] = Some(weak);
+        sides[PARTY][1] = Some(unit(100, None));
+        let spread = Weapon {
+            part: 2,
+            spread: 2,
+            ..short_gun()
+        };
+        let mut enemy = unit(100, Some(short_gun()));
+        enemy.weapons[1] = Some(spread);
+        enemy.ai = ai;
+        sides[ENEMY][1] = Some(enemy);
+        sides
+    }
+
+    fn chosen(sides: &Sides) -> Choice {
+        choose(sides, ENEMY, 1, 0, &mut Rng::default(), 0)
+    }
+
+    #[test]
+    fn the_twelfth_way_takes_the_most_targets() {
+        assert!(matches!(
+            chosen(&standoff(12)),
+            Choice::Weapon { weapon: 1, targets, .. } if targets == vec![0, 1]
+        ));
+    }
+
+    #[test]
+    fn the_fifth_way_goes_for_a_unit_it_can_beat() {
+        let choice = chosen(&standoff(5));
+        assert!(matches!(choice, Choice::Weapon { targets, .. } if targets.contains(&0)));
+    }
+
+    #[test]
+    fn the_seventh_way_first_repairs_its_pilot_when_badly_hurt() {
+        let mut sides = standoff(7);
+        let repair = Weapon {
+            part: 3,
+            flags: 0x8_0002,
+            power: 30,
+            ..short_gun()
+        };
+        let mut friend = unit(100, None);
+        friend.hp = 5;
+        friend.character = 0x12;
+        sides[ENEMY][0] = Some(friend);
+        if let Some(enemy) = sides[ENEMY][1].as_mut() {
+            enemy.weapons[2] = Some(repair);
+        }
+        assert!(matches!(
+            chosen(&sides),
+            Choice::Weapon { weapon: 2, side: ENEMY, targets } if targets == vec![0]
         ));
     }
 }

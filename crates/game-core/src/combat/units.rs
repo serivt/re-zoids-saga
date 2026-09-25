@@ -278,6 +278,9 @@ pub struct BattleUnit {
     /// Its pilot to the attack scenes: the portrait and the lines
     /// ([`saga_party::pilot_face`]).
     pub face: u8,
+    /// Its pilot (`U+0x42`, the pilot record's `+2`), which some of the
+    /// enemies' ways of choosing aim at first.
+    pub character: u8,
 }
 
 /// A part slot without a part.
@@ -342,6 +345,7 @@ impl BattleUnit {
             parts,
             size: record[UNIT_SIZE],
             face: saga_party::pilot_face(rom, state, character).unwrap_or(character),
+            character,
         };
         unit.fit(rom, parts);
         Some(unit)
@@ -413,6 +417,7 @@ impl BattleUnit {
             parts,
             size: zoid_record.size,
             face: saga_party::pilot_face(rom, state, character).unwrap_or(character),
+            character,
         };
         unit.fit(rom, parts);
         Some(unit)
@@ -747,6 +752,7 @@ mod tests {
             parts: [0xFFFF; 6],
             size: 0,
             face: 0,
+            character: 0,
         }
     }
 

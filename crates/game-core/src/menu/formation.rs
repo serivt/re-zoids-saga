@@ -81,18 +81,53 @@ const FIRST_PLACE: usize = 1;
 /// How far the cursor's anchor lies from a slot's (`0x08038510`).
 const CURSOR_OFFSET: (i32, i32) = (8, -16);
 const FADE_TOP: u32 = 31;
-/// Frames after the choice before the menu starts darkening.
-const DARKEN_DELAY: u32 = 4;
-/// Frames after the choice at which the screen is built, in the dark.
-const BUILD_AT: u32 = 36;
-/// Frames after the choice at which the screen starts brightening.
-const BRIGHTEN_AT: u32 = 60;
-/// Frames after the choice at which the help line is printed.
-const HELP_AT: u32 = 95;
-/// Frames after B or START before the screen starts darkening.
-const LEAVE_DELAY: u32 = 4;
-/// Frames after B or START at which the pause menu is rebuilt.
-const LEAVE_FRAMES: u32 = 44;
+
+/// The screen's frames, which depend on what opened it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Timing {
+    /// Frames after the choice before the screen behind starts darkening.
+    darken_delay: u32,
+    /// Frames after the choice at which the screen is built, in the dark.
+    build_at: u32,
+    /// Frames after the choice at which the screen starts brightening.
+    brighten_at: u32,
+    /// Frames after the choice at which the help line is printed.
+    help_at: u32,
+    /// Frames after B or START before the screen starts darkening.
+    leave_delay: u32,
+    /// Frames after B or START at which the screen hands back.
+    leave_frames: u32,
+    /// Whether the text system is reset as it hands back.
+    reset_on_leave: bool,
+    /// Whether the help's frames are already counted in `help_at`, so the
+    /// list's menu runs in the next frame.
+    help_spent: bool,
+}
+
+/// From the pause menu.
+const PAUSE_MENU: Timing = Timing {
+    darken_delay: 4,
+    build_at: 36,
+    brighten_at: 60,
+    help_at: 95,
+    leave_delay: 4,
+    leave_frames: 44,
+    reset_on_leave: true,
+    help_spent: false,
+};
+
+/// From the battle's menu (`0x0802E9CC`, states `0xBB8` and `0xC1C`),
+/// counted from the frame its menu returns.
+pub(crate) const BATTLE: Timing = Timing {
+    darken_delay: 4,
+    build_at: 36,
+    brighten_at: 61,
+    help_at: 96,
+    leave_delay: 3,
+    leave_frames: 37,
+    reset_on_leave: false,
+    help_spent: true,
+};
 
 /// What the screen is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,7 +154,8 @@ enum Aim {
 }
 
 /// The formation screen.
-pub(super) struct Formation {
+pub(crate) struct Formation {
+    timing: Timing,
     field: Option<BattleField>,
     cursor: Option<EffectSprite>,
     anchors: [(i32, i32); SLOTS],
@@ -142,6 +178,11 @@ pub(super) struct Formation {
 impl Formation {
     /// The screen over `state`, opened on the frame 部隊編成 was chosen.
     pub(super) fn new(data: &GameData<'_>, state: &[u8]) -> Self {
+        Self::with_timing(data, state, PAUSE_MENU)
+    }
+
+    /// The screen over `state` with the frames of what opened it.
+    pub(crate) fn with_timing(data: &GameData<'_>, state: &[u8], timing: Timing) -> Self {
         let offsets = |table| {
             data.script_offsets(table)
                 .ok()
@@ -161,6 +202,7 @@ impl Formation {
             }
         }
         Self {
+            timing,
             field: data.battle_field(),
             cursor: data.slot_cursor(),
             anchors,
@@ -181,23 +223,23 @@ impl Formation {
     }
 
     /// Whether the screen has handed back to the pause menu.
-    pub(super) fn is_closed(&self) -> bool {
+    pub(crate) fn is_closed(&self) -> bool {
         self.phase == Phase::Closed
     }
 
     /// Whether the screen shows itself rather than the darkening menu.
-    pub(super) fn covers(&self) -> bool {
-        !matches!(self.phase, Phase::Opening(frames) if frames < BUILD_AT)
+    pub(crate) fn covers(&self) -> bool {
+        !matches!(self.phase, Phase::Opening(frames) if frames < self.timing.build_at)
     }
 
     /// The game's fade level, 0 to 31.
-    pub(super) fn fade(&self) -> u32 {
+    pub(crate) fn fade(&self) -> u32 {
         match self.phase {
-            Phase::Opening(frames) if frames < BRIGHTEN_AT => {
-                frames.saturating_sub(DARKEN_DELAY).min(FADE_TOP)
-            }
-            Phase::Opening(frames) => FADE_TOP.saturating_sub(frames - BRIGHTEN_AT),
-            Phase::Leaving(frames) => frames.saturating_sub(LEAVE_DELAY).min(FADE_TOP),
+            Phase::Opening(frames) if frames < self.timing.brighten_at => frames
+                .saturating_sub(self.timing.darken_delay)
+                .min(FADE_TOP),
+            Phase::Opening(frames) => FADE_TOP.saturating_sub(frames - self.timing.brighten_at),
+            Phase::Leaving(frames) => frames.saturating_sub(self.timing.leave_delay).min(FADE_TOP),
             Phase::Closed => FADE_TOP,
             Phase::List | Phase::Slots(_) => 0,
         }
@@ -209,7 +251,7 @@ impl Formation {
     /// # Errors
     ///
     /// Returns [`ScriptError`] when a script cannot run.
-    pub(super) fn update(
+    pub(crate) fn update(
         &mut self,
         rom: &[u8],
         input: Input,
@@ -233,20 +275,25 @@ impl Formation {
             Phase::Opening(frames) => {
                 let frames = frames + 1;
                 self.phase = Phase::Opening(frames);
-                if frames == BUILD_AT {
+                if frames == self.timing.build_at {
                     self.build(rom, windows, state)?;
                 }
-                if frames == HELP_AT {
+                if frames == self.timing.help_at {
                     self.busy = 0;
                     self.show_list(rom, windows)?;
+                    if self.timing.help_spent {
+                        self.busy = 0;
+                    }
                 }
                 return Ok(());
             }
             Phase::Leaving(frames) => {
                 let frames = frames + 1;
                 self.phase = Phase::Leaving(frames);
-                if frames >= LEAVE_FRAMES {
-                    self.run(rom, Table::Menu, SCRIPT_RESET, windows)?;
+                if frames >= self.timing.leave_frames {
+                    if self.timing.reset_on_leave {
+                        self.run(rom, Table::Menu, SCRIPT_RESET, windows)?;
+                    }
                     self.phase = Phase::Closed;
                 }
                 return Ok(());
@@ -604,7 +651,7 @@ impl Formation {
 
     /// Draws the field, the units, the windows and the cursor, darkened by
     /// the fade.
-    pub(super) fn draw(
+    pub(crate) fn draw(
         &self,
         frame: &mut Frame,
         windows: &ScriptWindows<'_>,

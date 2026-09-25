@@ -17,7 +17,9 @@
 pub mod ai;
 pub mod aim;
 pub mod attack;
+pub mod deck;
 pub mod effects;
+mod items;
 mod results;
 pub mod scene;
 mod turn;
@@ -106,7 +108,19 @@ const NAME_RECT: (u8, u8, u8, u8) = (0, 0, 15, 2);
 
 /// The menu's lines.
 const CHOICE_FIGHT: u16 = 0;
+const CHOICE_FORMATION: u16 = 1;
+const CHOICE_DECK: u16 = 2;
+const CHOICE_STATUS: u16 = 3;
+/// Frames from the character screen's fade out to its build, and from the
+/// build to its fade in and to its menu.
+const STATUS_BUILD: u32 = 7;
+const STATUS_FADE: u32 = 5;
+const STATUS_MENU: u32 = 41;
 const CHOICE_RETREAT: u16 = 4;
+/// Frames of the rebuild before the panels' names are printed, and after
+/// them before the message window opens again.
+const REBUILD_NAMES: u32 = 3;
+const REBUILD_MESSAGE: u32 = 3;
 
 /// How a battle ended, as `0x0800C3AC` tells its caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,8 +155,8 @@ struct Placed<'a> {
     mirrored: bool,
     sheet: &'a SpriteSheet,
     dim: u8,
-    /// A glow's red, see [`redden`].
-    tint: u8,
+    /// A glow's change of its colors, see [`tint_color`].
+    tint: Option<(turn::Glow, u8)>,
     shake: i32,
 }
 
@@ -207,6 +221,12 @@ enum Act {
     /// Shows party slot `n`'s bars and lights its panel (`0x08031618`,
     /// `0x08031598`).
     Panel(usize),
+    /// Prints `text` until the current line of the print window has
+    /// `column` characters, as the item list pads its names
+    /// (`0x08039518`).
+    Pad(usize, u16),
+    /// What the item list's menu returned, taken as its script ends.
+    ItemChoice,
 }
 
 /// The opening and menu task (`0x0802E9CC`), by the state it waits in.
@@ -224,6 +244,29 @@ enum Opening {
     AwaitReady,
     Menu,
     Retreat,
+    /// 部隊編成: the formation screen opens in the next frame (state
+    /// `0xBB8`), then runs (`0xC1C`).
+    OpenFormation,
+    Formation,
+    /// コマンド作成: the deck screen opens in the next frame (state `0xFA0`),
+    /// then runs (`0x1004`).
+    OpenDeck,
+    Deck,
+    /// ステータス: the screen fades out from the frame the menu returned
+    /// (states `0x1388`, `0x1392`).
+    StatusFadeOut(u32),
+    /// Black since the given frame, until the character screen is built
+    /// (`0x13EC`, the task `0x08052284`).
+    StatusBuild(u32),
+    /// The character screen, built and fading in since the given frame.
+    Status(u32),
+    /// B left it: the fade out.
+    StatusLeave,
+    /// Back from the formation screen since the given frame (`0xC80`): the
+    /// screen is built again in the dark.
+    Rebuild(u32),
+    /// Its fade in (`0xCE4`), then the menu again.
+    AwaitRebuildFade,
     /// 戦闘に入る: the panels and grounds come down (state `0x2328`).
     Engage(u32),
     Done,
@@ -317,10 +360,42 @@ pub struct Combat {
     /// palette 14 during a turn (`0x080316EC`), but for the acting unit's
     /// (`0x08031598`).
     dim_panels: PanelLight,
+    /// The formation screen 部隊編成 opened (task `0x08037B84`, slot 7).
+    formation_screen: Option<Box<crate::menu::formation::Formation>>,
+    /// The deck screen コマンド作成 opened (task `0x0803B004`, slot 7).
+    deck_screen: Option<Box<deck::DeckScreen>>,
+    /// The character screen ステータス opened (task `0x08052284`, slot 6).
+    status_screen: Option<Box<crate::menu::PauseMenu>>,
+    /// The window until whose closing the screen keeps the panels it
+    /// shows: the maps the panels were drawn to reach the screen with the
+    /// item list's reset.
+    panels_held: Option<u8>,
     /// The spark a hit unit shows (the battle screen's effect 6).
     spark: Option<extraction::saga_battle::EffectSprite>,
-    /// The glow a unit a support part raised shows.
+    /// The glow a unit a support part raised shows, and a repaired one's.
     glow: Option<extraction::saga_battle::EffectSprite>,
+    mend: Option<extraction::saga_battle::EffectSprite>,
+    /// The figures L shows over the party's units.
+    figure_glyphs: Option<extraction::saga_battle::UnitLabels>,
+    /// Whether the figures' task runs (`0x0802F8F8`, slot 8), whether they
+    /// show, and whether the frame shows them (its sprites of the frame
+    /// before).
+    figures_task: bool,
+    figures: Option<Figures>,
+    shown_figures: Option<Figures>,
+    /// The controller's stage at the last run of the figures' task.
+    figures_stage: Option<turn::Stage>,
+    /// While an item's glow plays, the figures' task holds them hidden
+    /// (`0x0802FA58`).
+    figures_held: bool,
+    /// The item task's list and choices, what it reported, the marker's
+    /// slot and frames, and the slots the marker goes to.
+    item_menu: items::ItemMenu,
+    item_used: Option<bool>,
+    targeting: Option<usize>,
+    shown_marker: Option<usize>,
+    marker: Option<extraction::saga_battle::EffectSprite>,
+    neighbour_slots: Vec<Vec<Vec<u8>>>,
     /// The sparks as the frame shows them: the sprites' OAM of the frame
     /// before.
     shown_sparks: Vec<turn::Spark>,
@@ -381,28 +456,15 @@ impl Combat {
             saga_combat::grounds(rom, player_terrain).map(|Grounds { player, .. }| player),
             saga_combat::grounds(rom, enemy_terrain).map(|Grounds { enemy, .. }| enemy),
         );
-        let panel_graphics = saga_combat::panel_graphics(rom);
-        let mut bank = [[0u16; 16]; 16];
-        if let Some(graphics) = &panel_graphics {
-            bank[usize::from(PANEL_BANK)] = graphics.palette;
-        }
-        let skin = data.window_skin().ok();
-        if let Some(skin) = &skin {
-            bank[usize::from(TEXT_BANK)] = skin.palette;
-        }
-        let speed = state.get(SPEED_BYTE).copied().unwrap_or(2);
-        let wait_frames = MESSAGE_WAITS
-            .get(usize::from(speed))
-            .copied()
-            .filter(|_| speed != KEY_WAIT_SPEED);
+        let (panel_graphics, frame_tiles, banks) = screen_graphics(data);
         let build_frames =
             BUILD_FRAMES + BUILD_PER_PANEL * u32::try_from(panels.len()).unwrap_or(0);
         Self {
             grid: data.battle_field().map(|field| field.grid),
             grounds,
             panel_graphics,
-            frame_tiles: skin.map(|skin| skin.tiles),
-            banks: PaletteBank::from_bgr555(&bank),
+            frame_tiles,
+            banks,
             panels,
             units: [player, enemy],
             anchors,
@@ -434,8 +496,25 @@ impl Combat {
             shown_scrolls: (turn::PANELS_HIDDEN, 0),
             dims: [[0; SLOTS]; 2],
             dim_panels: PanelLight::Own,
+            panels_held: None,
+            formation_screen: None,
+            status_screen: None,
+            deck_screen: None,
             spark: extraction::saga_battle::screen_effect(rom, turn::SPARK),
             glow: extraction::saga_battle::screen_effect(rom, turn::GLOW),
+            mend: extraction::saga_battle::screen_effect(rom, turn::MEND),
+            figure_glyphs: extraction::saga_battle::unit_labels(rom),
+            figures_task: false,
+            figures: None,
+            shown_figures: None,
+            figures_stage: None,
+            figures_held: false,
+            item_menu: items::ItemMenu::default(),
+            item_used: None,
+            targeting: None,
+            shown_marker: None,
+            marker: extraction::saga_battle::screen_sprite(rom, MARKER_SPRITE),
+            neighbour_slots: extraction::saga_battle::neighbours(rom),
             shown_sparks: Vec::new(),
             lag: 0,
             shown_panels: (Vec::new(), PanelLight::Own),
@@ -447,7 +526,7 @@ impl Combat {
             opening: Opening::Build,
             results: Results::Idle,
             wait: Wait::Idle,
-            wait_frames,
+            wait_frames: message_wait(state),
             fade: None,
             level: BLACK,
             shown_level: BLACK,
@@ -509,7 +588,11 @@ impl Combat {
     pub fn latch(&mut self) {
         self.shown_level = self.level;
         self.shown_scrolls = self.scrolls;
-        self.shown_panels = (self.panels.clone(), self.dim_panels);
+        if self.panels_held.is_none() {
+            self.shown_panels = (self.panels.clone(), self.dim_panels);
+        }
+        self.shown_figures = self.figures;
+        self.shown_marker = self.targeting;
         self.shown_sparks = self
             .fight
             .display
@@ -541,16 +624,103 @@ impl Combat {
             return Ok(());
         }
         self.update_controller(rom);
+        self.update_formation_screen(rom, input, windows)?;
+        self.update_status_screen(rom, input, windows)?;
+        self.update_deck_screen(rom, input, windows)?;
         if self.controller == Controller::Fight(turn::Stage::Scene) {
             self.update_scene(rom, input, windows)?;
         } else {
             self.update_slot5(rom, windows)?;
+        }
+        self.update_figures();
+        if let Some(id) = self.panels_held
+            && windows
+                .windows()
+                .get(usize::from(id))
+                .is_none_or(Option::is_none)
+        {
+            self.panels_held = None;
         }
         self.update_wait();
         self.update_fade();
         self.frame += 1;
         self.vblank = self.vblank.wrapping_add(1);
         Ok(())
+    }
+
+    /// The figures' task (`0x0802F8F8`, run after the controller and slot
+    /// 5): the controller starts it for the battle's menus and turns and
+    /// stops it as an attack starts, from the screen's return on; L toggles
+    /// the figures, which a flag of the game state keeps from one battle
+    /// to the next.
+    fn update_figures(&mut self) {
+        let stage = match self.controller {
+            Controller::Fight(stage) => Some(stage),
+            _ => None,
+        };
+        let left = std::mem::replace(&mut self.figures_stage, stage);
+        if !self.figures_running() || self.figures_held {
+            self.figures_task = false;
+            self.figures = None;
+            return;
+        }
+        let pressed =
+            self.input.is_held(platform::Button::L) && !self.previous.is_held(platform::Button::L);
+        let shown = if self.figures_task {
+            self.figures.is_some() != pressed
+        } else {
+            self.figures_task = true;
+            pressed || formats::progress::battle_labels(&self.state)
+        };
+        // The controller asks for them again as it leaves these stages
+        // (`0x0802FA94`), with the units' places and figures of then.
+        let refresh = left != stage
+            && matches!(
+                left,
+                Some(
+                    turn::Stage::RoundStart
+                        | turn::Stage::Actor
+                        | turn::Stage::Next
+                        | turn::Stage::Over
+                )
+            );
+        if !shown {
+            self.figures = None;
+        } else if self.figures.is_none() || refresh {
+            self.figures = Some(self.figures_now());
+        }
+        formats::progress::set_battle_labels(&mut self.state, shown);
+    }
+
+    /// The party's units' places, hit points and energy as the figures take
+    /// them (`0x08031A10`). The figures are sprites off the grounds' layer:
+    /// they show the places as they are, and stay where they are while the
+    /// grounds scroll.
+    fn figures_now(&self) -> Figures {
+        std::array::from_fn(|slot| {
+            self.sides[PLAYER][slot]
+                .as_ref()
+                .filter(|unit| unit.fighting())
+                .map(|unit| (self.anchors[PLAYER][slot], unit.hp, unit.ep))
+        })
+    }
+
+    /// Whether the controller has the figures' task running: from the
+    /// battle's start to its end (`0x2530`), but from an attack's start
+    /// (`0x1004`) to the end of the screen's return (`0x13EC`).
+    fn figures_running(&self) -> bool {
+        match self.controller {
+            Controller::Fight(stage) => !matches!(
+                stage,
+                turn::Stage::AwaitAttackFade
+                    | turn::Stage::StartScene
+                    | turn::Stage::Scene
+                    | turn::Stage::Return
+                    | turn::Stage::AwaitReturn
+            ),
+            Controller::Finish | Controller::Done => false,
+            _ => true,
+        }
     }
 
     fn pressed_a(&self) -> bool {
@@ -617,7 +787,15 @@ impl Combat {
         if self.fight_task_active() && (!busy || matches!(self.task, turn::Task::Return(_))) {
             self.step_fight_task();
         }
-        self.run_acts(rom, windows)
+        self.run_acts(rom, windows)?;
+        // The item task goes on in the frame its last call returns.
+        if matches!(self.task, turn::Task::Item(items::ItemStep::Closed(_)))
+            && self.running.is_none()
+            && self.acts.is_empty()
+        {
+            self.step_fight_task();
+        }
+        Ok(())
     }
 
     fn run_acts(&mut self, rom: &[u8], windows: &mut ScriptWindows<'_>) -> Result<(), ScriptError> {
@@ -669,6 +847,18 @@ impl Combat {
                 Act::Spoils => self.roll_spoils(rom),
                 Act::Allocation => self.allocate(),
                 Act::PrintWindow(id) => self.print_window = id,
+                Act::ItemChoice => self.take_item_choice(),
+                Act::Pad(column, text) => {
+                    let length = windows
+                        .windows()
+                        .get(usize::from(self.print_window))
+                        .and_then(Option::as_ref)
+                        .and_then(|window| window.lines.last())
+                        .map_or(0, |line| line.chars().count());
+                    for _ in length..column {
+                        self.acts.push_front(Act::Call(Call::Text(text)));
+                    }
+                }
                 Act::Pause(frames) => {
                     self.pause = frames.saturating_sub(1);
                     return Ok(());
@@ -764,6 +954,170 @@ impl Combat {
     }
 
     /// One step of the opening (`0x0802E9CC`).
+    /// The formation screen's task: opened the frame after the choice, it
+    /// runs until it hands back; the party is then taken again from the
+    /// game state it changed.
+    fn update_formation_screen(
+        &mut self,
+        rom: &[u8],
+        input: Input,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        if self.opening == Opening::OpenFormation {
+            self.formation_screen = Some(Box::new(crate::menu::formation::Formation::with_timing(
+                &GameData::new(rom),
+                &self.state,
+                crate::menu::formation::BATTLE,
+            )));
+            self.opening = Opening::Formation;
+        }
+        let Some(screen) = self.formation_screen.as_mut() else {
+            return Ok(());
+        };
+        screen.update(rom, input, windows, &mut self.state)?;
+        if screen.is_closed() {
+            // The screen hands back black: the battle's stays so.
+            self.level = BLACK;
+            self.shown_level = BLACK;
+            self.formation_screen = None;
+            self.take_party(rom);
+            self.opening = Opening::Rebuild(self.frame);
+        }
+        Ok(())
+    }
+
+    /// The deck screen's task: opened the frame after the choice, it runs
+    /// until it hands back, black; the screen is then built again.
+    fn update_deck_screen(
+        &mut self,
+        rom: &[u8],
+        input: Input,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        if self.opening == Opening::OpenDeck {
+            // The port has no link battles, which forbid some commands.
+            let screen = deck::DeckScreen::new(&GameData::new(rom), &self.state, false);
+            self.deck_screen = Some(Box::new(screen));
+            self.opening = Opening::Deck;
+        }
+        let Some(screen) = self.deck_screen.as_mut() else {
+            return Ok(());
+        };
+        screen.update(rom, input, windows, &mut self.state)?;
+        if screen.is_closed() {
+            self.level = BLACK;
+            self.shown_level = BLACK;
+            self.deck_screen = None;
+            self.opening = Opening::Rebuild(self.frame);
+        }
+        Ok(())
+    }
+
+    /// The character screen's task: built in the dark, it fades in and its
+    /// menu runs once it is bright; B fades it out.
+    fn update_status_screen(
+        &mut self,
+        rom: &[u8],
+        input: Input,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        match self.opening {
+            Opening::StatusBuild(start) if self.frame >= start + STATUS_BUILD => {
+                if let Ok(mut screen) =
+                    crate::menu::PauseMenu::battle_status(&GameData::new(rom), self.state.clone())
+                {
+                    screen.open_battle_status(rom, windows)?;
+                    self.status_screen = Some(Box::new(screen));
+                }
+                self.opening = Opening::Status(self.frame);
+            }
+            Opening::Status(start) if self.frame == start + STATUS_FADE => {
+                self.acts.push_back(Act::Fade { out: false });
+            }
+            Opening::Status(start) if self.frame >= start + STATUS_MENU => {
+                if self.fade.is_some_and(|fade| fade.age >= FADE_SEEN_AGE) {
+                    self.fade = None;
+                    self.level = 0;
+                }
+                let Some(screen) = self.status_screen.as_mut() else {
+                    self.opening = Opening::StatusLeave;
+                    return Ok(());
+                };
+                // The character screen opens no guide, whose loading is
+                // all that fails otherwise.
+                let step = match screen.update(rom, input, windows) {
+                    Ok(step) => step,
+                    Err(crate::guide::GuideError::Script(error)) => return Err(error),
+                    Err(_) => crate::menu::MenuStep::Closed,
+                };
+                if step == crate::menu::MenuStep::Closed {
+                    // The original's menu (opcode `0x36`) returns in the
+                    // key's frame, the port's a frame later: the fade out
+                    // starts a frame on.
+                    self.fade = Some(Fade { out: true, age: 1 });
+                    self.opening = Opening::StatusLeave;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// The fades around the character screen: out before it is built, and
+    /// out after B, until the battle's screen is built again.
+    fn step_status_fade(&mut self) {
+        if let Opening::StatusFadeOut(start) = self.opening
+            && self.frame == start + 1
+        {
+            self.acts.push_back(Act::Fade { out: true });
+            return;
+        }
+        if self.fade.is_none_or(|fade| fade.age < FADE_SEEN_AGE) {
+            return;
+        }
+        self.fade = None;
+        self.level = BLACK;
+        self.opening = if self.opening == Opening::StatusLeave {
+            self.status_screen = None;
+            Opening::Rebuild(self.frame + 1)
+        } else {
+            Opening::StatusBuild(self.frame)
+        };
+    }
+
+    /// The party's units, panels and pictures from the game state again
+    /// (`0x0802B5D0`, `0x08031074`).
+    fn take_party(&mut self, rom: &[u8]) {
+        let data = GameData::new(rom);
+        let (panels, [player, _]) = screen_units(&data, &mut self.state, &self.formation);
+        let [party, _] = battle_units(rom, &self.state, &self.formation);
+        self.panels = panels;
+        self.units[PLAYER] = player;
+        self.sides[ai::PARTY] = party;
+        self.build_frames =
+            BUILD_FRAMES + BUILD_PER_PANEL * u32::try_from(self.panels.len()).unwrap_or(0);
+    }
+
+    /// A frame of the screen's rebuild after the formation screen (state
+    /// `0xC80`): in the dark, the panels' names, the text system's reset
+    /// (`0x0802F07C`), the message window with 戦闘態勢に入ります, then the
+    /// fade in.
+    fn step_rebuild(&mut self, frame: u32) {
+        if frame == REBUILD_NAMES {
+            self.print_panel_names();
+        }
+        if frame >= REBUILD_NAMES + self.build_frames + REBUILD_MESSAGE {
+            self.acts
+                .push_back(Act::Call(Call::Menu(MENU_MESSAGE_WINDOW)));
+            self.acts.push_back(Act::Call(Call::Menu(MENU_DRAW)));
+            self.acts.push_back(Act::Call(Call::Menu(MENU_CLEAR)));
+            self.acts.push_back(Act::Call(Call::Text(TEXT_READY)));
+            self.acts.push_back(Act::Call(Call::Menu(MENU_PRESENT)));
+            self.acts.push_back(Act::Fade { out: false });
+            self.opening = Opening::AwaitRebuildFade;
+        }
+    }
+
     fn step_opening(&mut self) {
         match self.opening {
             Opening::Build => {
@@ -835,6 +1189,15 @@ impl Combat {
                 self.outcome = Some(Outcome::Retreated);
                 self.opening = Opening::Done;
             }
+            Opening::Rebuild(start) => self.step_rebuild(self.frame.saturating_sub(start)),
+            Opening::StatusFadeOut(_) | Opening::StatusLeave => self.step_status_fade(),
+            Opening::AwaitRebuildFade => {
+                if self.fade.is_some_and(|fade| fade.age >= FADE_SEEN_AGE) {
+                    self.fade = None;
+                    self.figures_held = false;
+                    self.opening = Opening::Menu;
+                }
+            }
             Opening::Engage(frame) => {
                 self.scrolls = turn::engage_scrolls(frame);
                 self.opening = if frame + 1 >= turn::engage_frames() {
@@ -843,7 +1206,13 @@ impl Combat {
                     Opening::Engage(frame + 1)
                 };
             }
-            Opening::Done => {}
+            Opening::OpenFormation
+            | Opening::Formation
+            | Opening::OpenDeck
+            | Opening::Deck
+            | Opening::StatusBuild(_)
+            | Opening::Status(_)
+            | Opening::Done => {}
         }
     }
 
@@ -854,6 +1223,18 @@ impl Combat {
         self.choice = line;
         self.opening = match line {
             CHOICE_FIGHT => Opening::Engage(0),
+            CHOICE_FORMATION => {
+                self.figures_held = true;
+                Opening::OpenFormation
+            }
+            CHOICE_DECK => {
+                self.figures_held = true;
+                Opening::OpenDeck
+            }
+            CHOICE_STATUS => {
+                self.figures_held = true;
+                Opening::StatusFadeOut(self.frame)
+            }
             CHOICE_RETREAT => Opening::Retreat,
             _ => Opening::Menu,
         };
@@ -905,6 +1286,23 @@ impl Combat {
             scene.draw(frame, windows, skin, painter);
             return;
         }
+        if let Some(screen) = &self.formation_screen
+            && screen.covers()
+        {
+            screen.draw(frame, windows, skin, painter, &self.state);
+            return;
+        }
+        if let Some(screen) = &self.deck_screen
+            && screen.covers()
+        {
+            screen.draw(frame, windows, skin, painter);
+            return;
+        }
+        if let Some(screen) = &self.status_screen {
+            screen.draw(frame, windows, skin, painter);
+            darken(frame, self.shown_level.min(FADE_STEPS));
+            return;
+        }
         frame.fill(Rgb::default());
         if self.shown_level < FADE_STEPS {
             if let Some(grid) = &self.grid {
@@ -915,10 +1313,21 @@ impl Combat {
             }
             self.draw_units(frame);
             self.draw_sparks(frame);
+            self.draw_figures(frame);
+            self.draw_marker(frame);
             self.draw_panels(frame, skin, painter);
             windows.draw_shown(frame, skin, painter);
         }
         darken(frame, self.shown_level.min(FADE_STEPS));
+        let screen_fade = self
+            .formation_screen
+            .as_ref()
+            .map(|screen| screen.fade())
+            .or_else(|| self.deck_screen.as_ref().map(|screen| screen.fade()));
+        if let Some(level) = screen_fade {
+            let level = level.min(u32::from(FADE_STEPS));
+            darken(frame, u8::try_from(level).unwrap_or(FADE_STEPS));
+        }
     }
 
     /// The units in their slots, the nearer (lower) ones over the others;
@@ -965,9 +1374,11 @@ impl Combat {
             } else {
                 x + i32::from(sprite.x)
             };
+            // A glow's colors are the Zoid's own, whatever darkened it.
+            let dim = if tint.is_some() { 0 } else { dim };
             let palette = sheet
                 .palette
-                .map(|color| redden(darken_color(color, dim), tint));
+                .map(|color| tint_color(darken_color(color, dim), tint));
             draw_sprite(
                 frame,
                 left,
@@ -988,15 +1399,91 @@ impl Combat {
             .sum()
     }
 
+    /// The party's units' hit points and energy over them (`0x08031A10`,
+    /// `0x08031FB4`): four orange digits, a slash and three blue ones, each
+    /// an 8×8 tile, from 32 pixels left of the unit's place and 16 above,
+    /// at most 9999 and 999.
+    fn draw_figures(&self, frame: &mut Frame) {
+        let (Some(glyphs), Some(figures)) = (self.figure_glyphs.as_ref(), self.shown_figures)
+        else {
+            return;
+        };
+        let palette = Palette::new(glyphs.palette.map(Palette::from_bgr555));
+        // The first slot's sprites come first in OAM, in front of the
+        // others'.
+        for ((x, y), hp, ep) in figures.into_iter().rev().flatten() {
+            let digits = |value: i32, count: u32, first: usize| {
+                let value = u32::try_from(value.max(0))
+                    .unwrap_or(0)
+                    .min(10u32.pow(count) - 1);
+                (0..count).map(move |place| {
+                    let digit = value / 10u32.pow(count - 1 - place) % 10;
+                    first + usize::try_from(digit).unwrap_or(0)
+                })
+            };
+            let tiles: Vec<usize> = digits(hp, 4, LABEL_HP_DIGITS)
+                .chain(std::iter::once(LABEL_SLASH))
+                .chain(digits(ep, 3, LABEL_EP_DIGITS))
+                .collect();
+            let top = y + LABEL_OFFSET.1;
+            for (place, tile) in tiles.into_iter().enumerate() {
+                let Some(pixels) = glyphs.tiles.tile(tile) else {
+                    continue;
+                };
+                let left = x + LABEL_OFFSET.0 + 8 * i32::try_from(place).unwrap_or(0);
+                for (index, &color) in pixels.iter().enumerate() {
+                    if color == 0 {
+                        continue;
+                    }
+                    let (px, py) = (
+                        left + i32::try_from(index % 8).unwrap_or(0),
+                        top + i32::try_from(index / 8).unwrap_or(0),
+                    );
+                    if let (Ok(px), Ok(py)) = (usize::try_from(px), usize::try_from(py))
+                        && px < WIDTH
+                        && py < HEIGHT
+                    {
+                        frame.set_pixel(px, py, palette.color(color));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The item's target marker (`0x08031B44`): its entity does not
+    /// animate, so it shows its first frame.
+    fn draw_marker(&self, frame: &mut Frame) {
+        let (Some(sprite), Some(slot)) = (self.marker.as_ref(), self.shown_marker) else {
+            return;
+        };
+        let index = sprite.animation.first().map_or(0, |step| step.frame);
+        let palette = Palette::new(sprite.palette.map(Palette::from_bgr555));
+        let (x, y) = self.anchors[PLAYER][slot];
+        let mut layer: Vec<Option<Rgb>> = vec![None; WIDTH * HEIGHT];
+        for piece in sprite.frames.get(index).into_iter().flatten() {
+            crate::battle::draw_piece(
+                &mut layer,
+                sprite,
+                &palette,
+                piece,
+                (x + MARKER_OFFSET.0, y + MARKER_OFFSET.1),
+                false,
+            );
+        }
+        for (index, color) in layer.into_iter().enumerate() {
+            if let Some(color) = color {
+                frame.set_pixel(index % WIDTH, index / WIDTH, color);
+            }
+        }
+    }
+
     /// How much a glow takes the red of a unit's colors to its top and
     /// back this frame.
-    fn tint_of(&self, side: usize, slot: usize) -> u8 {
+    fn tint_of(&self, side: usize, slot: usize) -> Option<(turn::Glow, u8)> {
         self.shown_sparks
             .iter()
             .filter(|spark| spark.side == side && spark.slot == slot)
-            .map(turn::Spark::tint)
-            .max()
-            .unwrap_or(0)
+            .find_map(turn::Spark::tint)
     }
 
     /// The hit units' sparks and the raised ones' glows, on the grounds'
@@ -1004,12 +1491,7 @@ impl Combat {
     fn draw_sparks(&self, frame: &mut Frame) {
         let mut layer: Vec<Option<Rgb>> = vec![None; WIDTH * HEIGHT];
         for spark in &self.shown_sparks {
-            let sprite = if spark.glow.is_some() {
-                self.glow.as_ref()
-            } else {
-                self.spark.as_ref()
-            };
-            let Some(sprite) = sprite else {
+            let Some(sprite) = self.spark_sprite(spark) else {
                 continue;
             };
             let palette = Palette::new(sprite.palette.map(Palette::from_bgr555));
@@ -1117,6 +1599,35 @@ impl Combat {
     }
 }
 
+/// The frames a message waits before it goes on at the save's message
+/// speed, or none when it waits for a key.
+fn message_wait(state: &[u8]) -> Option<u16> {
+    let speed = state.get(SPEED_BYTE).copied().unwrap_or(2);
+    MESSAGE_WAITS
+        .get(usize::from(speed))
+        .copied()
+        .filter(|_| speed != KEY_WAIT_SPEED)
+}
+
+/// The panels' graphics, the window frames' tiles and the palettes both
+/// use.
+fn screen_graphics(data: &GameData<'_>) -> (Option<PanelGraphics>, Option<Tileset>, PaletteBank) {
+    let panel_graphics = saga_combat::panel_graphics(data.bytes());
+    let mut bank = [[0u16; 16]; 16];
+    if let Some(graphics) = &panel_graphics {
+        bank[usize::from(PANEL_BANK)] = graphics.palette;
+    }
+    let skin = data.window_skin().ok();
+    if let Some(skin) = &skin {
+        bank[usize::from(TEXT_BANK)] = skin.palette;
+    }
+    (
+        panel_graphics,
+        skin.map(|skin| skin.tiles),
+        PaletteBank::from_bgr555(&bank),
+    )
+}
+
 /// The battle screen's units and the party's panels: each unit's Zoid and
 /// status sprite, and each party unit's bars, its statistics computed
 /// again.
@@ -1165,17 +1676,45 @@ fn screen_units(
     (panels, [player, enemy])
 }
 
-/// A BGR555 color's red raised by `amount`, at most 31, then lowered by
-/// it, at least 0 (`0x08031E90` with flags 6, then 5): the brightest reds
-/// dim, the rest stay.
-fn redden(color: u16, amount: u8) -> u16 {
-    if amount == 0 {
+/// The item's target marker (record 0 of the battle screen's own sprites),
+/// 8 pixels right of and 16 above the unit (`0x080385B0`).
+const MARKER_SPRITE: usize = 0;
+const MARKER_OFFSET: (i32, i32) = (8, -16);
+
+/// The figures of each party slot: the unit's place, hit points and
+/// energy when they were taken.
+type Figures = [Option<((i32, i32), i32, i32)>; SLOTS];
+
+/// The figures' tiles: the hit points' digits, the energy's, the slash.
+const LABEL_HP_DIGITS: usize = 0;
+const LABEL_EP_DIGITS: usize = 10;
+const LABEL_SLASH: usize = 20;
+/// Where the figures' first tile is from the unit's place.
+const LABEL_OFFSET: (i32, i32) = (-32, -16);
+
+/// A BGR555 color as a glow changes it (`0x08031E90`): for a raised
+/// statistic, red raised by the amount, at most 31, then lowered by it, at
+/// least 0 (flags 6, then 5), so the brightest reds dim; for a repair, blue
+/// raised and red and green lowered (flags `0x12`, then `0xD`).
+fn tint_color(color: u16, tint: Option<(turn::Glow, u8)>) -> u16 {
+    let Some((glow, amount)) = tint.filter(|(_, amount)| *amount > 0) else {
         return color;
-    }
+    };
     let amount = u16::from(amount);
-    let red = color & 0x1F;
-    let red = (red + amount).min(0x1F).saturating_sub(amount);
-    (color & !0x1F) | red
+    let channel = |shift: u16| (color >> shift) & 0x1F;
+    let (red, green, blue) = match glow {
+        turn::Glow::Raise => (
+            (channel(0) + amount).min(0x1F).saturating_sub(amount),
+            channel(5),
+            channel(10),
+        ),
+        turn::Glow::Mend => (
+            channel(0).saturating_sub(amount),
+            channel(5).saturating_sub(amount),
+            (channel(10) + amount).min(0x1F),
+        ),
+    };
+    red | green << 5 | blue << 10 | (color & 0x8000)
 }
 
 /// A BGR555 color with `amount` taken off each channel (`0x08031E90` with
@@ -1296,13 +1835,17 @@ mod tests {
     }
 
     #[test]
-    fn the_menus_retreat_ends_the_opening() {
+    fn the_menus_lines_open_their_screens_and_retreat_ends_it() {
         let rom = Vec::new();
         let data = GameData::new(&rom);
         let mut state = vec![0; 0x3F10];
         let mut combat = Combat::new(&data, &mut state, &[0xFF; 36], (0, 0));
-        combat.choose(1);
-        assert_eq!(combat.opening, Opening::Menu);
+        combat.choose(CHOICE_DECK);
+        assert_eq!(combat.opening, Opening::OpenDeck);
+        combat.choose(CHOICE_STATUS);
+        assert!(matches!(combat.opening, Opening::StatusFadeOut(_)));
+        combat.choose(CHOICE_FORMATION);
+        assert_eq!(combat.opening, Opening::OpenFormation);
         combat.choose(CHOICE_FIGHT);
         assert_eq!(combat.opening, Opening::Engage(0));
         combat.choose(CHOICE_RETREAT);

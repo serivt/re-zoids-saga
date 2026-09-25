@@ -147,6 +147,13 @@ pub trait ScriptHost {
 enum Wait {
     None,
     Frames(u32),
+    /// The text system's reset (`0x0803F4A4`'s opcode): its frames; the
+    /// screen shows the windows gone from the frame before the script goes
+    /// on (the battle's item list, traced in VRAM).
+    Reset {
+        left: u32,
+        mode: u8,
+    },
     Key {
         mode: u8,
         cancelable: bool,
@@ -377,6 +384,19 @@ impl ScriptRunner {
             Wait::Frames(left) => {
                 if left > 1 {
                     self.wait = Wait::Frames(left - 1);
+                    return Ok(false);
+                }
+                self.wait = Wait::None;
+            }
+            Wait::Reset { left, mode } => {
+                if left > 1 {
+                    if left == 2 {
+                        host.reset(mode);
+                    }
+                    self.wait = Wait::Reset {
+                        left: left - 1,
+                        mode,
+                    };
                     return Ok(false);
                 }
                 self.wait = Wait::None;
@@ -631,11 +651,13 @@ impl ScriptRunner {
                 self.wait = Wait::Frames(1);
             }
             Instruction::Reset { mode } => {
-                host.reset(mode);
                 if mode & 0xF0 == 0 {
                     self.vars = [0; VARIABLES];
                 }
-                self.wait = Wait::Frames(RESET_FRAMES);
+                self.wait = Wait::Reset {
+                    left: RESET_FRAMES,
+                    mode,
+                };
             }
             Instruction::CloseWindow { id } => {
                 host.close_window(id);
@@ -1244,8 +1266,9 @@ mod tests {
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert_eq!(host.log, ["portrait 0 2 6"]);
         assert!(!runner.update(&bytes, Input::default(), &mut host).unwrap());
-        assert_eq!(host.log[1..], ["reset 0"]);
+        assert!(host.log[1..].is_empty());
         assert!(!run(&bytes, &mut runner, &mut host, 2));
+        assert_eq!(host.log[1..], ["reset 0"]);
         assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
         assert_eq!(host.log[1..], ["reset 0", "sound 0x3c"]);
         assert_eq!(runner.vars()[0], 0);
