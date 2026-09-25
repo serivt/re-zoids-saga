@@ -10,7 +10,8 @@
 //! `docs/combat.md`.
 
 use super::ai::Sides;
-use super::units::{damage, hit_chance};
+use super::units::{BattleUnit, Effect, Weapon, damage, hit_chance};
+use extraction::saga_party::percent;
 
 /// Rolls a turn draws (`0x08033D94`): each actor's, `% 100`, at EWRAM
 /// `0x020143BC`.
@@ -31,7 +32,35 @@ const HURTS_PILOT: u32 = 0x1000;
 /// A weapon that shakes the target.
 const STUNS: u32 = 0x2000;
 const ALWAYS: u32 = 0x800;
-
+/// A part used up by its use (bit 31): its slot empties.
+const USED_UP: u32 = 0x8000_0000;
+/// The support parts' effects (`0x08033E40`).
+const DEFENSES: u32 = 0xC000;
+const BEAM_SHIELD: u32 = 0x4000;
+const SPEED_UP: u32 = 0x2_0000;
+const EVASION_UP: u32 = 0x1_0000;
+const ACCURACY_UP: u32 = 0x4_0000;
+const FULL_REPAIR: u32 = 0x40_0000;
+const STATE: u32 = 0x10_0000;
+const REPAIR: u32 = 0x8_0000;
+/// Effects by the amount on the unit's own statistics, and on its pilot's
+/// bonuses.
+const OWN_AMOUNT: u8 = 2;
+const PILOT_AMOUNT: u8 = 3;
+/// What an effect raises (bit 0 raising): defense, beam defense, both,
+/// speed, evasion, accuracy; the shields' bit `0x1000`; the state
+/// `0x4000`; and what a sure weapon lowers.
+const RAISE_DEFENSE: u16 = 0x201;
+const RAISE_BEAM_DEFENSE: u16 = 0x401;
+const RAISE_DEFENSES: u16 = 0x101;
+const SHIELD: u16 = 0x1000;
+const RAISE_SPEED: u16 = 0x801;
+const RAISE_EVASION: u16 = 0x8001;
+const RAISE_ACCURACY: u16 = 0x21;
+const STATE_EFFECT: u16 = 0x4000;
+const SURE_EFFECT: u16 = 0x22;
+/// What a full repair raises speed and defense by, in percent.
+const RESTORE_PERCENT: i32 = 50;
 /// What an attack did to one target (a record at `0x0200EB84 + 0x220C`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Blow {
@@ -42,12 +71,30 @@ pub struct Blow {
     /// The record's flags: [`LANDED`], [`CRITICAL`], [`STUNNED`],
     /// [`PILOT_HURT`] and [`BEATEN`].
     pub flags: u16,
-    /// The damage in 16.16.
+    /// The damage in 16.16; for the other kinds, the amount the message
+    /// gives (`+4`).
     pub damage: i32,
-    /// How the battle screen shows it (`+8`): 0 for damage; the support
-    /// parts' own kinds otherwise.
+    /// What changed, for the message (`+2`): the effect's bits (see
+    /// [`Effect::changes`]).
+    pub code: u16,
+    /// How the battle screen shows it (`+8`): [`DAMAGE`], [`RAISED`],
+    /// [`LOWERED`], [`REPAIRED`], [`AFFLICTED`] or [`RESTORED`].
     pub kind: u8,
 }
+
+/// A blow's kinds (`+8`), which pick the return's display
+/// (`0x0802BCA4`, the table at `0x0802BEB0`).
+pub const DAMAGE: u8 = 0;
+/// A statistic raised.
+pub const RAISED: u8 = 1;
+/// A statistic lowered by a weapon that always lands.
+pub const LOWERED: u8 = 2;
+/// Hit points repaired.
+pub const REPAIRED: u8 = 3;
+/// A state set on the unit.
+pub const AFFLICTED: u8 = 4;
+/// Hit points and energy restored in full, speed and defense raised.
+pub const RESTORED: u8 = 5;
 
 /// The attack landed.
 pub const LANDED: u16 = 1;
@@ -154,7 +201,19 @@ pub fn attack(
                 blow.flags |= CRITICAL;
             }
         }
-        if arms.flags & OFFENSIVE != 0 && arms.flags & ALWAYS == 0 && blow.landed() {
+        if arms.flags & OFFENSIVE == 0 {
+            if let Some(unit) = sides[aimed][target_slot].as_mut() {
+                support(unit, &arms, &mut blow);
+            }
+        } else if arms.flags & ALWAYS != 0 {
+            blow.flags |= LANDED;
+            blow.kind = LOWERED;
+            blow.damage = arms.power;
+            blow.code = SURE_EFFECT;
+            if let Some(unit) = sides[aimed][target_slot].as_mut() {
+                unit.affect(effect(&arms, SURE_EFFECT, arms.power, OWN_AMOUNT));
+            }
+        } else if blow.landed() {
             blow.damage = damage(
                 (&attacker, &stats),
                 (&target, &target_stats),
@@ -181,7 +240,92 @@ pub fn attack(
         }
         outcome.blows.push(blow);
     }
+    if arms.flags & USED_UP != 0
+        && let Some(unit) = sides[side][slot].as_mut()
+    {
+        unit.use_up(weapon);
+    }
     outcome
+}
+
+/// What a weapon for its own side does to one of its targets
+/// (`0x08033E40`): it always lands; shields and the parts that raise a
+/// statistic put an effect on the unit for the weapon's turns, a repair
+/// part gives back hit points, the full repair everything.
+fn support(unit: &mut BattleUnit, arms: &Weapon, blow: &mut Blow) {
+    let power = arms.power;
+    let second = i32::from(arms.accuracy);
+    let flags = arms.flags;
+    let raise = |unit: &mut BattleUnit, code: u16, value: i32, kind: u8| {
+        unit.affect(effect(arms, code, value, kind));
+    };
+    blow.flags |= LANDED;
+    blow.kind = RAISED;
+    if flags & DEFENSES != 0 {
+        if flags & BEAM_SHIELD == 0 {
+            raise(unit, RAISE_DEFENSE, power, OWN_AMOUNT);
+            raise(unit, RAISE_BEAM_DEFENSE, power, OWN_AMOUNT);
+        } else {
+            raise(unit, SHIELD | RAISE_DEFENSE, power, OWN_AMOUNT);
+            raise(unit, SHIELD | RAISE_BEAM_DEFENSE, second, OWN_AMOUNT);
+        }
+        (blow.code, blow.damage) = if second == 0 {
+            (RAISE_DEFENSE, power)
+        } else if power == 0 {
+            (RAISE_BEAM_DEFENSE, second)
+        } else {
+            (RAISE_DEFENSES, power + second)
+        };
+    } else if flags & (SPEED_UP | EVASION_UP) != 0 {
+        let code = if flags & SPEED_UP != 0 {
+            RAISE_SPEED
+        } else {
+            RAISE_EVASION
+        };
+        raise(unit, code, power, OWN_AMOUNT);
+        (blow.code, blow.damage) = (code, power);
+    } else if flags & ACCURACY_UP != 0 {
+        raise(unit, RAISE_ACCURACY, power, PILOT_AMOUNT);
+        (blow.code, blow.damage) = (RAISE_ACCURACY, power);
+    } else if flags & FULL_REPAIR != 0 {
+        blow.kind = RESTORED;
+        unit.sp = unit
+            .sp
+            .wrapping_add(low_half(percent(i32::from(unit.sp), RESTORE_PERCENT)));
+        unit.df = unit
+            .df
+            .wrapping_add(low_half(percent(i32::from(unit.df), RESTORE_PERCENT)));
+        unit.hp = unit.max_hp;
+        unit.ep = unit.max_ep;
+    } else if flags & STATE != 0 {
+        blow.kind = AFFLICTED;
+        raise(unit, STATE_EFFECT, power, OWN_AMOUNT);
+    } else if flags & REPAIR != 0 {
+        blow.kind = REPAIRED;
+        let before = unit.hp;
+        unit.hp = before.saturating_add(power).min(unit.max_hp.max(before));
+        blow.damage = unit.hp - before;
+    } else {
+        blow.flags &= !LANDED;
+        blow.kind = DAMAGE;
+    }
+}
+
+/// The effect a weapon puts on a unit (`0x08032B54`): what it changes, by
+/// how much, how, for the weapon's turns.
+fn effect(arms: &Weapon, changes: u16, value: i32, kind: u8) -> Effect {
+    Effect {
+        changes,
+        value: u16::from_ne_bytes(low_half(value).to_ne_bytes()),
+        kind,
+        turns: arms.turns,
+        part: arms.part,
+    }
+}
+
+/// The low half-word of `value`, as the game stores it.
+fn low_half(value: i32) -> i16 {
+    i16::from_ne_bytes([value.to_ne_bytes()[0], value.to_ne_bytes()[1]])
 }
 
 #[cfg(test)]
@@ -223,6 +367,7 @@ mod tests {
             cost: 3,
             reach: 2,
             spread: 0,
+            turns: 0,
         }
     }
 
@@ -244,6 +389,77 @@ mod tests {
         assert_eq!(outcome.experience, 7);
         assert_eq!(sides[0][0].as_ref().map(|unit| unit.ep), Some(7));
         assert_eq!(sides[1][2].as_ref().map(|unit| unit.hp), Some(8));
+    }
+
+    fn shield() -> Weapon {
+        Weapon {
+            part: 316,
+            flags: 0x4004,
+            accuracy: 20,
+            power: 20,
+            cost: 2,
+            reach: 0,
+            spread: 0,
+            turns: 3,
+        }
+    }
+
+    #[test]
+    fn a_shield_always_raises_both_defenses_for_its_turns() {
+        let mut sides: Sides = Default::default();
+        sides[0][1] = Some(unit(50, Some(shield())));
+        let rolls = [99; ROLLS];
+        let outcome = attack(&mut sides, (0, 1), 0, &[1], &rolls, (0, 0, 1));
+        let blow = outcome.blows[0];
+        assert!(blow.landed());
+        assert_eq!((blow.kind, blow.code, blow.damage), (RAISED, 0x101, 40));
+        assert_eq!(sides[0][1].as_ref().map(|unit| unit.ep), Some(8));
+        let effects: Vec<_> = sides[0][1]
+            .iter()
+            .flat_map(|unit| &unit.effects)
+            .map(|effect| {
+                (
+                    effect.changes,
+                    effect.value,
+                    effect.kind,
+                    effect.turns,
+                    effect.part,
+                )
+            })
+            .collect();
+        assert_eq!(effects, [(0x1201, 20, 2, 3, 316), (0x1401, 20, 2, 3, 316)]);
+    }
+
+    #[test]
+    fn a_repair_gives_back_what_the_unit_lacks_at_most() {
+        let mut sides: Sides = Default::default();
+        let repair = Weapon {
+            flags: 0x8_0002,
+            power: 50,
+            ..shield()
+        };
+        let mut hurt = unit(100, Some(repair));
+        hurt.hp = 80;
+        sides[0][0] = Some(hurt);
+        let outcome = attack(&mut sides, (0, 0), 0, &[0], &[0; ROLLS], (0, 0, 1));
+        assert_eq!(
+            (outcome.blows[0].kind, outcome.blows[0].damage),
+            (REPAIRED, 20)
+        );
+        assert_eq!(sides[0][0].as_ref().map(|unit| unit.hp), Some(100));
+    }
+
+    #[test]
+    fn a_used_up_part_leaves_its_slot() {
+        let mut sides: Sides = Default::default();
+        let once = Weapon {
+            flags: 0x8040_0004,
+            ..shield()
+        };
+        sides[0][0] = Some(unit(100, Some(once)));
+        let outcome = attack(&mut sides, (0, 0), 0, &[0], &[0; ROLLS], (0, 0, 1));
+        assert_eq!(outcome.blows[0].kind, RESTORED);
+        assert_eq!(sides[0][0].as_ref().and_then(|unit| unit.weapons[0]), None);
     }
 
     #[test]

@@ -19,6 +19,10 @@ const NO_CHARACTER: u8 = 0xFF;
 const PASSIVE: u32 = 0x2000_0000;
 const OFFENSIVE: u32 = 1;
 const SELF_ONLY: u32 = 4;
+/// A weapon aimed at its own side (bit 1), rather than at its user.
+const OWN_SIDE: u32 = 2;
+/// The kind of a weapon its user takes on itself.
+const SELF_KIND: u8 = 0xF;
 const BEAM: u32 = 0x30;
 const ANTI_AIR: u32 = 0x200;
 const PIERCING: u32 = 0x400;
@@ -103,6 +107,8 @@ pub struct Weapon {
     pub reach: u8,
     /// How many it hits: one, a row, a column, a square or all.
     pub spread: u8,
+    /// The turns the effects it causes last.
+    pub turns: u8,
 }
 
 impl Weapon {
@@ -116,6 +122,7 @@ impl Weapon {
             cost: part.cost,
             reach: part.range.0,
             spread: part.range.1,
+            turns: part.turns,
         })
     }
 
@@ -123,6 +130,33 @@ impl Weapon {
     #[must_use]
     pub fn offensive(&self) -> bool {
         self.flags & OFFENSIVE != 0
+    }
+
+    /// Its kind (`0x0802BAF8`, the weapon's `+0xF`), which names its reach
+    /// in the aim's window and picks its shape on the grid: `0xF` for one
+    /// its user takes on itself; for one aimed at its side, `0x10`, `0x11`
+    /// or `0x12` by its spread 0, 2 or 4; otherwise, for a spread of 0 or 2,
+    /// a code by its reach (5, 6, 0, 7, 8, 9 or 10, 11, 2, 12, 13, 14), and
+    /// its spread itself for the rest.
+    #[must_use]
+    pub fn kind(&self) -> u8 {
+        if self.flags & SELF_ONLY != 0 {
+            return SELF_KIND;
+        }
+        let by_reach = |codes: [u8; 6]| {
+            codes
+                .get(usize::from(self.reach))
+                .copied()
+                .unwrap_or(self.spread)
+        };
+        match (self.flags & OWN_SIDE != 0, self.spread) {
+            (true, 0) => 0x10,
+            (true, 2) => 0x11,
+            (true, 4) => 0x12,
+            (false, 0) => by_reach([5, 6, 0, 7, 8, 9]),
+            (false, 2) => by_reach([10, 11, 2, 12, 13, 14]),
+            (_, spread) => spread,
+        }
     }
 
     /// Whether it reaches a target `distance` rows away (`0x08038F60`).
@@ -410,9 +444,24 @@ impl BattleUnit {
         }
     }
 
-    /// Adds an effect in the first free place (`0x08032B54`); `false`
-    /// when all 48 are taken.
+    /// Empties the slot of a part used up by its use (`0x08033E40`, bit 31
+    /// of its flags).
+    pub fn use_up(&mut self, slot: usize) {
+        if let Some(weapon) = self.weapons.get_mut(slot) {
+            *weapon = None;
+        }
+        if let Some(part) = self.parts.get_mut(slot) {
+            *part = NO_PART;
+        }
+    }
+
+    /// Adds an effect in the first free place, one whose turns have run
+    /// out (`0x08032B54`); `false` when all 48 are taken.
     pub fn affect(&mut self, effect: Effect) -> bool {
+        if let Some(free) = self.effects.iter_mut().find(|held| held.turns == 0) {
+            *free = effect;
+            return true;
+        }
         if self.effects.len() >= EFFECTS {
             return false;
         }
@@ -710,7 +759,27 @@ mod tests {
             cost: 0,
             reach: 2,
             spread: 0,
+            turns: 0,
         }
+    }
+
+    #[test]
+    fn a_weapons_kind_names_its_reach() {
+        let weapon = |flags: u32, reach: u8, spread: u8| Weapon {
+            part: 1,
+            flags,
+            accuracy: 0,
+            power: 0,
+            cost: 0,
+            reach,
+            spread,
+            turns: 0,
+        };
+        assert_eq!(weapon(0x4004, 0, 0).kind(), 0xF);
+        assert_eq!(weapon(0x21, 2, 1).kind(), 1);
+        assert_eq!(weapon(0x121, 0, 0).kind(), 5);
+        assert_eq!(weapon(0x11, 2, 2).kind(), 2);
+        assert_eq!(weapon(0x8_0002, 2, 4).kind(), 0x12);
     }
 
     #[test]

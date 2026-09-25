@@ -141,6 +141,8 @@ struct Placed<'a> {
     mirrored: bool,
     sheet: &'a SpriteSheet,
     dim: u8,
+    /// A glow's red, see [`redden`].
+    tint: u8,
     shake: i32,
 }
 
@@ -317,6 +319,8 @@ pub struct Combat {
     dim_panels: PanelLight,
     /// The spark a hit unit shows (the battle screen's effect 6).
     spark: Option<extraction::saga_battle::EffectSprite>,
+    /// The glow a unit a support part raised shows.
+    glow: Option<extraction::saga_battle::EffectSprite>,
     /// The sparks as the frame shows them: the sprites' OAM of the frame
     /// before.
     shown_sparks: Vec<turn::Spark>,
@@ -431,6 +435,7 @@ impl Combat {
             dims: [[0; SLOTS]; 2],
             dim_panels: PanelLight::Own,
             spark: extraction::saga_battle::screen_effect(rom, turn::SPARK),
+            glow: extraction::saga_battle::screen_effect(rom, turn::GLOW),
             shown_sparks: Vec::new(),
             lag: 0,
             shown_panels: (Vec::new(), PanelLight::Own),
@@ -934,6 +939,7 @@ impl Combat {
                         mirrored: side == ENEMY,
                         sheet,
                         dim: self.dims[side][slot],
+                        tint: self.tint_of(side, slot),
                         shake: self.shake_of(side, slot),
                     });
                 }
@@ -945,6 +951,7 @@ impl Combat {
             mirrored,
             sheet,
             dim,
+            tint,
             shake,
         } in placed
         {
@@ -958,7 +965,9 @@ impl Combat {
             } else {
                 x + i32::from(sprite.x)
             };
-            let palette = sheet.palette.map(|color| darken_color(color, dim));
+            let palette = sheet
+                .palette
+                .map(|color| redden(darken_color(color, dim), tint));
             draw_sprite(
                 frame,
                 left,
@@ -979,18 +988,35 @@ impl Combat {
             .sum()
     }
 
-    /// The hit units' sparks, on the grounds' layer.
+    /// How much a glow takes the red of a unit's colors to its top and
+    /// back this frame.
+    fn tint_of(&self, side: usize, slot: usize) -> u8 {
+        self.shown_sparks
+            .iter()
+            .filter(|spark| spark.side == side && spark.slot == slot)
+            .map(turn::Spark::tint)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The hit units' sparks and the raised ones' glows, on the grounds'
+    /// layer.
     fn draw_sparks(&self, frame: &mut Frame) {
-        let Some(sprite) = self.spark.as_ref() else {
-            return;
-        };
-        let palette = Palette::new(sprite.palette.map(Palette::from_bgr555));
         let mut layer: Vec<Option<Rgb>> = vec![None; WIDTH * HEIGHT];
         for spark in &self.shown_sparks {
+            let sprite = if spark.glow.is_some() {
+                self.glow.as_ref()
+            } else {
+                self.spark.as_ref()
+            };
+            let Some(sprite) = sprite else {
+                continue;
+            };
+            let palette = Palette::new(sprite.palette.map(Palette::from_bgr555));
             let Some(index) = spark.sprite_frame(sprite) else {
                 continue;
             };
-            let (x, y) = turn::Spark::anchor(self.anchors[spark.side][spark.slot]);
+            let (x, y) = spark.anchor(self.anchors[spark.side][spark.slot]);
             for piece in sprite.frames.get(index).into_iter().flatten() {
                 crate::battle::draw_piece(
                     &mut layer,
@@ -1137,6 +1163,19 @@ fn screen_units(
         saga_encounter::enemy_record(rom, formation, slot).map(|record| unit(u16::from(record[0])))
     });
     (panels, [player, enemy])
+}
+
+/// A BGR555 color's red raised by `amount`, at most 31, then lowered by
+/// it, at least 0 (`0x08031E90` with flags 6, then 5): the brightest reds
+/// dim, the rest stay.
+fn redden(color: u16, amount: u8) -> u16 {
+    if amount == 0 {
+        return color;
+    }
+    let amount = u16::from(amount);
+    let red = color & 0x1F;
+    let red = (red + amount).min(0x1F).saturating_sub(amount);
+    (color & !0x1F) | red
 }
 
 /// A BGR555 color with `amount` taken off each channel (`0x08031E90` with

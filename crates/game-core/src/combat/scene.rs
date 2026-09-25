@@ -38,6 +38,10 @@ use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
 const WIDTH: usize = 240;
+/// The part id in a weapon's part, without the back rack's bit.
+const PART_ID: u16 = 0x0FFF;
+/// Weapon flags for the attacker's own side (`2`) or itself (`4`).
+const OWN_SIDE_WEAPON: u32 = 6;
 const HEIGHT: usize = 160;
 const TILE: usize = 8;
 const IMAGE_TILES_SIDE: usize = 16;
@@ -489,6 +493,7 @@ impl AttackScene {
             match request {
                 Request::Sound(sound) => self.sounds.push(u16::from(sound)),
                 Request::Shake(kind) => self.shake = Some((kind, 0)),
+                Request::Blend(eva, evb) => self.alpha = (eva, evb),
             }
         }
         if self.scenery_task && scenery_runs {
@@ -612,7 +617,7 @@ impl AttackScene {
             | Step::FadeOut
             | Step::FadingOut => self.step_view(rom, windows)?,
             Step::NextTarget => {
-                self.step = if self.targets.is_empty() {
+                self.step = if self.targets.is_empty() || self.own_side(rom) {
                     Step::End
                 } else {
                     Step::Setup(View::Target)
@@ -791,6 +796,14 @@ impl AttackScene {
     /// The part of the weapon the attacker fires, as the scene lists it
     /// (`0x0200E23C`): 0 for one without a place on the picture, with
     /// `0x1000` for the back rack's.
+    /// Whether the weapon is for the attacker's own side (bits 1 and 2): the
+    /// scene then shows no target's view (`0x0200E24C`).
+    fn own_side(&self, rom: &[u8]) -> bool {
+        let part = self.weapon_part(&self.attack.attacker) & PART_ID;
+        extraction::saga_party::part_record(rom, part)
+            .is_some_and(|record| record.flags & OWN_SIDE_WEAPON != 0)
+    }
+
     fn weapon_part(&self, attacker: &SceneUnit) -> u16 {
         let part = attacker.parts.get(self.attack.weapon).copied().unwrap_or(0);
         if self.attack.weapon == effects::BACK_RACK && part != 0 {
@@ -1041,6 +1054,7 @@ impl AttackScene {
             back,
             spread: saga_battle::shot_spread(rom, unit.zoid).unwrap_or((0, 0)),
             chosen_slot: 0,
+            own_side: self.own_side(rom),
         };
         let loaded = self
             .entities

@@ -8,8 +8,9 @@
 //! advance (`0x0802F09C`), the effects' expiry (`0x0802FD4C`), the turn
 //! order (`0x08032410`), the rolls (`0x08033D94`), the actor's status check
 //! (`0x0802FAA8`), the action task (`0x0802E814`), the return to the
-//! screen (`0x0802BCA4`), its messages (`0x0802C084`) and hit display
-//! (`0x0802D36C`), the name routine (`0x080339C4`), the number routine
+//! screen (`0x0802BCA4`), its messages (`0x0802C084`, `0x0802CE98` after
+//! a support part) and displays (`0x0802D36C`, `0x0802CA54`), the name
+//! routine (`0x080339C4`), the number routine
 //! (`0x08001848`), the round's end (`0x0802F5C4`) and the result routine
 //! (`0x08032684`); checked frame by frame against a round of a battle on
 //! the world map in a reference emulator. See `docs/combat.md`.
@@ -62,6 +63,22 @@ const SPARK_DELAY: u32 = 1;
 /// pixels right of and 16 above the unit (`0x0802D9A4`).
 pub(super) const SPARK: usize = 6;
 const SPARK_OFFSET: (i32, i32) = (8, -16);
+/// The glow a unit a support part raised shows on its anchor (the battle
+/// screen's effect record 2, `0x0802CBBC`).
+pub(super) const GLOW: usize = 2;
+/// The glow's sound (`0x0802CA54`).
+const GLOW_SOUND: u16 = 0x57;
+/// The glow's frames: the unit's red brightens from 8 by 2 a frame to 30,
+/// then back to 0; the glow hides once both it and its animation are done,
+/// and its task reports a frame later (`0x0802CBBC`).
+const GLOW_FIRST: u32 = 8;
+const GLOW_STEP: u32 = 2;
+const GLOW_RISE: u32 = 12;
+const GLOW_FALL_END: u32 = 27;
+const GLOW_DONE: u32 = 29;
+/// The glow display's frames once its glows are done (`0x0802CA54`,
+/// states 100 to `0x38E`).
+const GLOW_TAIL: u32 = 2;
 /// How a hit unit shakes, a step a frame, three times (`0x0802D9A4`).
 const SHAKE: [i32; 4] = [-2, 0, 2, 0];
 const SHAKES: u32 = 3;
@@ -99,6 +116,29 @@ const TEXT_ROUND: u16 = 0x3B;
 const TEXT_LETTERS: u16 = 88;
 /// The digits: `battle-text` 94 on.
 const TEXT_DIGITS: u16 = 94;
+/// A support part's message (`0x0802CE98`): the unit, の, what changed,
+/// the amount, then 上がった or 下がった.
+const TEXT_OF: u16 = 63;
+/// の効果が無くなりました, after the part's name (`0x0802FD4C`).
+const TEXT_EXPIRED: u16 = 87;
+/// The parts the expiry names at most.
+const EXPIRED_PARTS: usize = 36;
+/// Frames between an expiry message's wait and the next message or the
+/// report (states `0x514` and `0x44C` or `0x2328`).
+const EXPIRY_GAP: u32 = 1;
+const TEXT_ROSE: u16 = 72;
+const TEXT_FELL: u16 = 73;
+/// What changed, by the first of the effect's bits the message finds:
+/// 攻撃力, 命中率, 総合防御, 物理防御, レーザー防御, スピード, 回避率.
+const CHANGE_TEXTS: [(u16, u16); 7] = [
+    (0x10, 64),
+    (0x20, 66),
+    (0x100, 65),
+    (0x200, 85),
+    (0x400, 86),
+    (0x800, 67),
+    (0x8000, 68),
+];
 /// "敵ゾイド　", the enemy's actions' prefix.
 const LABEL_ENEMY: u16 = 16;
 /// The round menu's lines.
@@ -207,6 +247,9 @@ pub(super) enum Task {
     Rows(u32),
     /// The effects' expiry (`0x0802FD4C`).
     Expiry(u32),
+    /// Its message for the `n`th part whose effects ran out, then the
+    /// frames after its wait.
+    Expired(usize, Option<u32>),
     /// The actor's status check (`0x0802FAA8`).
     Status(u32),
     /// The action task (`0x0802E814`).
@@ -234,6 +277,8 @@ pub(super) enum ActionStep {
 pub(super) enum Report {
     /// The message of target `n`, waiting for its wait.
     Target(usize),
+    /// The message of a support part's target `n`.
+    Support(usize),
     Destroyed(usize),
     /// The frames after the last wait.
     Tail(u32),
@@ -251,11 +296,14 @@ pub(super) struct Display {
     tail: Option<u32>,
 }
 
-/// A hit unit's spark (`0x0802D9A4`).
+/// A hit unit's spark (`0x0802D9A4`), or a raised one's glow
+/// (`0x0802CBBC`).
 #[derive(Clone)]
 pub(super) struct Spark {
     pub(super) side: usize,
     pub(super) slot: usize,
+    /// For a glow, the frames since its display started.
+    pub(super) glow: Option<u32>,
     /// Frames until the display's task first runs it.
     delay: u32,
     frame: u32,
@@ -268,7 +316,7 @@ pub(super) struct Spark {
 impl Spark {
     /// How far the unit is shaken this frame.
     pub(super) fn shake(&self) -> i32 {
-        if self.shown && self.frame < SHAKES * 4 {
+        if self.glow.is_none() && self.shown && self.frame < SHAKES * 4 {
             SHAKE[usize::try_from(self.frame % 4).unwrap_or(0)]
         } else {
             0
@@ -284,11 +332,42 @@ impl Spark {
     }
 
     /// Where the spark's anchor is, from the unit's.
-    pub(super) fn anchor((x, y): (i32, i32)) -> (i32, i32) {
-        (x + SPARK_OFFSET.0, y + SPARK_OFFSET.1)
+    pub(super) fn anchor(&self, (x, y): (i32, i32)) -> (i32, i32) {
+        if self.glow.is_some() {
+            (x, y)
+        } else {
+            (x + SPARK_OFFSET.0, y + SPARK_OFFSET.1)
+        }
+    }
+
+    /// How much a glow takes the red of the unit's colors to its top and
+    /// back (`0x08031E90` with flags 6, then 5).
+    pub(super) fn tint(&self) -> u8 {
+        let Some(frame) = self.glow else {
+            return 0;
+        };
+        let amount = if frame < GLOW_RISE {
+            GLOW_FIRST + GLOW_STEP * frame
+        } else if frame <= GLOW_FALL_END {
+            GLOW_STEP * (GLOW_FALL_END - frame)
+        } else {
+            0
+        };
+        u8::try_from(amount).unwrap_or(0)
+    }
+
+    /// Whether its task has reported.
+    fn done(&self) -> bool {
+        match self.glow {
+            Some(frame) => frame >= GLOW_DONE,
+            None => !self.shown && self.delay == 0,
+        }
     }
 
     fn advance(&mut self, sprite: &EffectSprite) {
+        if let Some(frame) = self.glow.as_mut() {
+            *frame += 1;
+        }
         if self.delay > 0 {
             self.delay -= 1;
             if self.delay > 0 {
@@ -336,6 +415,8 @@ pub(super) struct Fight {
     pub(super) cancelled: bool,
     /// Frames the screen's rebuild has taken.
     pub(super) rebuild: u32,
+    /// The parts whose effects ran out this round, for their messages.
+    pub(super) expired: Vec<u16>,
 }
 
 impl Combat {
@@ -659,6 +740,57 @@ impl Combat {
         Stage::RoundMenu
     }
 
+    /// The parts whose effects have run out, each once, in the units'
+    /// order: those effects forget their part (`0x0802FD4C`, state 0; at
+    /// most 36).
+    fn expire_effects(&mut self) -> Vec<u16> {
+        let mut parts = Vec::new();
+        for unit in self.sides.iter_mut().flatten().flatten() {
+            if !unit.fighting() {
+                continue;
+            }
+            for effect in &mut unit.effects {
+                if effect.turns == 0 && effect.part != 0 {
+                    if !parts.contains(&effect.part) && parts.len() < EXPIRED_PARTS {
+                        parts.push(effect.part);
+                    }
+                    effect.part = 0;
+                }
+            }
+        }
+        parts
+    }
+
+    /// The message that part `index`'s effects have gone (state `0x44C`):
+    /// its name and の効果が無くなりました, then the wait.
+    fn expiry_message(&mut self, index: usize) -> Task {
+        let part = self.fight.expired.get(index).copied().unwrap_or(0);
+        self.message(&[Call::Part(part), Call::Text(TEXT_EXPIRED)]);
+        Task::Expired(index, None)
+    }
+
+    /// Once the wait is over (state `0x4B0`), the next part's message two
+    /// frames on, or the report (states `0x514`, `0x2328`).
+    fn step_expired(&mut self, index: usize, after: Option<u32>) -> Task {
+        let Some(frames) = after else {
+            let busy = self.running.is_some() || !self.acts.is_empty();
+            return if !busy && self.wait_done() {
+                Task::Expired(index, Some(0))
+            } else {
+                Task::Expired(index, None)
+            };
+        };
+        if frames < EXPIRY_GAP {
+            return Task::Expired(index, Some(frames + 1));
+        }
+        if index + 1 < self.fight.expired.len() {
+            self.expiry_message(index + 1)
+        } else {
+            self.fight.expired.clear();
+            Task::Reported
+        }
+    }
+
     /// The round's end (`0x0802F5C4`): the effects count a turn down and
     /// the units' round flags clear.
     fn end_round(&mut self) {
@@ -773,7 +905,7 @@ impl Combat {
                 part: weapon.part,
                 power,
                 accuracy: u16::try_from(weapon.accuracy.max(0)).unwrap_or(0),
-                code: weapon.spread,
+                code: weapon.kind(),
                 cost: u16::try_from(weapon.cost.max(0)).unwrap_or(0),
                 flags: weapon.flags,
                 chances,
@@ -886,13 +1018,18 @@ impl Combat {
             }
             // 0x0802FD4C: the effects that ran out; without any it reports
             // on its second frame.
-            Task::Expiry(frame) => {
-                if frame >= 1 {
+            Task::Expiry(0) => {
+                self.fight.expired = self.expire_effects();
+                Task::Expiry(1)
+            }
+            Task::Expiry(_) => {
+                if self.fight.expired.is_empty() {
                     Task::Reported
                 } else {
-                    Task::Expiry(frame + 1)
+                    self.expiry_message(0)
                 }
             }
+            Task::Expired(index, after) => self.step_expired(index, after),
             Task::Status(frame) => {
                 let slots = u32::try_from(2 * SLOTS).unwrap_or(0);
                 if frame >= slots * STATUS_FRAMES_PER_SLOT {
@@ -1001,8 +1138,84 @@ impl Combat {
         Task::Return(frame + 1)
     }
 
-    /// The hit display and the first message (`0x0802D36C`, `0x0802C084`).
+    /// The display and the first message the first blow's kind picks
+    /// (`0x0802BCA4`, the table at `0x0802BEB0`): after damage the hit
+    /// display (`0x0802D36C`, `0x0802C084`); after a raised or lowered
+    /// statistic the glows and their messages (`0x0802CA54`, `0x0802CE98`).
     fn start_report(&mut self) {
+        match self.fight.blows.first().map(|blow| blow.kind) {
+            Some(attack::RAISED | attack::LOWERED) => self.start_support_report(),
+            Some(attack::DAMAGE) | None => self.start_hit_report(),
+            Some(_) => self.fight.report = Some(Report::Tail(0)),
+        }
+    }
+
+    /// A raised unit's glow and sound (`0x0802CA54`); after a lowered one
+    /// the original's own display is not modeled.
+    fn start_support_report(&mut self) {
+        let raised = self.fight.blows.first().map(|blow| blow.kind) == Some(attack::RAISED);
+        let sparks: Vec<Spark> = self
+            .fight
+            .blows
+            .iter()
+            .filter(|blow| raised && blow.landed())
+            .map(|blow| Spark {
+                side: blow.side,
+                slot: blow.slot,
+                glow: Some(0),
+                delay: SPARK_DELAY,
+                frame: 0,
+                step: 0,
+                ticks: self
+                    .glow
+                    .as_ref()
+                    .and_then(|sprite| sprite.animation.first())
+                    .map_or(1, |step| step.duration.max(1)),
+                ended: false,
+                shown: false,
+            })
+            .collect();
+        if !sparks.is_empty() {
+            self.sounds.push(GLOW_SOUND);
+            self.fight.display = Some(Display {
+                sparks,
+                frames: 0,
+                tail: None,
+            });
+        }
+        self.report_support(0);
+    }
+
+    /// The message of blow `index` of a support part, or of the next that
+    /// landed (`0x0802CE98`): the unit, what changed, by how much, and
+    /// whether it rose or fell.
+    fn report_support(&mut self, index: usize) {
+        let Some(offset) = self.fight.blows[index.min(self.fight.blows.len())..]
+            .iter()
+            .position(Blow::landed)
+        else {
+            self.fight.report = Some(Report::Tail(0));
+            return;
+        };
+        let index = index + offset;
+        let blow = self.fight.blows[index];
+        let mut calls = self.unit_name(Some((blow.side, blow.slot)));
+        calls.push(Call::Text(TEXT_OF));
+        if let Some(&(_, text)) = CHANGE_TEXTS.iter().find(|(bit, _)| blow.code & bit != 0) {
+            calls.push(Call::Text(text));
+        }
+        calls.extend(number(blow.damage));
+        if blow.code & 1 != 0 {
+            calls.push(Call::Text(TEXT_ROSE));
+        } else if blow.code & 2 != 0 {
+            calls.push(Call::Text(TEXT_FELL));
+        }
+        self.message(&calls);
+        self.fight.report = Some(Report::Support(index));
+    }
+
+    /// The hit display and the first message (`0x0802D36C`, `0x0802C084`).
+    fn start_hit_report(&mut self) {
         let sparks: Vec<Spark> = self
             .fight
             .blows
@@ -1011,6 +1224,7 @@ impl Combat {
             .map(|blow| Spark {
                 side: blow.side,
                 slot: blow.slot,
+                glow: None,
                 delay: SPARK_DELAY,
                 frame: 0,
                 step: 0,
@@ -1069,7 +1283,10 @@ impl Combat {
         let busy = self.running.is_some() || !self.acts.is_empty();
         let report = self.fight.report;
         let waited = !busy
-            && matches!(report, Some(Report::Target(_) | Report::Destroyed(_)))
+            && matches!(
+                report,
+                Some(Report::Target(_) | Report::Destroyed(_) | Report::Support(_))
+            )
             && self.wait_done();
         match report {
             Some(Report::Target(index)) if waited => {
@@ -1086,6 +1303,7 @@ impl Combat {
                     self.fight.report = Some(Report::Tail(0));
                 }
             }
+            Some(Report::Support(index)) if waited => self.report_support(index + 1),
             Some(Report::Destroyed(index)) if waited => {
                 if index + 1 < self.fight.blows.len() {
                     self.report_target(index + 1);
@@ -1170,25 +1388,34 @@ impl Combat {
             return;
         };
         display.frames += 1;
-        if let Some(sprite) = self.spark.as_ref() {
-            for spark in &mut display.sparks {
+        for spark in &mut display.sparks {
+            let sprite = if spark.glow.is_some() {
+                self.glow.as_ref()
+            } else {
+                self.spark.as_ref()
+            };
+            if let Some(sprite) = sprite {
                 spark.advance(sprite);
-                if spark.ended && spark.frame >= SHAKES * 4 {
-                    spark.shown = false;
-                }
+            }
+            let over = match spark.glow {
+                Some(frame) => frame > GLOW_FALL_END,
+                None => spark.frame >= SHAKES * 4,
+            };
+            if spark.ended && over {
+                spark.shown = false;
             }
         }
-        if display.tail.is_none()
-            && display
-                .sparks
-                .iter()
-                .all(|spark| !spark.shown && spark.delay == 0)
-        {
+        if display.tail.is_none() && display.sparks.iter().all(Spark::done) {
             display.tail = Some(0);
         }
+        let last = if display.sparks.iter().any(|spark| spark.glow.is_some()) {
+            GLOW_TAIL
+        } else {
+            DISPLAY_TAIL
+        };
         if let Some(tail) = display.tail.as_mut() {
             *tail += 1;
-            if *tail > DISPLAY_TAIL {
+            if *tail > last {
                 return;
             }
         }

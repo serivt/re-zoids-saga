@@ -105,10 +105,36 @@ pub struct Entity {
     shake: u8,
     /// The sound it plays as it starts (`+0x6C`).
     sound: u8,
+    /// Where its fade of the blend stands (`+0x68`), 0 once done.
+    fading: u8,
     /// Its own affine transform (flag `0x20`, `+0x44`): the horizontal and
     /// vertical ratios in 8.8 and the angle, which every piece takes.
     pub(super) affine: Option<(i16, i16, u16)>,
 }
+
+/// A step of the blend's fade in (`0x080481D4` with 2): the next step,
+/// and the blend it sets. It starts from none of the sprite and all of the
+/// layer below and goes up in 32 steps, the last one back to 0.
+fn fade_step(step: u8) -> (u8, (u8, u8)) {
+    let blend = if step == 0 {
+        (0, FADE_BELOW)
+    } else {
+        let half = u16::from(step >> 1);
+        let eva = (half * 15) >> 4;
+        let evb = u16::from(FADE_BELOW) - ((half * 7) >> 4);
+        (
+            u8::try_from(eva).unwrap_or(0),
+            u8::try_from(evb).unwrap_or(0),
+        )
+    };
+    let next = step.wrapping_add(1);
+    (if next >> 1 == FADE_STEPS { 0 } else { next }, blend)
+}
+
+/// The layer below's share when a fade starts.
+const FADE_BELOW: u8 = 15;
+/// Double steps of a blend's fade in.
+const FADE_STEPS: u8 = 16;
 
 /// Drawn this frame.
 pub const VISIBLE: u16 = 0x8000;
@@ -138,6 +164,9 @@ pub enum Request {
     Sound(u8),
     /// Starts a screen shake of this kind (`0x0804416C`).
     Shake(u8),
+    /// Sets the blend of the semi-transparent sprites over the layers
+    /// below, as eighth-sixteenths (`BLDALPHA`, `0x08048168`).
+    Blend(u8, u8),
 }
 
 /// The entity table of a scene.
@@ -169,6 +198,9 @@ pub struct ShotPlace {
     /// The weapon slot the player chose, which puts the third rack's shots
     /// behind the Zoid.
     pub chosen_slot: u16,
+    /// A weapon for the attacker's own side, whose shots show in front of
+    /// the Zoid (`0x0200E24B`).
+    pub own_side: bool,
 }
 
 impl Entities {
@@ -298,7 +330,9 @@ impl Entities {
             entity.set(HOLDS_END, spawn.flags & LOOP == 0);
             entity.set(ON_LAYER, spawn.flags & RACK_FLAG != 0);
             entity.semi_transparent = spawn.flags & SEMI_TRANSPARENT != 0;
-            entity.priority = if spawn.flags & BEHIND != 0 || place.chosen_slot == BEHIND_SLOT {
+            entity.priority = if place.own_side {
+                PRIORITY_FRONT
+            } else if spawn.flags & BEHIND != 0 || place.chosen_slot == BEHIND_SLOT {
                 PRIORITY_BEHIND
             } else {
                 PRIORITY_FRONT
@@ -393,6 +427,7 @@ impl Entities {
             1 => self.chain_at_link(entity, starting),
             10 => self.chain_at_steps(entity),
             13 => self.fly_in(entity, starting, enemy_view),
+            15 => self.fade_in(entity, starting),
             14 => self.fly_back(entity, starting, enemy_view),
             17 => self.drift(entity, starting, enemy_view),
             _ => self.chain_at_end(entity, starting),
@@ -436,6 +471,19 @@ impl Entities {
         if entity.is(ENDED) {
             entity.reset();
             entity.set(VISIBLE, false);
+            entity.mark(ALIVE, false);
+        }
+    }
+
+    /// `0x0804A78C`: fades the blend in over 32 frames (`0x080481D4` in its
+    /// second way), then plays its part until its parameter's frames have
+    /// gone, staying on the screen.
+    fn fade_in(&mut self, entity: &mut Entity, starting: bool) {
+        if starting || entity.fading != 0 {
+            let (next, blend) = fade_step(entity.fading);
+            entity.fading = next;
+            self.requests.push(Request::Blend(blend.0, blend.1));
+        } else if entity.parameter <= entity.age {
             entity.mark(ALIVE, false);
         }
     }
@@ -629,6 +677,7 @@ impl Entity {
             timer: 0,
             shake: 0,
             sound: 0,
+            fading: 0,
             affine: None,
         }
     }
@@ -822,6 +871,22 @@ fn spread_y(y: u16, mode: u8) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_blend_fades_in_over_32_steps() {
+        let mut step = 0;
+        let mut blends = Vec::new();
+        for _ in 0..32 {
+            let (next, blend) = fade_step(step);
+            blends.push(blend);
+            step = next;
+        }
+        assert_eq!(step, 0);
+        assert_eq!(blends[0], (0, 15));
+        assert_eq!(blends[2], (0, 15));
+        assert_eq!(blends[4], (1, 15));
+        assert_eq!(blends[31], (14, 9));
+    }
 
     #[test]
     fn shots_spread_toward_the_middle_by_the_zoids_size() {

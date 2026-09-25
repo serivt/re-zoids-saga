@@ -381,6 +381,7 @@ mod tests {
             cost: 0,
             reach: 0,
             spread: 0,
+            turns: 0,
         }
     }
 

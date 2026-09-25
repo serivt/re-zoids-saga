@@ -176,7 +176,7 @@ the fight:
 | `0x76C` | The end when a side is beaten, the round otherwise |
 | `0x1B58` | The round's menu: `battle-menu` 6 and 7, `battle-text` 0x3B, `battle-menu` 5, then the menu, `battle-menu` 3 (0x19 in story battles); 退却 always works |
 | 2000, `0x7DA` | The row advance (task `0x0802F09C`), 5 frames; a side whose front row is empty would move its back row up |
-| `0x8FC`, `0x906` | The effects that ran out (`0x0802FD4C`); without any it reports on its second frame |
+| `0x8FC`, `0x906` | The effects that ran out (`0x0802FD4C`): once for each part among them, in the units' order, *part*の効果が無くなりました (`battle-text` 87) and the wait, the next two frames after it; the effects forget the part. Without any it reports on its second frame |
 | `0x9C4` | The turn's order, which costs a frame more |
 | `0xBB8`, `0xBD6` | The next actor (`0x0802AF70`): the turn's 16 rolls, its defense dropped, its status check (`0x0802FAA8`, 2 frames a slot) |
 | `0xBEA`, `0xC1C` | It acts (the action task `0x0802E814`): the others are darkened, the message *name*は, then the party's menu (`battle-menu` 4: 攻撃, 防御) or the enemy's choice |
@@ -208,6 +208,17 @@ The screen's other changes:
   after a beaten one), each with its wait; a panel's bars follow its message. The
   display ends 7 frames after its sparks, the messages 5 after their last wait, the
   return 2 after both.
+- **After a support part:** the first target's kind picks the display and the
+  messages (the table at `0x0802BEB0`). For a raised statistic (kind 1,
+  `0x0802CA54` and `0x0802CE98`), each unit it landed on shows a glow on its place
+  (record 2 of the battle screen's effects: a ring on the ground and rising light),
+  with sound `0x57`, while the red of its colors is raised and lowered again by the
+  same amount (`0x08031E90` with flags 6 and 5: the brightest reds dim), from 8 by 2
+  a frame to 30 and back to 0. The message gives the unit's name, `battle-text` 63
+  (の), what changed (64 攻撃力, 66 命中率, 65 総合防御, 85 物理防御, 86
+  レーザー防御, 67 スピード, 68 回避率, by the first of the change's bits `0x10`,
+  `0x20`, `0x100`, `0x200`, `0x400`, `0x800`, `0x8000`), the amount, and 72 上がった
+  (bit 0) or 73 下がった (bit 1), with its wait.
 
 ## Results
 
@@ -369,6 +380,31 @@ The defense is the beam defense against beams (`0x30`), capped at 65:
    chapter 6 on.
 4. A target left without hit points is beaten (`0x400`); it leaves the battle when the
    actor's turn ends, and its experience and money go to the party's reward.
+5. A weapon for its own side (bit 0 clear) always lands and does what its flags say
+   (below). A weapon for the other side that always lands (`0x800`) lowers the
+   target's accuracy instead of hurting it: effect `0x22` by its power.
+6. A part used up by its use (bit 31) leaves its slot.
+
+Each target's record (`0x0200EB84 + 0x220C`) keeps what the return shows: a kind
+(`+8`), what changed (`+2`) and an amount (`+4`). The effects go in the first of the
+unit's 48 places whose turns have run out (`0x08032B54`), for the part's turns
+(`+0x14`), by the amount (kind 2, 3 for the pilot's bonuses):
+
+| Flags | Effects | Kind, change, amount |
+|---|---|---|
+| `0x8000` | `0x201` and `0x401` (defense and beam defense) by the power | 1, `0x201`, `0x401` or `0x101` (both), by the power, the second value (`+8` of the record) or their sum when neither is 0 |
+| `0x4000` | `0x1201` by the power and `0x1401` by the second value | the same |
+| `0x20000` | `0x801` (speed) by the power | 1, `0x801`, the power |
+| `0x10000` | `0x8001` (evasion) by the power | 1, `0x8001`, the power |
+| `0x40000` | `0x21` (the pilot's accuracy) by the power | 1, `0x21`, the power |
+| `0x400000` | Hit points and energy full; speed and defense raised by half, for good | 5 |
+| `0x100000` | `0x4000` (a state) by the power | 4 |
+| `0x80000` | Hit points back by the power, at most the full amount | 3, the points given back |
+
+The first of these that the flags hold applies. The party starts with two: the Shield
+Liger's Eシールド (part 316, `0x4004`: 20 and 20 for three turns) and the Command
+Wolves' 煙幕発生装置 (356, evasion 20). Bit 2 (`4`) makes a weapon its user's alone,
+bit 1 (`2`) its side's.
 
 ### Turns and the enemies' choices
 
@@ -440,6 +476,10 @@ rack 2 behind.
 | `0x10A0` | The target's pilot reacts, the shots' animations paused meanwhile |
 | `0x2000`, `0x2010` | The end: the screen goes back to the battle's (result 1, or 2 after an aim given up) |
 
+A weapon for the attacker's own side or for itself (bits 1 and 2) shows no target's
+view (`0x0200E24C`): `0x10B0` goes to the end. Its shots show in front of the Zoid
+(`0x0200E24B`).
+
 Holding A skips ahead. In the shots' states, holding it counts down 60 frames (35 on
 a target's view) and then ends them; in the hold it counts down what is left of those
 first. Story battles cannot skip the shots.
@@ -472,7 +512,11 @@ the unit aimed last, when it is still there (EWRAM `0x0200E24E`).
 
 The weapon's window gives the power (the turn's, rounded, at most 999, －－－ below
 1), the accuracy (at most 99, －－－ for support), the reach (`system` 21 by the
-weapon's reach code `+0xF`) and the energy cost. With the scene's result 1 the
+weapon's reach code `+0xF`) and the energy cost. The reach code is the weapon's kind
+(`0x0802BAF8`): `0xF` (自機) for one its user takes on itself; for one for its side,
+`0x10`, `0x11` or `0x12` by its spread 0, 2 or 4; otherwise, for a spread of 0 or 2,
+a code by its reach (5, 6, 0, 7, 8, 9 or 10, 11, 2, 12, 13, 14); the spread itself
+for the rest. With the scene's result 1 the
 attacker speaks and fires (`0x1010`); with 2 it fades out and ends (`0x2010`).
 
 **The grid.** A weapon's reach code and whether it is a fixed weapon (slot 3 on) give
@@ -571,6 +615,7 @@ at ROM `0x6D4784`) then moves it and sets off the next one:
 | 10 | From its first frame, sets off the next on its link step and the sprite its value's low byte names on the step its high byte gives; goes when its animation ends |
 | 13 | A bullet flying in at 24 pixels a frame; past its mark it restarts the sprite it names |
 | 14 | A bullet that jumps a screen back and flies in to its place, then sets off the sprite it names |
+| 15 | Fades the blend of the semi-transparent sprites in over 32 frames (`0x080481D4` in its second way: from none of the sprite and all of the layer below to 14 and 9 sixteenths), then plays its part, still showing, until its value's frames have gone; the shield's bubble (sprite `0x2E`, placed on the screen rather than on the rack) |
 | 17 | Drifts by its value until its animation ends, setting off the next at its link step |
 
 The five screen shakes (`0x08044B34` and after, tables at ROM `0x6D4168`, `0x6D41E8`,
@@ -624,6 +669,17 @@ In the game, the step, the sound, the darkening, the battle's start, the song, t
 retreat's sound, the end and the field's return fall on the same frames as the
 original's. The enemies themselves differ, as the formations are drawn at random.
 
+The Shield Liger's shield was compared on every frame from the traced save state of
+the party's turn, choosing it in the aim: the window (射程 自機, the kind `0xF`), the
+aim's end without a grid, the scene's states and sounds, the bubble's fade and its
+hold, the fade out and the end fall on the same frames as the original's, and the
+frames are identical but for the scenery's rewrite line. The return then runs a frame
+late (see Differences); a frame apart, the glow, the unit's red and the message are
+identical. The shield's expiry was traced in the original over four rounds (the
+enemies' hit points raised by hand): its message and the task's states give the
+port's timing. The port shows it, with the Command Wolves' and an enemy's, at the
+fourth round's start of a fight where the party only uses its support parts.
+
 Back on the field, the port was compared with the original's saved fight, won and,
 with its result set to a loss, lost. The port met an enemy on the same cells of the
 world map, and fought until it won, and again with the party's hit points set to 1
@@ -634,6 +690,10 @@ Zoid. The enemy the port beat had been standing, so its animation ran at half th
 traced one's speed: each step of its explosion is identical to the original's.
 
 ## Differences
+
+- The return's build before its fade in: the port takes 20 frames and 8 a panel; the
+  original took 49, 51 and 52 frames for four panels in the traced returns, as the
+  CPU time of the panels' text varies.
 
 - The menu window appears a frame early. Presenting it cost the original two frames
   (the CPU time of its five lines of text), as happens in the pause menu.
@@ -663,12 +723,15 @@ traced one's speed: each step of its explosion is identical to the original's.
 - In the results: the battle's flags (`0x0200EB84 + 2`: no spoils, double money,
   double experience), the training a unit gains when `+0x21E0` is set, the link
   battles' results (flag `0x20`), and a new unit for a party without one after a loss.
-- The row advance and the expiry of effects (their fixed frames are).
+- The row advance (its fixed frames are).
+- After a support part, the displays and messages of the kinds other than a raised
+  statistic: a lowered one (`0x0802C8ED`; its messages are modeled), a repair
+  (`0x0802C421`, `0x0802C709`), a state (`0x0802D225`) and a full repair
+  (`0x0802D0C1`). A part used up in battle is not taken from the game state.
 - The enemies' other fifteen ways of choosing; items and deck commands; the battle
   menu's other lines, which show the menu again.
-- In the attack scenes: the shot behaviors other than 0, 1, 2, 10, 13, 14 and 17 (they
-  play as 2), the palette flash of a critical hit, support weapons (their own-side
-  flows and displays), the view that skips the attacker (`0x0200EB84 & 3 == 1`), the
+- In the attack scenes: the shot behaviors other than 0, 1, 2, 10, 13, 14, 15 and 17
+  (they play as 2), the palette flash of a critical hit, the view that skips the attacker (`0x0200EB84 & 3 == 1`), the
   weapons' and the special pilots' own lines, and the story battles' scripted aim.
 - In the aim: the front weapon's hiding while the Zoid fades (the mount's `+0x4A`),
   and the entities the back rack's weapon moves when it fires (`0x08042780`).
