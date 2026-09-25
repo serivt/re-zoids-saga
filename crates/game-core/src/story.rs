@@ -1323,8 +1323,8 @@ const SHOP_FADE_DELAY: u8 = 2;
 
 /// Meeting a roaming enemy (`0x0800B9CC`, entity state 4, a frame after
 /// the step that met it): sound `0x52`, the field darkens to black from
-/// the next frame (`0x08001524`), the battle runs, and the field returns
-/// from black a level a frame (`0x080014A8`).
+/// the next frame (`0x08001524`), the battle runs, the field returns from
+/// black a level a frame (`0x080014A8`), and then the outcome takes hold.
 pub const ENCOUNTER: &[Op] = &[
     Op::Freeze(1),
     Op::Sound(ENCOUNTER_SOUND),
@@ -1332,6 +1332,7 @@ pub const ENCOUNTER: &[Op] = &[
     Op::Combat,
     Op::Freeze(ENCOUNTER_RELOAD_FRAMES),
     Op::FadeInHolding,
+    Op::AfterCombat,
 ];
 
 const ENCOUNTER_SOUND: u16 = 0x52;

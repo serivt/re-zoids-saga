@@ -12,15 +12,16 @@
 //!
 //! | Offset | Content |
 //! |---|---|
-//! | `0x11` | Scenery: index of the backgrounds below |
+//! | `0x11` | Scenery + 1: index of the backgrounds below |
 //! | `0x14` | The enemy's Zoid |
 //! | `0x15` | Its pilot (a character) |
 //! | `0x16` | Its quote: string `172 + n` of the `battle` table |
 //!
 //! Battle images are 128×128 pixels of 256 8bpp tiles with 64 colors,
-//! LZ77-compressed: the scenery's at the pointers of ROM `0x6F6968` (tiles)
-//! and `0x6F6BF0` (palette) by scenery, loaded to palette entries 64–127;
-//! a Zoid's at the first of three pointers per Zoid of ROM `0x6F8974`
+//! LZ77-compressed, loaded by the 12-byte entries (source, destination,
+//! length) of the loader at `0x08001A54`: the scenery's by the entries at ROM
+//! `0x6F6934` (tiles) and `0x6F6BBC` (palette), loaded to palette entries
+//! 64–127; a Zoid's by the entries at ROM `0x6F8974`
 //! (tiles) and `0x6F9100` (palette), loaded to entries 0–63.
 //!
 //! The shots' effects are sprites of the 282 16-byte records at ROM
@@ -42,11 +43,12 @@ const SCENES: usize = 0x0066_429C;
 const SCENE_LEN: usize = 44;
 const SCENERY_FIELD: usize = 0x11;
 const ENEMY_FIELD: usize = 0x14;
-const SCENERY_TILES: usize = 0x006F_6968;
-const SCENERY_PALETTES: usize = 0x006F_6BF0;
+const SCENERY_TILES: usize = 0x006F_6934;
+const SCENERY_PALETTES: usize = 0x006F_6BBC;
+/// The loader's entries (`0x08001A54`): source, destination and length.
+const LOAD_ENTRY_LEN: usize = 12;
 const ZOID_TILES: usize = 0x006F_8974;
 const ZOID_PALETTES: usize = 0x006F_9100;
-const ZOID_IMAGES: usize = 3;
 const IMAGE_TILES: usize = 256;
 const IMAGE_COLORS: usize = 64;
 /// First `battle` string of the quotes the scenes' enemies speak.
@@ -123,7 +125,14 @@ pub struct EffectSprite {
     pub frames: Vec<Vec<EffectPiece>>,
     /// Its first animation.
     pub animation: Vec<AnimationStep>,
+    /// Its animations, the first [`EFFECT_ANIMATIONS`] of its table that
+    /// the ROM has.
+    pub animations: Vec<Vec<AnimationStep>>,
 }
+
+/// Animations an effect sprite's table is read for: the shots pick one of
+/// the first four (`0x080485C4`), the aiming grid up to its 20th.
+pub const EFFECT_ANIMATIONS: usize = 32;
 
 /// Effect sprite `id` of the table at ROM `0x6F77D4`.
 #[must_use]
@@ -168,31 +177,123 @@ pub fn weapon_mount(rom: &[u8], zoid: u16, rack: usize) -> Option<(i16, i16)> {
     Some((value(0), value(MOUNT_Y)))
 }
 
+/// Rack `rack`'s own vertical place on Zoid `zoid`'s picture, `-1` when it
+/// takes the default: the attack scenes leave off a part whose place is 0
+/// (`0x08041AA8`).
+#[must_use]
+pub fn weapon_mount_raw(rom: &[u8], zoid: u16, rack: usize) -> Option<i16> {
+    let at = WEAPON_MOUNTS + usize::from(zoid) * MOUNT_LEN + MOUNT_Y + rack.min(MOUNTS - 1) * 2;
+    let bytes = rom.get(at..at + 2)?;
+    Some(i16::from_le_bytes([bytes[0], bytes[1]]))
+}
+
+/// The Zoids' 76-byte records (ROM `0x670210`), whose sprite the status
+/// screens and the aiming grid show: its 64 plain tiles, palette,
+/// animations and frames at `+0x30`.
+const ZOID_RECORDS: usize = 0x0067_0210;
+const ZOID_RECORD_LEN: usize = 0x4C;
+const ZOID_ICON: usize = 0x30;
+const ZOID_ICON_TILE_BYTES: usize = 64 * 32;
+
+/// Zoid `zoid`'s icon, which the aiming grid shows in its cells
+/// (`0x0804502C`).
+#[must_use]
+pub fn zoid_icon(rom: &[u8], zoid: u16) -> Option<EffectSprite> {
+    let at = ZOID_RECORDS + usize::from(zoid) * ZOID_RECORD_LEN + ZOID_ICON;
+    sprite_record(rom, at, Packing::Plain(ZOID_ICON_TILE_BYTES))
+}
+
+/// The battle screen's effects (ROM `0x66B99C`, 7 records like the
+/// shots' but with a plain palette): the spark a hit unit shows is 6.
+const SCREEN_EFFECTS: usize = 0x0066_B99C;
+const SCREEN_EFFECT_COUNT: usize = 7;
+
+/// Effect `id` of the battle screen's table (`0x08032208`).
+#[must_use]
+pub fn screen_effect(rom: &[u8], id: usize) -> Option<EffectSprite> {
+    if id >= SCREEN_EFFECT_COUNT {
+        return None;
+    }
+    sprite_record(rom, SCREEN_EFFECTS + id * EFFECT_LEN, Packing::Screen)
+}
+
 fn sprite_at(rom: &[u8], at: usize) -> Option<EffectSprite> {
+    sprite_record(rom, at, Packing::Effect)
+}
+
+/// How a sprite record's tiles and palette are stored.
+#[derive(Clone, Copy)]
+enum Packing {
+    /// Both LZ77-compressed: the effects and the weapons.
+    Effect,
+    /// Compressed tiles and a plain palette: the battle screen's effects.
+    Screen,
+    /// This many plain tile bytes and a plain palette: the Zoids' icons.
+    Plain(usize),
+}
+
+fn sprite_record(rom: &[u8], at: usize, packing: Packing) -> Option<EffectSprite> {
     let record = rom.get(at..at + EFFECT_LEN)?;
     let pointer = |at: usize| rom_offset(&record[at..at + 4]);
-    let (tile_bytes, _) = lz77::decompress(rom.get(pointer(0)?..)?).ok()?;
-    let (palette_bytes, _) = lz77::decompress(rom.get(pointer(4)?..)?).ok()?;
-    let palette = parse_palette(&palette_bytes)?;
-    let first_animation = rom_offset(rom.get(pointer(8)?..pointer(8)? + 4)?)?;
+    let tile_bytes = match packing {
+        Packing::Effect | Packing::Screen => lz77::decompress(rom.get(pointer(0)?..)?).ok()?.0,
+        Packing::Plain(len) => rom.get(pointer(0)?..pointer(0)? + len)?.to_vec(),
+    };
+    let palette = if let Packing::Effect = packing {
+        let (palette_bytes, _) = lz77::decompress(rom.get(pointer(4)?..)?).ok()?;
+        parse_palette(&palette_bytes)?
+    } else {
+        parse_palette(rom.get(pointer(4)?..pointer(4)? + 32)?)?
+    };
+    let table = pointer(8)?;
+    let first_animation = rom_offset(rom.get(table..table + 4)?)?;
     let animation = read_steps(rom, first_animation)?;
+    let mut animations = vec![animation.clone()];
+    for index in 1..EFFECT_ANIMATIONS {
+        let at = table + index * 4;
+        let Some(steps) = rom
+            .get(at..at + 4)
+            .and_then(rom_offset)
+            .and_then(|start| read_steps(rom, start))
+            .filter(|steps| !steps.is_empty())
+        else {
+            break;
+        };
+        animations.push(steps);
+    }
     let frame_table = pointer(12)?;
     let frame_count = animation
         .iter()
         .map(|step| step.frame + 1)
         .max()
         .unwrap_or(0);
-    let frames = (0..frame_count)
+    let mut frames = (0..frame_count)
         .map(|index| {
             let at = frame_table + index * 4;
             read_pieces(rom, rom_offset(rom.get(at..at + 4)?)?)
         })
         .collect::<Option<Vec<_>>>()?;
+    let wanted = animations
+        .iter()
+        .flatten()
+        .map(|step| step.frame + 1)
+        .max()
+        .unwrap_or(0);
+    for index in frame_count..wanted {
+        let at = frame_table + index * 4;
+        let pieces = rom
+            .get(at..at + 4)
+            .and_then(rom_offset)
+            .and_then(|start| read_pieces(rom, start))
+            .unwrap_or_default();
+        frames.push(pieces);
+    }
     Some(EffectSprite {
         tiles: Tileset::from_4bpp(&tile_bytes),
         palette,
         frames,
         animation,
+        animations,
     })
 }
 
@@ -227,24 +328,25 @@ pub fn battle_scene(rom: &[u8], index: usize) -> Option<BattleScene> {
     let at = SCENES + index * SCENE_LEN;
     let record = rom.get(at..at + SCENE_LEN)?;
     Some(BattleScene {
-        scenery: record[SCENERY_FIELD],
+        scenery: record[SCENERY_FIELD].wrapping_sub(1),
         zoid: record[ENEMY_FIELD],
         pilot: record[ENEMY_FIELD + 1],
         quote: QUOTE_BASE + usize::from(record[ENEMY_FIELD + 2]),
     })
 }
 
-/// The scenery image `scenery`.
+/// The scenery image `scenery`: kind × 3 + the Zoid's size class
+/// (`0x08043D6C`).
 #[must_use]
 pub fn scenery_image(rom: &[u8], scenery: u8) -> Option<BattleImage> {
-    let slot = usize::from(scenery) * 4;
+    let slot = usize::from(scenery) * LOAD_ENTRY_LEN;
     image(rom, SCENERY_TILES + slot, SCENERY_PALETTES + slot)
 }
 
-/// Zoid `zoid`'s battle image.
+/// Zoid `zoid`'s battle image (`0x08044E98`).
 #[must_use]
 pub fn zoid_image(rom: &[u8], zoid: u8) -> Option<BattleImage> {
-    let slot = usize::from(zoid) * ZOID_IMAGES * 4;
+    let slot = usize::from(zoid) * LOAD_ENTRY_LEN;
     image(rom, ZOID_TILES + slot, ZOID_PALETTES + slot)
 }
 
@@ -276,6 +378,174 @@ fn decompress_at(rom: &[u8], pointer_at: usize) -> Option<Vec<u8>> {
     lz77::decompress(rom.get(offset..)?)
         .ok()
         .map(|(bytes, _)| bytes)
+}
+
+/// Entry of the effects table the attack scenes' shot sprites start at:
+/// their table at ROM `0x6F8174` is the effects table's tail.
+pub const SHOT_SPRITES: usize = 154;
+const FIRE_PARTS: usize = 0x006E_51BC;
+const FIRE_PART_LEN: usize = 16;
+const SHOT_ANIMATIONS: usize = 0x006D_718C;
+const MISSED_ANIMATIONS: usize = 0x006E_8F64;
+const SHOT_ANIMATION_LEN: usize = 0x110;
+/// Sprites a shot animation spawns at most.
+pub const SHOT_SPAWNS: usize = 18;
+const SPAWN_X: usize = 0x12;
+const SPAWN_Y: usize = 0x36;
+const SPAWN_FLAGS: usize = 0x5C;
+const SPAWN_PARAMETER: usize = 0xA4;
+const SPAWN_BEHAVIOR: usize = 0xC8;
+const SPAWN_TIMING: usize = 0xDA;
+const SPAWN_SOUND: usize = 0xFE;
+const SPREADS: usize = 0x006E_8A88;
+const WAVE: usize = 0x006D_3B94;
+
+/// The shot sprite `id` of an animation (`0x080483B4`).
+#[must_use]
+pub fn shot_sprite(rom: &[u8], id: u8) -> Option<EffectSprite> {
+    effect_sprite(rom, SHOT_SPRITES + usize::from(id))
+}
+
+/// How a weapon part fires in the attack scenes: its 16-byte record at
+/// ROM `0x6E51BC` (`0x080485C4`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FirePart {
+    /// The shot animation the attacker's view plays.
+    pub attacker: u8,
+    /// The one the target's view plays.
+    pub target: u8,
+    /// The attacker's in the sky (scenery kind 7), when not 0.
+    pub sky_attacker: u8,
+    /// The target's in the sky, when not 0.
+    pub sky_target: u8,
+    /// The attacker's when the part sits on the back rack, when not 0.
+    pub back: u8,
+    /// Added to the rack's mount for the sprites placed on it.
+    pub mount_offset: (u16, u16),
+    /// Added again on the back rack.
+    pub back_offset: (u16, u16),
+}
+
+/// Part `part`'s fire record.
+#[must_use]
+pub fn fire_part(rom: &[u8], part: u16) -> Option<FirePart> {
+    let at = FIRE_PARTS + usize::from(part) * FIRE_PART_LEN;
+    let record = rom.get(at..at + FIRE_PART_LEN)?;
+    let half = |i: usize| u16::from_le_bytes([record[i], record[i + 1]]);
+    Some(FirePart {
+        attacker: record[0],
+        target: record[1],
+        sky_attacker: record[2],
+        sky_target: record[3],
+        back: record[4],
+        mount_offset: (half(6), half(8)),
+        back_offset: (half(10), half(12)),
+    })
+}
+
+/// One sprite a shot animation spawns: an entry of the 0x110-byte records
+/// at ROM `0x6D718C` (`0x6E8F64` for the target's view of a miss).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShotSpawn {
+    /// The shot sprite; `b'.'` places it where the record says even on a
+    /// rack.
+    pub sprite: u8,
+    /// Where it starts.
+    pub x: u16,
+    /// See [`ShotSpawn::x`].
+    pub y: u16,
+    /// How it is drawn and set off: bit 0 animates it, bit 1 loops the
+    /// animation, bit 2 places it on the weapon's rack, bit 3 makes it
+    /// semi-transparent, bit 4 starts it at once, bits 8–12 a step the
+    /// next one waits for, bits 14 and 15 spread x and y, bits 16–19 a
+    /// shake, bit 20 puts it behind the Zoid, and bit 31 shares the tiles
+    /// of the sprite bits 26–30 count back to.
+    pub flags: u32,
+    /// A value its behavior reads.
+    pub parameter: u16,
+    /// Its behavior (the routines at ROM `0x6D4784`).
+    pub behavior: u8,
+    /// Frames it waits once set off (high byte), and its animation (low).
+    pub timing: u16,
+    /// The sound effect it plays as it appears, when not 0.
+    pub sound: u8,
+}
+
+/// The sprites of shot animation `index`; `missed` reads the table of
+/// the misses.
+#[must_use]
+pub fn shot_animation(rom: &[u8], index: u8, missed: bool) -> Option<Vec<Option<ShotSpawn>>> {
+    let table = if missed {
+        MISSED_ANIMATIONS
+    } else {
+        SHOT_ANIMATIONS
+    };
+    let at = table + usize::from(index) * SHOT_ANIMATION_LEN;
+    let record = rom.get(at..at + SHOT_ANIMATION_LEN)?;
+    let half = |i: usize| u16::from_le_bytes([record[i], record[i + 1]]);
+    Some(
+        (0..SHOT_SPAWNS)
+            .map(|slot| {
+                let sprite = record[slot];
+                (sprite != 0).then(|| ShotSpawn {
+                    sprite,
+                    x: half(SPAWN_X + slot * 2),
+                    y: half(SPAWN_Y + slot * 2),
+                    flags: u32::from_le_bytes([
+                        record[SPAWN_FLAGS + slot * 4],
+                        record[SPAWN_FLAGS + slot * 4 + 1],
+                        record[SPAWN_FLAGS + slot * 4 + 2],
+                        record[SPAWN_FLAGS + slot * 4 + 3],
+                    ]),
+                    parameter: half(SPAWN_PARAMETER + slot * 2),
+                    behavior: record[SPAWN_BEHAVIOR + slot],
+                    timing: half(SPAWN_TIMING + slot * 2),
+                    sound: record[SPAWN_SOUND + slot],
+                })
+            })
+            .collect(),
+    )
+}
+
+/// How far Zoid `zoid`'s shots spread (ROM `0x6E8A88`, 4 bytes a Zoid):
+/// the horizontal and the vertical mode.
+#[must_use]
+pub fn shot_spread(rom: &[u8], zoid: u16) -> Option<(u8, u8)> {
+    let at = SPREADS + usize::from(zoid) * 4;
+    let record = rom.get(at..at + 2)?;
+    Some((record[0], record[1]))
+}
+
+/// Entry `index` of the wave table at ROM `0x6D3B94` (256 signed
+/// halves) the flying Zoids bob by (`0x08043038`).
+#[must_use]
+pub fn wave(rom: &[u8], index: u8) -> Option<i16> {
+    let at = WAVE + usize::from(index) * 2;
+    let bytes = rom.get(at..at + 2)?;
+    Some(i16::from_le_bytes([bytes[0], bytes[1]]))
+}
+
+/// The screen shakes' tables (`0x08044B34` and the four after it): the
+/// pixels the Zoid's layer moves each frame, by shake kind 1 to 5.
+const SHAKES: [(usize, usize); 5] = [
+    (0x006D_4168, 16),
+    (0x006D_41E8, 16),
+    (0x006D_4218, 0x98),
+    (0x006D_4188, 48),
+    (0x006D_4208, 8),
+];
+
+/// Shake kind `kind`'s steps, one a frame.
+#[must_use]
+pub fn shake_steps(rom: &[u8], kind: u8) -> Option<Vec<i16>> {
+    let (at, count) = *SHAKES.get(usize::from(kind).checked_sub(1)?)?;
+    let bytes = rom.get(at..at + count * 2)?;
+    Some(
+        bytes
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -375,15 +645,15 @@ mod tests {
         let data = 0x0070_0000;
         let mut rom = vec![0; data + 0x6000];
         let scene = SCENES + 2 * SCENE_LEN;
-        rom[scene + SCENERY_FIELD] = 8;
+        rom[scene + SCENERY_FIELD] = 9;
         rom[scene + ENEMY_FIELD..scene + ENEMY_FIELD + 3].copy_from_slice(&[0x49, 0x3A, 1]);
         let tiles = literal_block(IMAGE_TILES * TILE_PIXELS, 5);
         let palette = literal_block(IMAGE_COLORS * 2, 0x11);
         rom[data..data + tiles.len()].copy_from_slice(&tiles);
         let palette_at = data + tiles.len();
         rom[palette_at..palette_at + palette.len()].copy_from_slice(&palette);
-        put_pointer(&mut rom, SCENERY_TILES + 8 * 4, data);
-        put_pointer(&mut rom, SCENERY_PALETTES + 8 * 4, palette_at);
+        put_pointer(&mut rom, SCENERY_TILES + 8 * LOAD_ENTRY_LEN, data);
+        put_pointer(&mut rom, SCENERY_PALETTES + 8 * LOAD_ENTRY_LEN, palette_at);
         put_pointer(&mut rom, ZOID_TILES + 0x49 * 12, data);
         put_pointer(&mut rom, ZOID_PALETTES + 0x49 * 12, palette_at);
         let read = battle_scene(&rom, 2).expect("scene");

@@ -14,7 +14,6 @@ use extraction::saga_combat::{self, SLOTS};
 use extraction::saga_encounter::{self, Formation};
 use extraction::saga_party::{self, PILOT_VALUES, percent};
 
-const NO_PART: u16 = 0xFFFF;
 /// The character that stands for no pilot in the statistics routine.
 const NO_CHARACTER: u8 = 0xFF;
 const PASSIVE: u32 = 0x2000_0000;
@@ -70,6 +69,7 @@ const UNIT_HP: usize = 8;
 const UNIT_EP: usize = 0xC;
 const UNIT_PARTS: usize = 0x10;
 const UNIT_STATS: usize = 0x28;
+const UNIT_SIZE: usize = 0x35;
 // Offsets in an enemy record.
 const ENEMY_PARTS: usize = 4;
 const ENEMY_PARTS_OVERRIDE: usize = 3;
@@ -236,7 +236,18 @@ pub struct BattleUnit {
     pub money: u32,
     /// The effects it is under.
     pub effects: Vec<Effect>,
+    /// The parts in its six slots, [`NO_PART`] for none: what the attack
+    /// scenes mount on its Zoid.
+    pub parts: [u16; SLOTS],
+    /// Its Zoid's size class: 0 S, 1 M, 2 L.
+    pub size: u8,
+    /// Its pilot to the attack scenes: the portrait and the lines
+    /// ([`saga_party::pilot_face`]).
+    pub face: u8,
 }
+
+/// A part slot without a part.
+pub const NO_PART: u16 = 0xFFFF;
 
 /// A unit's statistics for a turn (`0x08032CA4`), its pilot's bonuses
 /// applied.
@@ -294,6 +305,9 @@ impl BattleUnit {
             experience: 0,
             money: 0,
             effects: Vec::new(),
+            parts,
+            size: record[UNIT_SIZE],
+            face: saga_party::pilot_face(rom, state, character).unwrap_or(character),
         };
         unit.fit(rom, parts);
         Some(unit)
@@ -362,13 +376,17 @@ impl BattleUnit {
             experience: word(ENEMY_EXPERIENCE),
             money: word(ENEMY_MONEY),
             effects: Vec::new(),
+            parts,
+            size: zoid_record.size,
+            face: saga_party::pilot_face(rom, state, character).unwrap_or(character),
         };
         unit.fit(rom, parts);
         Some(unit)
     }
 
     /// Takes the weapons from the part slots; a passive part instead adds
-    /// its beam defense or its traits and leaves no weapon (`0x0803376C`).
+    /// its beam defense or its traits and leaves its slot empty
+    /// (`0x0803376C`).
     fn fit(&mut self, rom: &[u8], parts: [u16; SLOTS]) {
         for (slot, part) in parts.into_iter().enumerate() {
             if part == NO_PART {
@@ -381,6 +399,7 @@ impl BattleUnit {
                 self.weapons[slot] = Some(weapon);
                 continue;
             }
+            self.parts[slot] = NO_PART;
             if weapon.flags & BEAM_DEFENSE_PARTS != 0 {
                 self.beam_df = self.beam_df.wrapping_add(weapon.accuracy);
             }
@@ -676,6 +695,9 @@ mod tests {
             experience: 0,
             money: 0,
             effects: Vec::new(),
+            parts: [0xFFFF; 6],
+            size: 0,
+            face: 0,
         }
     }
 

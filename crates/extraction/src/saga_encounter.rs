@@ -16,6 +16,10 @@
 //! A leader's record is at ROM `0x67894C`, a member's at `0x67664C`, both
 //! `group × 0x380 + record × 0x1C`; a record's first byte is the sprite a
 //! map Zoid leading it shows.
+//!
+//! A battle lost on the field takes the party to its area's return point
+//! (`0x08006E08`, read against the warp a reference emulator made after a
+//! loss).
 
 const FORMATION_TABLES: usize = 0x0068_38C8;
 const AREA_TABLE_LEN: usize = 0x30;
@@ -36,6 +40,9 @@ pub const LEADER_SLOT: usize = 4;
 const MEMBERS: usize = 4;
 const MEMBER_LEN: usize = 4;
 const NO_RECORD: u8 = 0xFF;
+const RETURN_POINTS: usize = 0x0032_8D6C;
+const RETURN_POINT_LEN: usize = 8;
+const RETURN_POINT_COUNT: usize = 23;
 const ROM_BASE: u32 = 0x0800_0000;
 /// Rolls below this (of 100) pick a formation of class 0.
 const COMMON_ROLLS: u16 = 60;
@@ -113,11 +120,59 @@ pub fn enemy_record(
     rom.get(start..start + ENEMY_RECORD_LEN)?.try_into().ok()
 }
 
+/// The record the battle's spoils come from (`0x0803666C`): the leader's
+/// for `None`, else member `member`'s of the four-byte groups from `+4`,
+/// which the spoils read for all six slots.
+#[must_use]
+pub fn spoils_record(
+    rom: &[u8],
+    formation: &Formation,
+    member: Option<usize>,
+) -> Option<[u8; ENEMY_RECORD_LEN]> {
+    let (table, group, record) = match member {
+        None => (LEADER_RECORDS, formation[0], formation[1]),
+        Some(member) => {
+            let at = MEMBERS + member * MEMBER_LEN;
+            (MEMBER_RECORDS, *formation.get(at)?, *formation.get(at + 1)?)
+        }
+    };
+    let start =
+        table + usize::from(group) * RECORD_GROUP_LEN + usize::from(record) * ENEMY_RECORD_LEN;
+    rom.get(start..start + ENEMY_RECORD_LEN)?.try_into().ok()
+}
+
 /// The sprite a map Zoid standing for `formation` shows: the first byte of
 /// its leader's record (`0x080328FC`); `0xFF` when it cannot be read.
 #[must_use]
 pub fn leader_sprite(rom: &[u8], formation: &Formation) -> u8 {
     enemy_record(rom, formation, LEADER_SLOT).map_or(NO_RECORD, |record| record[0])
+}
+
+/// Where the party is taken after losing a battle on the field
+/// (`0x08006E08`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReturnPoint {
+    /// The map.
+    pub map: usize,
+    /// The player's cell on it.
+    pub cell: (usize, usize),
+}
+
+/// The return point of area index `index` (the area less one, at
+/// `0x02000B5C + 3`): record `index` of the 23 at ROM `0x328D6C`, eight
+/// bytes each, a map, a column and a row in halfwords.
+#[must_use]
+pub fn return_point(rom: &[u8], index: usize) -> Option<ReturnPoint> {
+    if index >= RETURN_POINT_COUNT {
+        return None;
+    }
+    let start = RETURN_POINTS + index * RETURN_POINT_LEN;
+    let record = rom.get(start..start + RETURN_POINT_LEN)?;
+    let half = |at: usize| usize::from(u16::from_le_bytes([record[at], record[at + 1]]));
+    Some(ReturnPoint {
+        map: half(0),
+        cell: (half(2), half(4)),
+    })
 }
 
 fn rom_pointer(rom: &[u8], at: usize) -> Option<usize> {
@@ -131,6 +186,21 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn a_return_point_is_a_map_and_a_cell_by_area() {
+        let mut rom = vec![0; RETURN_POINTS + RETURN_POINT_COUNT * RETURN_POINT_LEN];
+        let at = RETURN_POINTS + 2 * RETURN_POINT_LEN;
+        rom[at..at + 6].copy_from_slice(&[0x2C, 0x01, 7, 0, 5, 0]);
+        assert_eq!(
+            return_point(&rom, 2),
+            Some(ReturnPoint {
+                map: 300,
+                cell: (7, 5)
+            })
+        );
+        assert_eq!(return_point(&rom, RETURN_POINT_COUNT), None);
+    }
 
     fn rom() -> Vec<u8> {
         let table = 0x0070_0000;

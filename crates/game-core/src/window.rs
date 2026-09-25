@@ -17,6 +17,7 @@ const RIGHT: usize = 0x11;
 const DIVIDER_TOP: usize = 0x20;
 const DIVIDER_BOTTOM: usize = 0x21;
 const PROMPT: usize = 0x1C;
+const LIGHT_PROMPT: usize = 0x1D;
 const MORE_ABOVE: usize = 0x32;
 const MORE_BELOW: usize = 0x34;
 /// The page marks' tiles (`0x08040BA8`): the left one's top half, then the
@@ -132,9 +133,15 @@ impl WindowPainter {
         }
     }
 
-    /// Draws the "more text" prompt on the border at tile `(column, row)`.
-    pub fn draw_prompt(&self, frame: &mut Frame, column: usize, row: usize) {
-        self.draw_tile(frame, column, row, PROMPT);
+    /// Draws the "more text" prompt on the border at tile `(column, row)`,
+    /// the light border's own on a light window.
+    pub fn draw_prompt(&self, frame: &mut Frame, column: usize, row: usize, style: FrameStyle) {
+        let tile = if style == FrameStyle::Light {
+            LIGHT_PROMPT
+        } else {
+            PROMPT
+        };
+        self.draw_tile(frame, column, row, tile);
     }
 
     /// Draws the marks a scrolled menu shows at the middle of its top and

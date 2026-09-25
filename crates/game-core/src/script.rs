@@ -301,6 +301,13 @@ impl ScriptRunner {
         &self.vars
     }
 
+    /// Sets the variables the game's code fills before a string it runs,
+    /// and the copy `LoadVars` takes them back from.
+    pub fn set_vars(&mut self, vars: [u16; VARIABLES]) {
+        self.vars = vars;
+        self.saved = vars;
+    }
+
     /// The copy of the variables the last `StoreVars` made, which outlives
     /// a reset of the text system.
     #[must_use]
@@ -787,12 +794,16 @@ impl ScriptRunner {
             MessageStep::LineBreak => host.line_break(self.text_window),
             MessageStep::SwitchWindow(id) => self.text_window = id,
             MessageStep::PlayerName => self.queue_text(&host.player_name()),
-            MessageStep::Variable { var, digits, .. } => {
-                let text = format!(
-                    "{:>width$}",
-                    self.var(var),
-                    width = usize::from(digits.max(1))
-                );
+            MessageStep::Variable { var, digits, mode } => {
+                let text = if mode == crate::translation::TRANSLATED_VARIABLE {
+                    format!(
+                        "{:>width$}",
+                        self.var(var),
+                        width = usize::from(digits.max(1))
+                    )
+                } else {
+                    variable_text(self.var(var), digits, mode)
+                };
                 self.queue_text(&text);
             }
             MessageStep::Ignored(_) => {}
@@ -864,8 +875,71 @@ fn compare(left: u16, test: Comparison, right: u16) -> bool {
     }
 }
 
+/// The text a message prints for a variable (`0x08040FD8`): its last
+/// `digits` of five places in full-width digits, from its first
+/// significant one; mode 0 prints just those, 1 every place with its
+/// zeros, 2 pads them to the width after, 3 before. Other modes print
+/// nothing.
+fn variable_text(value: u16, digits: u8, mode: u8) -> String {
+    const PLACES: usize = 5;
+    const SPACE: char = '\u{3000}';
+    let full_width =
+        |digit: u8| char::from_u32(u32::from('０') + u32::from(digit)).unwrap_or(SPACE);
+    let mut places = [0u8; PLACES];
+    let mut first = PLACES - 1;
+    if mode < 4 {
+        let mut rest = value;
+        if rest > 9999 {
+            first = 0;
+            while rest > 9999 {
+                places[0] += 1;
+                rest -= 10_000;
+            }
+        }
+        while rest > 999 {
+            places[1] += 1;
+            rest -= 1000;
+            first = usize::from(first != 0);
+        }
+        while rest > 99 {
+            places[2] += 1;
+            rest -= 100;
+            first = first.min(2);
+        }
+        while rest > 9 {
+            places[3] += 1;
+            rest -= 10;
+            first = first.min(3);
+        }
+        places[4] = u8::try_from(rest).unwrap_or(0);
+    }
+    let start = usize::from(5u8.wrapping_sub(digits));
+    let shown = (start..PLACES).filter(|&place| first <= place);
+    let mut text = String::new();
+    match mode {
+        0 => text.extend(shown.map(|place| full_width(places[place]))),
+        1 => text.extend((start..PLACES).map(|place| full_width(places[place]))),
+        2 => {
+            text.extend(shown.map(|place| full_width(places[place])));
+            while text.chars().count() < usize::from(digits) {
+                text.push(SPACE);
+            }
+        }
+        3 => text.extend((start..PLACES).map(|place| {
+            if first <= place {
+                full_width(places[place])
+            } else {
+                SPACE
+            }
+        })),
+        _ => {}
+    }
+    text
+}
+
 #[cfg(test)]
 mod tests {
+
     #![allow(clippy::unwrap_used)]
 
     use std::collections::HashSet;
@@ -1303,7 +1377,7 @@ mod tests {
         let mut host = Recorder::default();
         runner.start(0).unwrap();
         assert!(run(&bytes, &mut runner, &mut host, 3));
-        assert_eq!(host.log[2..], ["char 0  ", "char 0 4", "char 0 2"]);
+        assert_eq!(host.log[2..], ["char 0 ４", "char 0 ２"]);
     }
 
     #[test]
@@ -1364,5 +1438,13 @@ mod tests {
         run(&bytes, &mut runner, &mut host, 4);
         assert!(runner.is_waiting_for_key());
         assert_eq!(host.log.last().unwrap(), "prompt 0 false");
+    }
+    #[test]
+    fn variables_print_in_full_width_by_their_mode() {
+        assert_eq!(super::variable_text(25, 4, 3), "\u{3000}\u{3000}２５");
+        assert_eq!(super::variable_text(25, 4, 0), "２５");
+        assert_eq!(super::variable_text(7, 3, 1), "００７");
+        assert_eq!(super::variable_text(1200, 4, 2), "１２００");
+        assert_eq!(super::variable_text(0, 4, 0), "０");
     }
 }

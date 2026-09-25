@@ -100,7 +100,12 @@ another window open at the same time that the original kept clear of or only bor
 (the story box shares one column with the portrait beside it); a window the original
 already drew over, as a menu over the menu that opened it, may be covered further.
 Windows are fitted per string that opens them, so every conversation shares the story
-box of the helper strings: one message too wide for it would enlarge the box for all. The launcher
+box of the helper strings: one message too wide for it would enlarge the box for all. A
+window one string opens and others print into is fitted from a list the port keeps:
+the attack scenes' weapon window (`system` 0x10) grows to the widest translated part
+name among the weapons and line of `system` 0x11 and 21. A line wider than a window
+that is not fitted wraps, and in a window whose rows are full the text then waits for
+a key: the weapon window's and the message window's lines of the aim must fit. The launcher
 prints one line per message that cannot fit even a screen-wide window or would cover
 another; those still wrap mid-word. The story box beside a portrait already reaches
 the screen's right edge, so its lines must stay within 168 pixels.

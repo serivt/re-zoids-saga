@@ -77,6 +77,13 @@ impl AreaObjects {
         }
     }
 
+    /// The area index the block holds: the area less one (`0x02000B5C +
+    /// 3`).
+    #[must_use]
+    pub fn area_index(state: &[u8]) -> usize {
+        state.get(AREA_INDEX).copied().map_or(0, usize::from)
+    }
+
     /// Builds the objects of `field`, map `map`, from the block's states
     /// when its record keeps them.
     ///

@@ -119,6 +119,9 @@ pub enum Op {
     /// Fights the roaming enemy the player met (`0x0800B9CC`), holding the
     /// game until the battle hands back.
     Combat,
+    /// What the battle's outcome does to the player and the enemy met,
+    /// once the field is bright again (`0x0800B9CC`).
+    AfterCombat,
     /// Scrolls the camera by `(dx, dy)` 16.16 fixed-point pixels
     /// (`0x08008324`, called once a frame for a pan).
     Pan(i32, i32),
@@ -249,6 +252,9 @@ pub trait EventHost {
     /// Starts the battle against the enemy the player met; the game holds
     /// until it hands back.
     fn start_combat(&mut self);
+    /// Gives the player and the enemy met the battle's outcome: the beaten
+    /// one is wrecked, the enemy retreated from stands still.
+    fn after_combat(&mut self);
     /// Plays song `song` unless it is playing.
     fn play_music(&mut self, song: u16);
     /// Plays sound effect `sound`.
@@ -906,6 +912,7 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::OpenChest => host.open_chest(),
         Op::MarkChest => host.mark_chest(),
         Op::TakeChestMoney => host.take_chest_money(),
+        Op::AfterCombat => host.after_combat(),
         _ => {}
     }
 }
@@ -1065,6 +1072,10 @@ mod tests {
 
         fn start_combat(&mut self) {
             self.log.push("combat".to_owned());
+        }
+
+        fn after_combat(&mut self) {
+            self.log.push("after combat".to_owned());
         }
 
         fn play_music(&mut self, song: u16) {

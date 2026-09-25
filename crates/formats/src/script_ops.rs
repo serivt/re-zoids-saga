@@ -556,6 +556,14 @@ const fn operation(index: u8) -> Operation {
 }
 
 fn character(lead: u8, trail: u8, offset: usize) -> Result<char, ScriptOpError> {
+    if lead == crate::font::GAME_GLYPH_LEAD {
+        return crate::font::game_glyph(u16::from_be_bytes([lead, trail])).ok_or(
+            ScriptOpError::InvalidCharacter {
+                offset,
+                code: u16::from_be_bytes([lead, trail]),
+            },
+        );
+    }
     let stored = [lead, trail];
     let (decoded, had_errors) = encoding_rs::SHIFT_JIS.decode_without_bom_handling(&stored);
     decoded

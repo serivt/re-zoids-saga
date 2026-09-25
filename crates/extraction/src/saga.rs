@@ -901,6 +901,14 @@ pub fn experience_to_next(rom: &[u8], level: usize) -> Option<u32> {
     Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
+/// The battle system's labels and link-cable menus, before its menus: the
+/// enemy's prefix 敵ゾイド (16) and the like.
+pub const BATTLE_LABEL_SCRIPTS: StringTable = StringTable {
+    name: "battle-label",
+    offset: 0x0067_5D10,
+    count: 33,
+};
+
 /// The battle system's menu scripts (the command list, the status
 /// window's frames and the helpers that open the battle's windows), which
 /// events also call.
@@ -1091,13 +1099,41 @@ impl SpriteSheet {
         self.compose(frame.tile, columns, rows)
     }
 
+    /// The picture the game shows for a sprite it streams (`0x08000BD8`
+    /// copies each frame's tiles into the sprite's slot of video memory):
+    /// the size and tiles of `shape`, the frame its sprite table still
+    /// names, with the tiles of `copied`, the frame just copied, over the
+    /// start. A smaller frame leaves the rest of the slot as it was.
+    #[must_use]
+    pub fn streamed_image(&self, shape: &SpriteFrame, copied: &SpriteFrame) -> Option<TileImage> {
+        let (columns, rows) = (shape.width / TILE_SIDE, shape.height / TILE_SIDE);
+        let fresh = (copied.width / TILE_SIDE) * (copied.height / TILE_SIDE);
+        let tiles = (0..columns * rows).map(|slot| {
+            if slot < fresh {
+                copied.tile + slot
+            } else {
+                shape.tile + slot
+            }
+        });
+        self.compose_tiles(tiles, columns, rows)
+    }
+
     fn compose(&self, first: usize, columns: usize, rows: usize) -> Option<TileImage> {
+        self.compose_tiles(first..first + columns * rows, columns, rows)
+    }
+
+    fn compose_tiles(
+        &self,
+        indices: impl Iterator<Item = usize> + Clone,
+        columns: usize,
+        rows: usize,
+    ) -> Option<TileImage> {
         let count = columns * rows;
-        if count == 0 || first + count > self.tiles.len() {
+        if count == 0 || indices.clone().any(|tile| tile >= self.tiles.len()) {
             return None;
         }
         let tiles = Tileset::from_pixels(
-            (first..first + count)
+            indices
                 .map(|tile| {
                     self.tiles
                         .tile(tile)
@@ -1563,6 +1599,18 @@ mod tests {
         assert_eq!(small.indices[0], 4);
         assert_eq!(small.indices[8], 5);
         assert_eq!(sheet.frame_image(2), None);
+    }
+
+    #[test]
+    fn a_streamed_frame_shows_over_the_tiles_a_smaller_one_leaves() {
+        let sheet = sheet(2, 16);
+        let (large, small) = (sheet.frames[0], sheet.frames[1]);
+        let image = sheet.streamed_image(&large, &small).unwrap();
+        assert_eq!((image.width, image.height), (32, 32));
+        assert_eq!(image.indices[0], 4);
+        assert_eq!(image.indices[8], 5);
+        assert_eq!(image.indices[16], 2);
+        assert_eq!(sheet.streamed_image(&large, &large), sheet.frame_image(0));
     }
 
     #[test]

@@ -143,10 +143,30 @@ impl GlyphIndex {
     }
 }
 
+/// The lead byte of the codes whose glyphs the game draws itself (the NEC
+/// special characters' row of Shift-JIS), such as the letters Ａ to Ｆ that
+/// tell same Zoids apart in battle (`0x8791` on).
+pub const GAME_GLYPH_LEAD: u8 = 0x87;
+/// Where those codes live among the characters: the supplementary private
+/// use area, so they keep their own glyphs.
+const GAME_GLYPH_BASE: u32 = 0xF_0000;
+
+/// The character standing for a code of the game's own glyphs.
+#[must_use]
+pub fn game_glyph(code: u16) -> Option<char> {
+    char::from_u32(GAME_GLYPH_BASE + u32::from(code))
+}
+
 /// The Shift-JIS code of a character, as the font indexes it; `None` for
 /// characters Shift-JIS cannot encode or single-byte ones.
 #[must_use]
 pub fn shift_jis_code(ch: char) -> Option<u16> {
+    if let Some(code) = u32::from(ch)
+        .checked_sub(GAME_GLYPH_BASE)
+        .and_then(|code| u16::try_from(code).ok())
+    {
+        return Some(code);
+    }
     let mut buffer = [0u8; 4];
     let (encoded, _, had_errors) = encoding_rs::SHIFT_JIS.encode(ch.encode_utf8(&mut buffer));
     match (had_errors, encoded.as_ref()) {

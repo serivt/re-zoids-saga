@@ -27,7 +27,7 @@
 //! what it runs.
 
 use extraction::saga::{
-    MapError, MapObject, ObjectScript, PLAYER_SPRITE, Scene, SceneError, SpriteSheet,
+    MapError, MapObject, ObjectScript, PLAYER_SPRITE, Scene, SceneError, SpriteFrame, SpriteSheet,
     SpriteSheetError, WALK_ANIMATION_BASE, Warp,
 };
 use formats::progress::ObjectState;
@@ -77,6 +77,10 @@ const CHASE_RADIUS: usize = 2;
 /// The attribute bit that sets a cell on another level; Zoids on different
 /// levels pass without meeting (`0x0800AE7C`).
 const LEVEL_BIT: u16 = 0x1000;
+/// What a beaten Zoid turns into (`0x080089A0` with sprite `0xFD`), and
+/// the sound it goes off with.
+pub const EXPLOSION_SPRITE: usize = 0xFD;
+const EXPLOSION_SOUND: u16 = 0x5A;
 /// The attribute bit of an exit's cell; an enemy does not reach the player
 /// standing on one.
 const EXIT_BIT: u16 = 0x4000;
@@ -187,6 +191,11 @@ pub enum FieldEvent {
         /// What it runs.
         script: ObjectScript,
     },
+    /// A wrecked actor's explosion ended and it is gone.
+    Wrecked {
+        /// Index into the field's actors.
+        actor: usize,
+    },
 }
 
 /// A walk toward a metatile, as cutscenes give it (the game's commands 10
@@ -222,6 +231,12 @@ pub enum Command {
     Chase,
     /// Heads for a metatile, the longer axis first, horizontally on ties.
     WalkTo(Walk),
+    /// Beaten in battle (entity state 5, `0x0800BC8C`): plays its animation
+    /// once more, then explodes (`exploding`) and is gone.
+    Wrecked {
+        /// Whether it already shows the explosion.
+        exploding: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,6 +296,8 @@ pub struct Actor {
     /// Frames it stands still before its command runs again, as an enemy
     /// does after the party retreated from it.
     pub pause: u16,
+    /// The sheet a wrecked actor explodes with.
+    explosion: Option<Box<SpriteSheet>>,
 }
 
 impl Actor {
@@ -316,6 +333,7 @@ impl Actor {
             slot: None,
             group: 0,
             pause: 0,
+            explosion: None,
         }
     }
 
@@ -637,6 +655,8 @@ pub struct Field {
     culled: Vec<bool>,
     /// What the screen shows, kept by [`Field::latch`].
     shown: Option<Shown>,
+    /// Sound effects the actors asked for, not yet played.
+    sounds: Vec<u16>,
 }
 
 impl Field {
@@ -660,6 +680,7 @@ impl Field {
             order: vec![0],
             culled: vec![false],
             shown: None,
+            sounds: Vec::new(),
         }
     }
 
@@ -709,6 +730,7 @@ impl Field {
             order: Vec::new(),
             culled: Vec::new(),
             shown: None,
+            sounds: Vec::new(),
         };
         field.player_mut().place((column, row));
         field.sort_actors();
@@ -800,6 +822,23 @@ impl Field {
         self.actors.get_mut(index)
     }
 
+    /// Wrecks actor `index`, beaten in battle (`0x0800B9CC`): its facing's
+    /// animation plays once from the start, then it turns into `explosion`
+    /// facing up, with a sound, and once that has played it is gone
+    /// (`0x0800BC8C`). It keeps its animation shift.
+    pub fn wreck(&mut self, index: usize, explosion: SpriteSheet) {
+        if let Some(actor) = self.actors.get_mut(index) {
+            actor.command = Command::Wrecked { exploding: false };
+            actor.explosion = Some(Box::new(explosion));
+            actor.play_once(actor.facing.index());
+        }
+    }
+
+    /// The sound effects asked for since the last call.
+    pub fn take_sounds(&mut self) -> Vec<u16> {
+        std::mem::take(&mut self.sounds)
+    }
+
     /// Restarts every actor's animation `elapsed` frames in, as reloading
     /// the map does when the pause menu closes.
     pub fn restart_animations(&mut self, elapsed: u32) {
@@ -862,6 +901,9 @@ impl Field {
 
     fn update_actor(&mut self, index: usize, input: Input, pressed_a: bool) -> Option<FieldEvent> {
         let actor = &mut self.actors[index];
+        if let Command::Wrecked { exploding } = actor.command {
+            return self.update_wreck(index, exploding);
+        }
         if actor.step.is_some() {
             let finished = actor.advance_step();
             if finished
@@ -887,7 +929,7 @@ impl Field {
         }
         let event = match actor.command {
             Command::Player => self.update_player(input, pressed_a),
-            Command::Idle => None,
+            Command::Idle | Command::Wrecked { .. } => None,
             Command::Wander => {
                 self.wander(index);
                 None
@@ -912,6 +954,28 @@ impl Field {
             };
         }
         event
+    }
+
+    /// A frame of a wrecked actor (`0x0800BC8C`): once its animation has
+    /// played, it turns into the explosion, and once that has, it is gone.
+    fn update_wreck(&mut self, index: usize, exploding: bool) -> Option<FieldEvent> {
+        let actor = &mut self.actors[index];
+        if !actor.animation_done() {
+            return None;
+        }
+        if exploding {
+            actor.visible = false;
+            actor.command = Command::Idle;
+            return Some(FieldEvent::Wrecked { actor: index });
+        }
+        if let Some(explosion) = actor.explosion.take() {
+            actor.sheet = Some(*explosion);
+        }
+        actor.facing = Direction::Up;
+        actor.play_once(Direction::Up.index());
+        actor.command = Command::Wrecked { exploding: true };
+        self.sounds.push(EXPLOSION_SOUND);
+        None
     }
 
     fn update_player(&mut self, input: Input, pressed_a: bool) -> Option<FieldEvent> {
@@ -1142,7 +1206,10 @@ impl Field {
         let facing = player.facing;
         let index = (1..self.actors.len()).find(|&index| {
             let actor = &self.actors[index];
-            actor.visible && actor.step.is_none() && actor.footing() == ahead
+            actor.visible
+                && actor.step.is_none()
+                && actor.footing() == ahead
+                && !matches!(actor.command, Command::Wrecked { .. })
         })?;
         let actor = &mut self.actors[index];
         if let Some(chest) = actor.chest {
@@ -1259,16 +1326,16 @@ impl Field {
             let Some(sheet) = actor.sheet.as_ref() else {
                 continue;
             };
-            let picture = actor.current_frame().unwrap_or(sprite.frame);
-            let Some((record, image)) = sheet
-                .frames
-                .get(sprite.frame)
-                .zip(sheet.frame_image(picture))
-            else {
+            let record = &sprite.frame;
+            let copied = actor
+                .current_frame()
+                .and_then(|index| sheet.frames.get(index))
+                .unwrap_or(record);
+            let Some(image) = sheet.streamed_image(record, copied) else {
                 continue;
             };
             let (x, y) = sprite.position;
-            let (anchor_x, anchor_y) = sheet.anchor;
+            let (anchor_x, anchor_y) = sprite.anchor;
             let anchor_x = if record.mirrored {
                 2 * i16::try_from(ANCHOR_FROM_ORIGIN.0).unwrap_or(0) - anchor_x
             } else {
@@ -1309,10 +1376,12 @@ impl Field {
                 if !actor.visible || actor.sheet.is_none() {
                     return None;
                 }
+                let sheet = actor.sheet.as_ref()?;
                 Some(ShownSprite {
                     actor: index,
                     position: actor.position(),
-                    frame: actor.current_frame()?,
+                    frame: *sheet.frames.get(actor.current_frame()?)?,
+                    anchor: sheet.anchor,
                 })
             })
             .collect();
@@ -1335,7 +1404,9 @@ struct Shown {
 struct ShownSprite {
     actor: usize,
     position: (isize, isize),
-    frame: usize,
+    /// The frame the sprite table names, and the anchor it was placed from.
+    frame: SpriteFrame,
+    anchor: (i16, i16),
 }
 
 /// Map `map`'s scene with the attribute grid its record sets.
@@ -1500,6 +1571,68 @@ mod tests {
         let mut actor = character(column, row, None, ZOID_BEHAVIOR);
         actor.command = Command::Chase;
         actor
+    }
+
+    /// An explosion of two steps, the second a smaller frame: three ticks,
+    /// then one.
+    fn explosion() -> SpriteSheet {
+        let mut sheet = sheet();
+        sheet.tag = "ma14".to_owned();
+        sheet.frames[1].width = 8;
+        sheet.frames[1].height = 8;
+        sheet.animations[0] = vec![
+            AnimationStep {
+                frame: 0,
+                duration: 3,
+            },
+            AnimationStep {
+                frame: 1,
+                duration: 1,
+            },
+        ];
+        sheet
+    }
+
+    #[test]
+    fn a_wrecked_enemy_plays_its_animation_explodes_and_is_gone() {
+        let mut field = zoid_field();
+        field.actors.push(enemy(4, 1));
+        field.actors[1].face(Direction::Left);
+        field.wreck(1, explosion());
+        let mut frames = 0;
+        while field.actors[1]
+            .sheet
+            .as_ref()
+            .map(|sheet| sheet.tag.as_str())
+            == Some("ch00")
+        {
+            assert_eq!(field.update(Input::default()), None);
+            frames += 1;
+        }
+        assert_eq!(frames, 17);
+        assert_eq!(field.take_sounds(), [EXPLOSION_SOUND]);
+        assert_eq!(field.actors[1].facing, Direction::Up);
+        assert!(field.actors[1].visible);
+        let mut gone = None;
+        for frame in 0..4 {
+            if let Some(event) = field.update(Input::default()) {
+                gone = Some((frame, event));
+                break;
+            }
+        }
+        assert_eq!(gone, Some((1, FieldEvent::Wrecked { actor: 1 })));
+        assert!(!field.actors[1].visible);
+        assert!(field.take_sounds().is_empty());
+    }
+
+    #[test]
+    fn a_wrecked_enemy_is_not_spoken_to() {
+        let mut field = zoid_field();
+        field.actors.push(enemy(4, 1));
+        field.player_mut().face(Direction::Right);
+        field.wreck(1, explosion());
+        field.update(Input::default().with(Button::A));
+        assert_eq!(field.actors[1].facing, Direction::Down);
     }
 
     #[test]

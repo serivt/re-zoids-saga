@@ -384,6 +384,9 @@ impl<'rom> GameData<'rom> {
             name if name == saga::BATTLE_TEXT_SCRIPTS.name => {
                 saga::BATTLE_TEXT_SCRIPTS.offsets(self.rom)?
             }
+            name if name == saga::BATTLE_LABEL_SCRIPTS.name => {
+                saga::BATTLE_LABEL_SCRIPTS.offsets(self.rom)?
+            }
             BATTLE_TABLE | DIALOGUE_TABLE | ITEM_TABLE | NAME_TABLE => {
                 match saga::string_table(table) {
                     Some(table) => table.offsets(self.rom)?,

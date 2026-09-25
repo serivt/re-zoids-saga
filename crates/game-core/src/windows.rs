@@ -25,6 +25,9 @@ const TILE: usize = 8;
 const LINE_HEIGHT: usize = 16;
 const TYPEWRITER_STYLE: u8 = 1;
 const MENU_KIND: u8 = 1;
+/// A window its portrait fills, from its top-left corner: the battle
+/// scenes' pilot window.
+const PORTRAIT_KIND: u8 = 4;
 const LIGHT_FRAME_KIND: u8 = 0x20;
 const NO_FRAME_KIND: u8 = 0x40;
 const MENU_MARGIN: usize = 2;
@@ -55,10 +58,16 @@ pub struct Window {
     pub layout: TextLayout,
     /// Portrait shown, if any.
     pub portrait: Option<Portrait>,
+    /// The portrait replacing the one shown, which appears a frame after
+    /// the old one goes: the game loads its tiles in between.
+    pub next_portrait: Option<Portrait>,
     /// Whether the "more" prompt is lit.
     pub prompt: bool,
     /// Whether the window has been presented.
     pub visible: bool,
+    /// The lines a draw left on screen: the text printed since shows once
+    /// the window is presented (`0x0803E950` without the flush).
+    pub frozen: Option<Vec<String>>,
     /// Line the menu cursor sits on, if the window is a menu being used.
     pub cursor: Option<usize>,
     /// Line the last menu ended on; the next one starts there.
@@ -234,9 +243,10 @@ impl Window {
     /// shown line.
     #[must_use]
     pub fn shown_lines(&self) -> &[String] {
-        let start = self.top.min(self.lines.len());
-        let end = (start + self.rows().max(1)).min(self.lines.len());
-        &self.lines[start..end]
+        let lines = self.frozen.as_ref().unwrap_or(&self.lines);
+        let start = self.top.min(lines.len());
+        let end = (start + self.rows().max(1)).min(lines.len());
+        &lines[start..end]
     }
 
     /// Whether lines are hidden above and below the shown ones.
@@ -415,6 +425,11 @@ impl<'rom> ScriptWindows<'rom> {
     /// its sprites do (see [`crate::field::Field::latch`]).
     pub fn latch(&mut self) {
         self.shown = Some(self.windows.clone());
+        for window in self.windows.iter_mut().flatten() {
+            if let Some(portrait) = window.next_portrait.take() {
+                window.portrait = Some(portrait);
+            }
+        }
     }
 
     /// Draws the windows kept by the last [`ScriptWindows::latch`], or the
@@ -455,10 +470,15 @@ impl<'rom> ScriptWindows<'rom> {
             }
             let origin = (pixels(window.x + window.margin()), pixels(window.y + 1));
             if let Some(portrait) = &window.portrait {
+                let corner = if window.kind & 0x0F == PORTRAIT_KIND {
+                    (pixels(window.x), pixels(window.y))
+                } else {
+                    origin
+                };
                 draw_sprite(
                     frame,
-                    origin.0,
-                    origin.1,
+                    corner.0,
+                    corner.1,
                     &portrait.image,
                     &portrait.palette,
                     false,
@@ -480,6 +500,7 @@ impl<'rom> ScriptWindows<'rom> {
                     frame,
                     (window.x + window.width).saturating_sub(PROMPT_FROM_RIGHT),
                     window.y + window.height - 1,
+                    window.frame_style(),
                 );
             }
             if let Some(line) = window.cursor {
@@ -554,8 +575,10 @@ impl ScriptHost for ScriptWindows<'_> {
                 widths: Vec::new(),
                 layout: TextLayout::Proportional,
                 portrait: None,
+                next_portrait: None,
                 prompt: false,
                 visible: false,
+                frozen: None,
                 cursor: None,
                 line: 0,
                 top: 0,
@@ -583,6 +606,7 @@ impl ScriptHost for ScriptWindows<'_> {
             Some(id) => {
                 if let Some(window) = self.window_mut(id) {
                     window.visible = true;
+                    window.frozen = None;
                     window.cursor = None;
                 }
             }
@@ -591,6 +615,7 @@ impl ScriptHost for ScriptWindows<'_> {
                     self.opened += 1;
                     window.opened = self.opened;
                     window.visible = true;
+                    window.frozen = None;
                     window.cursor = None;
                 }
             }
@@ -600,15 +625,17 @@ impl ScriptHost for ScriptWindows<'_> {
     fn draw_window(&mut self, id: u8) {
         self.opened += 1;
         let opened = self.opened;
+        self.present(Some(id));
         if let Some(window) = self.window_mut(id) {
             window.opened = opened;
+            window.frozen = Some(window.lines.clone());
         }
-        self.present(Some(id));
     }
 
     fn reveal(&mut self, id: u8) {
         if let Some(window) = self.window_mut(id) {
             window.visible = true;
+            window.frozen = None;
         }
     }
 
@@ -616,6 +643,10 @@ impl ScriptHost for ScriptWindows<'_> {
         if let Some(window) = self.window_mut(id) {
             window.lines.clear();
             window.widths.clear();
+            // Clearing flushes: a drawn window shows its text gone.
+            if window.frozen.is_some() {
+                window.frozen = Some(Vec::new());
+            }
             window.pending_break = false;
             window.prompt = false;
             window.top = 0;
@@ -661,7 +692,12 @@ impl ScriptHost for ScriptWindows<'_> {
             .portrait(usize::from(character), usize::from(expression))
             .ok();
         if let Some(window) = self.window_mut(id) {
-            window.portrait = portrait;
+            if window.portrait.is_some() {
+                window.portrait = None;
+                window.next_portrait = portrait;
+            } else {
+                window.portrait = portrait;
+            }
         }
     }
 

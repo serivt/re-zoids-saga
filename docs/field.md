@@ -59,6 +59,15 @@ frame by frame in the first room, in Arcana and above its bar.
   current one. A walking sprite's new step shows one frame before it moves. The port
   keeps the screen state at the start of each frame (`Field::latch`,
   `ScriptWindows::latch`) and draws it with the current pictures.
+- **Streamed tiles.** The animation step (`0x08000BD8`) copies the tiles of each new
+  frame into the start of the sprite's slot in video memory, while the sprite table
+  still names the frame before: its shape, offset and anchor. A frame smaller than
+  the one before only covers the start of the slot, so for a frame the rest of the
+  old picture shows through the old shape. The explosion of a beaten Zoid ends this
+  way: its last frame is a single 8×8 tile, so the smoke before it shows one more
+  frame, less its first tile. The port draws each sprite with the latched frame's
+  shape and anchor and the current frame's tiles over the start (checked on the
+  explosion against the original).
 
 ### Wandering
 

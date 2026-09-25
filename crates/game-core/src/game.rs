@@ -100,6 +100,21 @@ const MUSIC_PLAYER: usize = 0;
 /// Frames a roaming enemy stands still after the party retreated from it
 /// (entity state 8, `0x0800BD74`).
 const RETREAT_PAUSE: u16 = 180;
+/// What an enemy met stands still for until the battle's outcome takes
+/// hold: for good, after a lost battle.
+const MEETING_PAUSE: u16 = u16::MAX;
+/// The shift of the player's animation once the battle is over
+/// (`0x0800B9CC` sets `+0x38`).
+const AFTER_COMBAT_SHIFT: i8 = 1;
+/// Frames between the player's explosion ending and the screen darkening
+/// after a lost battle: the first frame of `0x08001524` sets level 0.
+const DEFEAT_FADE_DELAY: u8 = 1;
+/// Black frames once the return point is loaded, before it brightens.
+const DEFEAT_BLACK_FRAMES: u8 = 13;
+/// Where the player's animation stands when the outcome takes hold: its
+/// update runs after the battle's handler returns, in the same frame, while
+/// the other objects have already had theirs.
+const PLAYER_UPDATED: u32 = 1;
 /// The bits of the player's footing attribute the battle takes as its
 /// terrain; with any other set it takes the enemy's (`0x0800B9CC`).
 const TERRAIN_MASK: u16 = 0xFF;
@@ -229,6 +244,11 @@ pub struct Game<'rom> {
     combat: Option<Box<Combat>>,
     /// The roaming enemy the player met, until its battle ends.
     encounter: Option<usize>,
+    /// The enemy met and the battle's outcome, until the field is bright
+    /// again and they take hold.
+    aftermath: Option<(usize, Outcome)>,
+    /// Whether the party lost and is being taken to its return point.
+    defeated: bool,
     field: Option<Field>,
     events: Events,
     screen: Screen,
@@ -351,6 +371,8 @@ impl<'rom> Game<'rom> {
             shop: None,
             combat: None,
             encounter: None,
+            aftermath: None,
+            defeated: false,
             field: None,
             events: Events::new(),
             screen: Screen::Loading,
@@ -864,6 +886,7 @@ impl<'rom> Game<'rom> {
             shop: &mut self.shop,
             combat: &mut self.combat,
             encounter: self.encounter,
+            aftermath: &mut self.aftermath,
             warped: &mut self.warped,
             chest: self.chest,
             party: &mut self.party,
@@ -978,6 +1001,9 @@ impl<'rom> Game<'rom> {
             match step {
                 HoldStep::Held => return Ok(()),
                 HoldStep::Darkened => {
+                    if std::mem::take(&mut self.defeated) {
+                        return self.return_home();
+                    }
                     if let Some(exit) = self.exit_taken.take() {
                         let black = if self.door_taken.take().is_some() {
                             DOOR_BLACK_FRAMES
@@ -1012,12 +1038,30 @@ impl<'rom> Game<'rom> {
             return Ok(());
         }
         let event = self.field.as_mut().and_then(|field| field.update(input));
-        if let Some(field) = &self.field {
+        if let Some(field) = self.field.as_mut() {
             AreaObjects::record(&mut self.state, field);
+            for sound in field.take_sounds() {
+                Self::emit(&self.extensions, &Event::SoundRequested(usize::from(sound)));
+                self.sound.play(usize::from(sound))?;
+            }
         }
+        if self.follow(event)? {
+            return Ok(());
+        }
+        self.update_events(|events, host| events.update(host))
+    }
+
+    /// Follows what the field reported; whether the frame ends there.
+    fn follow(&mut self, event: Option<FieldEvent>) -> Result<bool, GameError> {
         match event {
-            Some(FieldEvent::Exit(exit)) => return self.take_exit(exit, false),
-            Some(FieldEvent::Door(exit)) => return self.take_exit(exit, true),
+            Some(FieldEvent::Exit(exit)) => {
+                self.take_exit(exit, false)?;
+                return Ok(true);
+            }
+            Some(FieldEvent::Door(exit)) => {
+                self.take_exit(exit, true)?;
+                return Ok(true);
+            }
             Some(FieldEvent::Talk {
                 actor,
                 script: ObjectScript::Dialogue(id),
@@ -1044,13 +1088,22 @@ impl<'rom> Game<'rom> {
                 ..
             }) => {
                 if let Some(program) = story::talk_handler(address) {
-                    return self.run_handler(Some(program));
+                    self.run_handler(Some(program))?;
+                    return Ok(true);
                 }
             }
-            Some(FieldEvent::Encounter { enemy }) => return self.meet_enemy(enemy),
-            None => {}
+            Some(FieldEvent::Encounter { enemy }) => {
+                self.meet_enemy(enemy)?;
+                return Ok(true);
+            }
+            Some(FieldEvent::Wrecked { actor: 0 }) => {
+                self.defeated = true;
+                self.events.fade_out_holding(DEFEAT_FADE_DELAY);
+                return Ok(true);
+            }
+            Some(FieldEvent::Wrecked { .. }) | None => {}
         }
-        self.update_events(|events, host| events.update(host))
+        Ok(false)
     }
 
     fn update_events(
@@ -1120,9 +1173,16 @@ impl<'rom> Game<'rom> {
     }
 
     /// The player and the roaming enemy `enemy` ran into each other: the
-    /// field darkens and the battle starts (`0x0800B9CC`).
+    /// field darkens and the battle starts (`0x0800B9CC`). Both stand still
+    /// until its outcome takes hold (entity states 4 and 1).
     fn meet_enemy(&mut self, enemy: usize) -> Result<(), GameError> {
         self.encounter = Some(enemy);
+        if let Some(field) = self.field.as_mut() {
+            field.player_mut().command = Command::Idle;
+            if let Some(actor) = field.actor_mut(enemy) {
+                actor.pause = MEETING_PAUSE;
+            }
+        }
         self.run_handler(Some(story::ENCOUNTER))
     }
 
@@ -1147,7 +1207,11 @@ impl<'rom> Game<'rom> {
         };
         let done = outcome.is_some();
         if let Some(outcome) = outcome {
-            self.combat = None;
+            if let Some(combat) = self.combat.take()
+                && combat.state().len() == self.state.len()
+            {
+                self.state.clone_from_slice(combat.state());
+            }
             self.end_encounter(outcome)?;
         }
         self.update_events(|events, host| {
@@ -1155,28 +1219,19 @@ impl<'rom> Game<'rom> {
         })
     }
 
-    /// What a battle's outcome does to the enemy met (`0x0800B9CC`): a
-    /// beaten one is gone for good; after a retreat it stands still for
-    /// three seconds. The map's song plays again.
+    /// A battle's end: the field reloads with the player and the enemy on
+    /// their cells, their animations restarted (`0x0800B9CC`), the outcome
+    /// waits for the field to be bright again ([`Op::AfterCombat`]), and
+    /// the map's song plays again.
     fn end_encounter(&mut self, outcome: Outcome) -> Result<(), GameError> {
         Self::emit(&self.extensions, &Event::CombatEnded(outcome));
-        if let (Some(enemy), Some(field)) = (self.encounter.take(), self.field.as_mut()) {
-            match outcome {
-                Outcome::Won => {
-                    if let Some(actor) = field.actor_mut(enemy) {
-                        actor.visible = false;
-                        if let Some(slot) = actor.slot.take() {
-                            formats::progress::remove_object(&mut self.state, slot);
-                        }
-                    }
-                    formats::progress::count_battle(&mut self.state);
+        self.aftermath = self.encounter.take().map(|enemy| (enemy, outcome));
+        if let (Some((enemy, _)), Some(field)) = (self.aftermath, self.field.as_mut()) {
+            for index in [0, enemy] {
+                if let Some(actor) = field.actor_mut(index) {
+                    actor.place((actor.column, actor.row));
+                    actor.face(actor.facing);
                 }
-                Outcome::Retreated => {
-                    if let Some(actor) = field.actor_mut(enemy) {
-                        actor.pause = RETREAT_PAUSE;
-                    }
-                }
-                Outcome::Lost => {}
             }
         }
         let map = self.field.as_ref().map(Field::map);
@@ -1184,6 +1239,39 @@ impl<'rom> Game<'rom> {
             self.play_map_music(map)?;
         }
         Ok(())
+    }
+
+    /// Takes the party, beaten, to its area's return point once the screen
+    /// is black (`0x08006E08`, `0x08007188`): the player stands there facing
+    /// up, and the map brightens after its load.
+    fn return_home(&mut self) -> Result<(), GameError> {
+        let index = AreaObjects::area_index(&self.state);
+        let Some(point) = extraction::saga_encounter::return_point(self.data.bytes(), index) else {
+            return Err(GameError::Text(format!("no return point {index}")));
+        };
+        self.objects.enter(
+            &self.data,
+            &mut self.state,
+            point.map,
+            frame_counter(self.frame),
+        );
+        let mut field = Field::load(&self.data, point.map, point.cell)?;
+        AreaObjects::place(&self.data, &self.state, point.map, &mut field)?;
+        field.player_mut().face(Direction::Up);
+        show_opened_chests(&mut field, &self.windows);
+        self.field = Some(field);
+        Self::emit(
+            &self.extensions,
+            &Event::RoomEntered {
+                map: point.map,
+                cell: point.cell,
+            },
+        );
+        self.play_map_music(point.map)?;
+        self.events
+            .fade_in_after(DEFEAT_BLACK_FRAMES, WARP_SETTLE_FRAMES);
+        self.events.end(MAP_TASK);
+        self.run_handler(story::map_handler(point.map))
     }
 
     /// Starts leaving by exit `exit`, a door when `door`: the screen
@@ -1351,6 +1439,7 @@ struct Host<'a, 'rom> {
     shop: &'a mut Option<Box<PauseMenu>>,
     combat: &'a mut Option<Box<Combat>>,
     encounter: Option<usize>,
+    aftermath: &'a mut Option<(usize, Outcome)>,
     warped: &'a mut Option<usize>,
     chest: Option<(usize, u16)>,
     party: &'a mut Party,
@@ -1457,6 +1546,48 @@ impl EventHost for Host<'_, '_> {
         }
         *self.combat = Some(Box::new(combat));
         Game::emit(self.extensions, &Event::CombatStarted { enemy });
+    }
+
+    fn after_combat(&mut self) {
+        let Some((enemy, outcome)) = self.aftermath.take() else {
+            return;
+        };
+        let explosion = match outcome {
+            Outcome::Retreated => None,
+            Outcome::Won | Outcome::Lost => {
+                match self.data.sprite_sheet(crate::field::EXPLOSION_SPRITE) {
+                    Ok(sheet) => Some(sheet),
+                    Err(error) => return self.fail(error),
+                }
+            }
+        };
+        let Some(field) = self.field.as_mut() else {
+            return;
+        };
+        match (outcome, explosion) {
+            (Outcome::Lost, Some(explosion)) => {
+                field.wreck(0, explosion);
+                let player = field.player_mut();
+                player.animation_shift = AFTER_COMBAT_SHIFT;
+                player.animation = PLAYER_UPDATED;
+            }
+            (Outcome::Won, Some(explosion)) => {
+                field.player_mut().command = Command::Player;
+                field.wreck(enemy, explosion);
+                if let Some(slot) = field.actor_mut(enemy).and_then(|actor| actor.slot.take()) {
+                    formats::progress::remove_object(self.state, slot);
+                }
+                formats::progress::count_battle(self.state);
+            }
+            _ => {
+                let player = field.player_mut();
+                player.command = Command::Player;
+                player.animation_shift = AFTER_COMBAT_SHIFT;
+                if let Some(actor) = field.actor_mut(enemy) {
+                    actor.pause = RETREAT_PAUSE;
+                }
+            }
+        }
     }
 
     fn play_music(&mut self, song: u16) {

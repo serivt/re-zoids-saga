@@ -366,6 +366,9 @@ mod tests {
             experience: 0,
             money: 0,
             effects: Vec::new(),
+            parts: [0xFFFF; 6],
+            size: 0,
+            face: 0,
         }
     }
 

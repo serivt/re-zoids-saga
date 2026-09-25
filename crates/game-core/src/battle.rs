@@ -608,7 +608,7 @@ pub(crate) fn draw_piece(
 /// The affine matrix the drawer sets for a piece (`ObjAffineSet` with the
 /// reciprocal of each scale and the piece's rotation), in 8.8, with the
 /// first entry negated for the enemy's mirroring.
-fn piece_matrix(piece: &EffectPiece, mirrored: bool) -> (i32, i32, i32, i32) {
+pub(crate) fn piece_matrix(piece: &EffectPiece, mirrored: bool) -> (i32, i32, i32, i32) {
     let reciprocal = |scale: i16| 0x1_0000 / i32::from(scale.unsigned_abs()).max(1);
     let (sx, sy) = (reciprocal(piece.scale_x), reciprocal(piece.scale_y));
     let sy = if piece.scale_y < 0 { -sy } else { sy };
@@ -642,7 +642,11 @@ fn to_fixed(value: f64) -> i32 {
 
 /// The palette index at `(x, y)` of a piece's image: its tiles in rows of
 /// `width / 8`, one-dimensional OBJ mapping.
-fn piece_pixel(sprite: &EffectSprite, piece: &EffectPiece, (x, y): (i32, i32)) -> Option<u8> {
+pub(crate) fn piece_pixel(
+    sprite: &EffectSprite,
+    piece: &EffectPiece,
+    (x, y): (i32, i32),
+) -> Option<u8> {
     let (width, height) = (i32::from(piece.width), i32::from(piece.height));
     if !(0..width).contains(&x) || !(0..height).contains(&y) {
         return None;
@@ -753,18 +757,20 @@ mod tests {
     fn effect(durations: &[u32]) -> EffectSprite {
         use extraction::saga::AnimationStep;
         use formats::tile::Tileset;
+        let animation: Vec<AnimationStep> = durations
+            .iter()
+            .enumerate()
+            .map(|(frame, duration)| AnimationStep {
+                frame,
+                duration: *duration,
+            })
+            .collect();
         EffectSprite {
             tiles: Tileset::from_pixels(vec![[1; TILE_PIXELS]; 4]),
             palette: [0x7FFF; 16],
             frames: vec![Vec::new(); durations.len()],
-            animation: durations
-                .iter()
-                .enumerate()
-                .map(|(frame, duration)| AnimationStep {
-                    frame,
-                    duration: *duration,
-                })
-                .collect(),
+            animations: vec![animation.clone()],
+            animation,
         }
     }
 

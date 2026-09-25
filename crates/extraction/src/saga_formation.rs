@@ -204,6 +204,7 @@ pub fn slot_cursor(rom: &[u8]) -> Option<EffectSprite> {
         tiles: Tileset::from_4bpp(tiles),
         palette,
         frames,
+        animations: vec![animation.clone()],
         animation,
     })
 }

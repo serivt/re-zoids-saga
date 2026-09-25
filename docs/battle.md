@@ -25,7 +25,7 @@ The opening uses these record fields:
 
 | Offset | Content |
 |---|---|
-| `0x11` | Scenery |
+| `0x11` | Scenery + 1 |
 | `0x14` | The enemy's Zoid |
 | `0x15` | Its pilot |
 | `0x16` | Its quote: string `172 + n` of the `battle` table (`0x08042916`) |
@@ -43,8 +43,8 @@ left.
 
 | What | Tiles | Palette | Loaded to |
 |---|---|---|---|
-| Scenery | pointers at ROM `0x6F6968` by scenery | `0x6F6BF0` | char block 2, palette 64–127 |
-| Zoid | first of three pointers per Zoid at ROM `0x6F8974` | `0x6F9100` | char block 1, palette 0–63 |
+| Scenery | entries at ROM `0x6F6934` by scenery | `0x6F6BBC` | char block 2, palette 64–127 |
+| Zoid | entries at ROM `0x6F8974` by Zoid | `0x6F9100` | char block 1, palette 0–63 |
 | Window frame | `0x3B9428`, the field's window skin | | char block 3 |
 | Portrait | the dialogue portraits (see [formats/portrait.md](formats/portrait.md)), expression 0 | | OBJ tiles 988–1023, palette 15 |
 
@@ -182,5 +182,5 @@ its start.
 
 - The rewrite line of the scroll table under CPU load.
 - The battle engine itself: the port transcribes these two scenes' timelines and shots
-  rather than running the module's attack logic. The real battles are described in
-  [combat.md](combat.md).
+  rather than running the module's attack logic, which it has for the real battles'
+  attack scenes ([combat.md](combat.md#attack-scenes)).

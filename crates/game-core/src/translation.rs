@@ -43,6 +43,9 @@ pub const PART_TABLE: &str = "part";
 pub const BATTLE_MENU_TABLE: &str = "battle-menu";
 /// Table of the battle messages' scripts, which the formation screen uses.
 pub const BATTLE_TEXT_TABLE: &str = "battle-text";
+/// The battle system's labels (ROM `0x675D10`), such as the enemy's
+/// prefix 敵ゾイド.
+pub const BATTLE_LABEL_TABLE: &str = "battle-label";
 /// Key prefix of the name entry's character pages: `name-entry/alphabet/N`.
 pub const ALPHABET_PREFIX: &str = "name-entry/alphabet/";
 /// Key of the name entry's help line.
@@ -122,6 +125,29 @@ struct Fit {
     pixels: usize,
     rows: usize,
 }
+
+/// A window one script opens and others print into, which the walk of a
+/// script can't see: it grows to the widest of their translations.
+struct Link {
+    /// The table and the string that open it, and its id.
+    table: &'static str,
+    opener: usize,
+    window: u8,
+    /// The pixels a line holds as the game opens it.
+    pixels: usize,
+    /// The strings printed into it: a table and a range of its strings.
+    sources: &'static [(&'static str, usize, usize)],
+}
+
+/// The attack scenes' weapon window (`system` 0x10), which shows the part's
+/// name (the part table's weapons) and the figures (`system` 0x11 and 21).
+const LINKED_WINDOWS: [Link; 1] = [Link {
+    table: "system",
+    opener: 0x10,
+    window: 2,
+    pixels: 64,
+    sources: &[("system", 0x11, 0x11), ("system", 21, 21), ("part", 0, 316)],
+}];
 
 /// A window as a script opens it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -338,6 +364,28 @@ impl Translation {
             let entry = self.fits.entry(fit_key).or_default();
             entry.pixels = entry.pixels.max(pixels);
             entry.rows = entry.rows.max(rows_needed);
+        }
+        for link in LINKED_WINDOWS {
+            let pixels = self
+                .messages
+                .iter()
+                .filter(|(context, _)| {
+                    split_key(context).is_some_and(|(table, index, _)| {
+                        link.sources.iter().any(|&(source, first, last)| {
+                            source == table && (first..=last).contains(&index)
+                        })
+                    })
+                })
+                .map(|(_, text)| needed(text, metrics).0)
+                .max()
+                .unwrap_or(0);
+            if pixels > link.pixels {
+                let entry = self
+                    .fits
+                    .entry(key(link.table, link.opener, usize::from(link.window)))
+                    .or_default();
+                entry.pixels = entry.pixels.max(pixels);
+            }
         }
         if let Some(help) = &self.name_entry_help
             && metrics.width(help) > NAME_HELP_PIXELS
@@ -926,6 +974,11 @@ pub fn steps(text: &str) -> Vec<MessageStep> {
     out
 }
 
+/// The format a translated message's variables take: the translation's
+/// digits, right-aligned in their cells, rather than the game's full-width
+/// ones.
+pub const TRANSLATED_VARIABLE: u8 = 0xFF;
+
 fn marker_step(marker: &str) -> Option<MessageStep> {
     if marker == "name" {
         return Some(MessageStep::PlayerName);
@@ -937,7 +990,7 @@ fn marker_step(marker: &str) -> Option<MessageStep> {
     Some(MessageStep::Variable {
         var: var.parse().ok()?,
         digits: digits.parse().ok()?,
-        mode: 0,
+        mode: TRANSLATED_VARIABLE,
     })
 }
 
@@ -982,7 +1035,7 @@ mod tests {
                 MessageStep::Variable {
                     var: 2,
                     digits: 3,
-                    mode: 0
+                    mode: TRANSLATED_VARIABLE
                 },
                 MessageStep::SwitchWindow(1),
                 MessageStep::Character('!'),

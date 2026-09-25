@@ -83,6 +83,7 @@ const KEEPS_EQUIPMENT: u16 = 0x08;
 const NO_UNIT: u8 = 0xFF;
 const FORMATION: usize = 0x3600;
 const MEMBER_RECORDS: usize = 0xCD8;
+const PILOT_FACE: usize = 2;
 const MEMBER_RECORD_LEN: usize = 16;
 const MEMBERS: usize = 4;
 const WARRIORS: usize = 3;
@@ -604,20 +605,30 @@ pub fn percent(value: i32, percent: i32) -> i32 {
 /// table at ROM `0x67B35C` by chapter for the others (`0x080334F8`).
 #[must_use]
 pub fn pilot(rom: &[u8], state: &[u8], character: u8) -> Option<[i32; PILOT_VALUES]> {
-    let character = usize::from(character);
-    let record = if character < MEMBERS {
-        let at = MEMBER_RECORDS + character * MEMBER_RECORD_LEN;
-        state.get(at..at + MEMBER_RECORD_LEN)?.to_vec()
-    } else {
-        let chapter = usize::from(state[AREA].wrapping_sub(1));
-        let chapter = if chapter > PILOT_CHAPTERS { 0 } else { chapter };
-        let at = PILOT_TABLE + (character * PILOT_CHAPTERS + chapter) * 4;
-        let pointer = word(rom.get(at..at + 4)?, 0);
-        let start = usize::try_from(pointer.checked_sub(ROM_BASE)?).ok()?;
-        rom.get(start..start + MEMBER_RECORD_LEN)?.to_vec()
-    };
+    let record = pilot_record(rom, state, character)?;
     let signed = |at: usize| i32::from(i16::from_ne_bytes(half(&record, at).to_ne_bytes()));
     Some([signed(4), signed(6), signed(8), signed(10), signed(12)])
+}
+
+/// Who a pilot is to the attack scenes: its record's byte 2, the portrait
+/// they show and the `battle` strings they speak (`0x08041AA8`).
+#[must_use]
+pub fn pilot_face(rom: &[u8], state: &[u8], character: u8) -> Option<u8> {
+    pilot_record(rom, state, character).map(|record| record[PILOT_FACE])
+}
+
+fn pilot_record(rom: &[u8], state: &[u8], character: u8) -> Option<Vec<u8>> {
+    let character = usize::from(character);
+    if character < MEMBERS {
+        let at = MEMBER_RECORDS + character * MEMBER_RECORD_LEN;
+        return Some(state.get(at..at + MEMBER_RECORD_LEN)?.to_vec());
+    }
+    let chapter = usize::from(state[AREA].wrapping_sub(1));
+    let chapter = if chapter > PILOT_CHAPTERS { 0 } else { chapter };
+    let at = PILOT_TABLE + (character * PILOT_CHAPTERS + chapter) * 4;
+    let pointer = word(rom.get(at..at + 4)?, 0);
+    let start = usize::try_from(pointer.checked_sub(ROM_BASE)?).ok()?;
+    Some(rom.get(start..start + MEMBER_RECORD_LEN)?.to_vec())
 }
 
 /// Puts `character`'s unit in formation slot `slot` (`0x08037AB4`).

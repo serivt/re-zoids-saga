@@ -73,7 +73,7 @@ with the variables it saved, which is how the chest and deck-command messages pr
 | `0x09` | 3 | var[`a0 & 7`] = `a1 | a2 << 8` |
 | `0x0A` | 2 | var[`a0`] = var[`a1`] |
 | `0x0B`, `0x0C` | 0 | Save / restore the eight variables (RAM `0x02007574`) |
-| `0x0D` | 1 | Draw window `a0` over the windows it overlaps; it becomes the current window. It calls the window's draw method as presenting does (`0x0803E950`), without the flush |
+| `0x0D` | 1 | Draw window `a0` over the windows it overlaps; it becomes the current window. It calls the window's draw method as presenting does (`0x0803E950`), without the flush: the window shows what it held, and the text printed into it after shows once it is presented |
 | `0x0E` | 1 | Clear the text of window `a0` |
 | `0x0F` | 3 | Portrait of character `a1`, expression `a2` in window `a0` |
 | `0x10`–`0x12` | 5 | Jump when var[`a0`] ==, > or < `a1 | a2 << 8` |
@@ -104,7 +104,12 @@ opcode runs one frame later. These are the usual costs measured in a reference
 emulator; the original's own costs grow when a frame runs out of CPU time (a reset
 took ten frames after a battle), which the port does not model. A message starts in the current window; inside it, `0x1C a0`
 redirects the rest of that message to window `a0` without changing the current window,
-and `0x1F a0 a1` prints var[`a0`] right-aligned in `a1 & 7` cells.
+and `0x1F a0 a1` prints var[`a0`] (`0x08040FD8`) in full-width digits (`０` is
+Shift-JIS `0x824F`): the last `a1 & 7` of five places, from the first that is not 0,
+by the mode in `a1 >> 4`. Mode 0 prints just those, 1 every place with its zeros, 2
+pads them with full-width spaces after to the width, 3 before; other modes print
+nothing. Translated messages print their variables right-aligned in the
+translation's digits.
 
 ## Shared strings
 

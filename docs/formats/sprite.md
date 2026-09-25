@@ -24,7 +24,7 @@ ends the table:
 | 24 | Unknown half-word: `9` for Zoids, `8` for characters, 1–4 for furniture |
 | 26 | Signed horizontal anchor: where the frames' x offsets start, from the left of the sprite's box (16 for almost every sprite) |
 | 28 | Signed vertical anchor, from the top of the box (16 for almost every sprite) |
-| 30 | Unknown half-word (0 for most sprites) |
+| 30 | 0 when each frame's tiles are copied into video memory as it shows (`0x08000BD8`); otherwise the bytes of images copied once when the sprite is set (`0x080089A0`) |
 
 The spawn routine copies the anchor to entity `+0x10` and `+0x12` (`0x08008906`), and
 the OAM builder (`0x080009AE`, `0x08000A12`) adds it to the frame's offset: the
