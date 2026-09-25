@@ -159,6 +159,91 @@ black for 14 frames and then brightens a level a frame (`0x080014A8`).
 - **After a retreat:** the enemy stands still for 180 frames (entity state 8) before
   it chases again.
 
+## Rules
+
+The port keeps the rules of a fight in `crates/game-core/src/combat/units.rs` and
+`crates/game-core/src/combat/ai.rs`. They are not yet played on screen (see below).
+
+### Units
+
+A unit in battle is 0x2CC bytes at `0x0200EB8C + side × 0x10D8 + slot × 0x2CC`.
+
+- **A party unit** is a copy of its record in the game state (`0x0802B5D0`, `0x0802B6E0`).
+  Its full hit points include the pilot's 耐久 bonus. Its energy, SP and DF are computed
+  again without the pilot (`0x08036CB0` with character `0xFF`); each turn adds the
+  pilot's other bonuses.
+- **An enemy** is built from its record (`0x0802B728`, `0x0802B978`, `0x0802B9DC`,
+  `0x08036EF4`). The Zoid's record gives the traits, the size, six part slots and the
+  statistics; the enemy record's three parts replace the first three slots. Its
+  pilot's record is taken by area (ROM `0x67B35C`). The passive parts add hit points,
+  energy, SP or DF, the pilot's 耐久 adds to the hit points, and it starts at full. It
+  also brings its way of choosing (`+0x11`), its experience (`+0x14`) and its money
+  (`+0x18`).
+- **Weapons.** A unit's weapons are its parts by slot (`0x0802BA24`), with each part
+  record's flags, accuracy, power (16.16), cost, reach and spread. A passive part
+  (`0x20000000`) is no weapon: it adds its beam defense or its traits (`0x0803376C`).
+  The beam defense starts at half the DF.
+
+Each turn (`0x08032CA4`), the statistics are built in three steps:
+1. The effects the unit is under change them, first by amounts, then in percent.
+2. They are clamped at zero.
+3. The pilot's bonuses raise them in percent:
+   - 防御 raises the defense and the beam defense;
+   - 反応 the speed;
+   - 攻撃 each weapon's power;
+   - 命中 each weapon's accuracy.
+
+An effect can make a unit ignore its pilot. Each of the 48 effects (`0x08032B54`) holds:
+- what it changes, and whether it raises or lowers it;
+- the amount;
+- whether it is a percent or an amount, on the unit or on its pilot;
+- the turns it has left;
+- the part that caused it.
+
+### Attacks
+
+The chance to hit (`0x08034500`) is the weapon's accuracy less the target's evasion
+bonus and a hundredth of its speed, clamped to 50–99:
+- a flying target is 20 harder to hit, unless the weapon is anti-air (`0x200`);
+- a swimming one is 20 harder on water (terrain 6);
+- some weapons and states make it sure or impossible.
+
+The damage (`0x080345EC`) is the weapon's power less the target's defense in percent.
+The defense is the beam defense against beams (`0x30`), capped at 65:
+- a critical hit adds half the power and ignores the defense, as piercing weapons do;
+- a defending target takes half;
+- any hit deals at least the smallest amount.
+
+`0x08033E40` applies an attack:
+1. The weapon's energy cost is paid.
+2. Each target is hit when a roll of the turn is at most the chance to hit (sixteen
+   rolls of 0–99 drawn when the turn starts, `0x08033D94`).
+3. A beaten target's experience and money go to the party's reward.
+
+### Turns and the enemies' choices
+
+- **Order.** The units still fighting act by speed, fastest first (`0x08032410`,
+  `0x08032564`, a stable insertion sort, the party's before the enemy's). Two battle
+  flags make it slowest first or shuffled.
+- **Reach.** Rows are 1 apart front to front, 2 between a front and a back row, 3 back
+  to back (`0x08038F10`). A weapon's reach is a range of those distances
+  (`0x08038F60`).
+- **Spread.** A weapon takes one slot, a slot and the one behind it, a column of three,
+  a square of four or the whole side (`0x08038B00`).
+- **Choice.** The enemies' first way of choosing (`0x0805959C`):
+  1. One time in two it looks for support worth giving. Restoring an ally that lacks
+     four fifths of both its hit points and its energy comes first, then repairing one
+     that lacks two thirds of its hit points, then other support an ally is not under.
+  2. Otherwise it picks, at random, one of its weapons that reach the party, and one
+     of its groups.
+  3. With nothing to use it defends.
+- **The other fifteen ways of choosing** (the table at ROM `0x75C048`) are not modeled
+  yet.
+
+The port's units, their statistics, the order and the three attacks of the traced
+battle matched the original's RAM: 20 hit points on a Command Wolf, 23 and 24 on the
+Gator and the Iguan, then 19 on the Iguan.
+
 ## Checked against the original
 
 The port's battle screen was compared with the original's on every frame of the
@@ -184,9 +269,11 @@ original's. The enemies themselves differ, as the formations are drawn at random
 
 ## Not modeled yet
 
-- The battle itself: 戦闘開始, the commands, aiming, the attacks and their scenes,
-  damage, the enemies' actions, experience, money and levels. The menu's other lines
-  show the menu again.
+- Playing a fight: 戦闘開始 and the second menu, the actions, choosing a weapon and a
+  target, the attack scenes (the fire animations of ROM `0x6E51BC` and `0x6D718C`),
+  the damage messages, the effects' turns, experience, money and levels. The rules
+  above are implemented but not yet driven by the screen. The menu's other lines show
+  the menu again.
 - 部隊編成, コマンド作成 and ステータス from the battle menu.
 - L showing the panels' names.
 - Losing a battle, and story battles (`0x08008D28`).

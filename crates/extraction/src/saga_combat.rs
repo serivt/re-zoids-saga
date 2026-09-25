@@ -188,6 +188,50 @@ pub fn slot_anchor(rom: &[u8], enemy: bool, slot: usize) -> Option<(i32, i32)> {
     Some((whole(SLOT_X), whole(SLOT_Y)))
 }
 
+/// What the battle takes from a Zoid's 76-byte record at ROM `0x670210`
+/// for an enemy unit (`0x0802B9DC`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZoidBattleRecord {
+    /// The record's first half-word: the unit's traits.
+    pub traits: u16,
+    /// The size class, 0 S, 1 M, 2 L.
+    pub size: u8,
+    /// The six part slots, each the slot's flags then the part id
+    /// (`0xFFFF` for none) in the upper half.
+    pub parts: [u32; SLOTS],
+    /// Hit points, energy, SP and DF before parts and pilot.
+    pub stats: (i32, i32, i16, i16),
+}
+
+const ZOID_SIZE: usize = 4;
+const ZOID_PARTS: usize = 8;
+const ZOID_STATS: usize = 0x40;
+
+/// The battle's view of Zoid `zoid`'s record, if the ROM has it.
+#[must_use]
+pub fn zoid_battle_record(rom: &[u8], zoid: u16) -> Option<ZoidBattleRecord> {
+    let at =
+        crate::saga_party::ZOID_RECORDS + usize::from(zoid) * crate::saga_party::ZOID_RECORD_LEN;
+    let record = rom.get(at..at + crate::saga_party::ZOID_RECORD_LEN)?;
+    let word = |at: usize| {
+        u32::from_le_bytes([record[at], record[at + 1], record[at + 2], record[at + 3]])
+    };
+    let half = |at: usize| u16::from_le_bytes([record[at], record[at + 1]]);
+    let signed = |value: u32| i32::from_ne_bytes(value.to_ne_bytes());
+    let short = |value: u16| i16::from_ne_bytes(value.to_ne_bytes());
+    Some(ZoidBattleRecord {
+        traits: half(0),
+        size: record[ZOID_SIZE],
+        parts: std::array::from_fn(|slot| word(ZOID_PARTS + slot * 4)),
+        stats: (
+            signed(word(ZOID_STATS)),
+            signed(word(ZOID_STATS + 4)),
+            short(half(ZOID_STATS + 8)),
+            short(half(ZOID_STATS + 10)),
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

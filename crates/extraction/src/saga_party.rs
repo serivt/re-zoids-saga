@@ -28,7 +28,8 @@
 use formats::progress::STATE_LEN;
 
 const UNITS: usize = 0xD2C;
-const UNIT_LEN: usize = 0x38;
+/// Bytes of a unit in the game-state block.
+pub const UNIT_LEN: usize = 0x38;
 const ORDINARY_UNITS: usize = 0x99;
 const ALL_UNITS: usize = 0xAD;
 const UNIT_COUNT: usize = 0x3304;
@@ -38,8 +39,8 @@ const PILOTED: u16 = 4;
 const SPECIAL: u16 = 8;
 const SPECIAL_TRAINING: u8 = 100;
 const SPECIAL_UNIT: u16 = 4;
-const ZOID_RECORDS: usize = 0x0067_0210;
-const ZOID_RECORD_LEN: usize = 0x4C;
+pub(crate) const ZOID_RECORDS: usize = 0x0067_0210;
+pub(crate) const ZOID_RECORD_LEN: usize = 0x4C;
 const ZOID_PARTS: usize = 8;
 const ZOID_STATS: usize = 0x40;
 const PARTS_LEN: usize = 24;
@@ -85,7 +86,8 @@ const MEMBER_RECORDS: usize = 0xCD8;
 const MEMBER_RECORD_LEN: usize = 16;
 const MEMBERS: usize = 4;
 const WARRIORS: usize = 3;
-const PILOT_VALUES: usize = 5;
+/// The pilot bonuses a record holds.
+pub const PILOT_VALUES: usize = 5;
 const PARTY_LEVEL: usize = 0xCD2;
 const GROWTH: usize = 0x0066_BB38;
 const GROWTH_LEN: usize = 10;
@@ -193,6 +195,14 @@ pub fn formation(state: &[u8]) -> [Option<(u8, u8)>; FORMATION_SLOTS] {
         let (unit, character) = (*state.get(at)?, *state.get(at + 1)?);
         (unit != NO_UNIT).then_some((unit, character))
     })
+}
+
+/// The 56 bytes of unit `unit` in the game-state block, when it is in use.
+#[must_use]
+pub fn unit_record(state: &[u8], unit: u8) -> Option<[u8; UNIT_LEN]> {
+    let at = unit_at(unit);
+    let record: [u8; UNIT_LEN] = state.get(at..at + UNIT_LEN)?.try_into().ok()?;
+    (half(&record, 2) & IN_USE != 0).then_some(record)
 }
 
 /// What the status screens show of a unit.
@@ -577,7 +587,8 @@ fn compute_stats(rom: &[u8], state: &mut [u8], character: u8, unit: u8) -> Optio
 
 /// `percent`% of `value`, rounded to nearest for values below 0x10000, as
 /// the routine at `0x080346C0` computes it.
-fn percent(value: i32, percent: i32) -> i32 {
+#[must_use]
+pub fn percent(value: i32, percent: i32) -> i32 {
     if value >> 16 == 0 {
         let scaled = (value << 16) / 100;
         let scaled = scaled.wrapping_mul(percent);
@@ -591,7 +602,8 @@ fn percent(value: i32, percent: i32) -> i32 {
 /// statistic, the two half-words, then two the statistics routine does not
 /// use: the member records for the first four characters, the
 /// table at ROM `0x67B35C` by chapter for the others (`0x080334F8`).
-fn pilot(rom: &[u8], state: &[u8], character: u8) -> Option<[i32; PILOT_VALUES]> {
+#[must_use]
+pub fn pilot(rom: &[u8], state: &[u8], character: u8) -> Option<[i32; PILOT_VALUES]> {
     let character = usize::from(character);
     let record = if character < MEMBERS {
         let at = MEMBER_RECORDS + character * MEMBER_RECORD_LEN;

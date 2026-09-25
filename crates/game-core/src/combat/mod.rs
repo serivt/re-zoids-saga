@@ -14,6 +14,9 @@
 //! the frame it does. The port keeps the same tasks and steps, so the
 //! screen changes on the same frames.
 
+pub mod ai;
+pub mod units;
+
 use std::collections::VecDeque;
 
 use extraction::saga::SpriteSheet;
