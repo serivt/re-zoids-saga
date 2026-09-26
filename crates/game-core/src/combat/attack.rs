@@ -10,7 +10,7 @@
 //! `docs/combat.md`.
 
 use super::ai::Sides;
-use super::units::{BattleUnit, Effect, Weapon, damage, hit_chance};
+use super::units::{BattleUnit, Effect, Weapon, accuracy_excess, damage, hit_chance};
 use extraction::saga_party::percent;
 
 /// Rolls a turn draws (`0x08033D94`): each actor's, `% 100`, at EWRAM
@@ -58,6 +58,9 @@ const RAISE_SPEED: u16 = 0x801;
 const RAISE_EVASION: u16 = 0x8001;
 const RAISE_ACCURACY: u16 = 0x21;
 const STATE_EFFECT: u16 = 0x4000;
+/// What a weapon that hurts the pilot leaves on the target
+/// (`0x08033E40`): its unit ignores its pilot for the weapon's turns.
+const DAZED: u16 = 0x2000;
 const SURE_EFFECT: u16 = 0x22;
 /// What a full repair raises speed and defense by, in percent.
 const RESTORE_PERCENT: i32 = 50;
@@ -142,8 +145,10 @@ pub struct Outcome {
 /// The attack of `side`/`slot`'s weapon in slot `weapon` on the slots
 /// `targets` of the side it aims at (`0x08033E40`). Target `k` hits when
 /// roll `15 − k` is at most the chance, and critically when it is also
-/// below `(bonus >> 1) + 2`. `terrain` is the attacker's side's ground,
-/// `chapter` the game's.
+/// below `(bonus >> 1) + 2`, `bonus` being the accuracy past 100 of the
+/// last chance to hit that went past it this turn, which each target's
+/// updates. `terrain` is the attacker's side's ground, `chapter` the
+/// game's.
 #[must_use]
 pub fn attack(
     sides: &mut Sides,
@@ -151,7 +156,7 @@ pub fn attack(
     weapon: usize,
     targets: &[usize],
     rolls: &[u16; ROLLS],
-    (bonus, terrain, chapter): (u16, u8, u8),
+    (bonus, terrain, chapter): (&mut u16, u8, u8),
 ) -> Outcome {
     let mut outcome = Outcome::default();
     let Some(attacker) = sides[side][slot].clone() else {
@@ -181,26 +186,18 @@ pub fn attack(
             continue;
         };
         let target_stats = target.derived();
-        let chance = hit_chance(
-            (&attacker, &stats),
-            (&target, &target_stats),
-            weapon,
-            terrain,
-        );
-        let roll = rolls[ROLLS - 1 - k.min(ROLLS - 1)];
-        if chance == SURE {
-            blow.flags |= LANDED;
-        } else if chance != 0 && roll <= chance {
-            blow.flags |= LANDED;
-            let mut threshold = (bonus >> 1) + 2;
-            if arms.flags & KEEN != 0 {
-                threshold = (threshold * 2).max(KEEN_FLOOR);
-            }
-            let immune = target.traits & NO_CRITICAL != 0 && chapter >= CRITICAL_FROM_CHAPTER;
-            if !immune && roll < threshold {
-                blow.flags |= CRITICAL;
-            }
+        let (units, other) = ((&attacker, &stats), (&target, &target_stats));
+        let chance = hit_chance(units, other, weapon, terrain);
+        if let Some(excess) = accuracy_excess(units, other, weapon, terrain) {
+            *bonus = excess;
         }
+        let immune = target.traits & NO_CRITICAL != 0 && chapter >= CRITICAL_FROM_CHAPTER;
+        blow.flags |= landing(
+            chance,
+            rolls[ROLLS - 1 - k.min(ROLLS - 1)],
+            *bonus,
+            (arms.flags & KEEN != 0, immune),
+        );
         if arms.flags & OFFENSIVE == 0 {
             if let Some(unit) = sides[aimed][target_slot].as_mut() {
                 support(unit, &arms, &mut blow);
@@ -233,6 +230,9 @@ pub fn attack(
             }
             if arms.flags & HURTS_PILOT != 0 {
                 blow.flags |= PILOT_HURT;
+                if let Some(unit) = sides[aimed][target_slot].as_mut() {
+                    unit.affect(effect(&arms, DAZED, arms.power, PILOT_AMOUNT));
+                }
             }
             if arms.flags & STUNS != 0 {
                 blow.flags |= STUNNED;
@@ -311,6 +311,28 @@ fn support(unit: &mut BattleUnit, arms: &Weapon, blow: &mut Blow) {
     }
 }
 
+/// Whether a blow lands and is critical: it lands when its roll is at
+/// most the chance, or always at [`SURE`]; a roll that lands is critical
+/// below `(bonus >> 1) + 2`, twice that and at least 10 for a keen weapon,
+/// never on an immune target.
+fn landing(chance: u16, roll: u16, bonus: u16, (keen, immune): (bool, bool)) -> u16 {
+    if chance == SURE {
+        return LANDED;
+    }
+    if chance == 0 || roll > chance {
+        return 0;
+    }
+    let mut threshold = (bonus >> 1) + 2;
+    if keen {
+        threshold = (threshold * 2).max(KEEN_FLOOR);
+    }
+    if !immune && roll < threshold {
+        LANDED | CRITICAL
+    } else {
+        LANDED
+    }
+}
+
 /// The effect a weapon puts on a unit (`0x08032B54`): what it changes, by
 /// how much, how, for the weapon's turns.
 fn effect(arms: &Weapon, changes: u16, value: i32, kind: u8) -> Effect {
@@ -381,7 +403,7 @@ mod tests {
         let mut rolls = [99; ROLLS];
         rolls[15] = 40;
         rolls[14] = 1;
-        let outcome = attack(&mut sides, (0, 0), 0, &[2, 3], &rolls, (0, 0, 1));
+        let outcome = attack(&mut sides, (0, 0), 0, &[2, 3], &rolls, (&mut 0, 0, 1));
         assert!(outcome.blows[0].landed() && !outcome.blows[0].critical());
         assert_eq!(outcome.blows[0].damage >> 16, 12);
         assert!(outcome.blows[1].critical());
@@ -410,7 +432,7 @@ mod tests {
         let mut sides: Sides = Default::default();
         sides[0][1] = Some(unit(50, Some(shield())));
         let rolls = [99; ROLLS];
-        let outcome = attack(&mut sides, (0, 1), 0, &[1], &rolls, (0, 0, 1));
+        let outcome = attack(&mut sides, (0, 1), 0, &[1], &rolls, (&mut 0, 0, 1));
         let blow = outcome.blows[0];
         assert!(blow.landed());
         assert_eq!((blow.kind, blow.code, blow.damage), (RAISED, 0x101, 40));
@@ -442,7 +464,7 @@ mod tests {
         let mut hurt = unit(100, Some(repair));
         hurt.hp = 80;
         sides[0][0] = Some(hurt);
-        let outcome = attack(&mut sides, (0, 0), 0, &[0], &[0; ROLLS], (0, 0, 1));
+        let outcome = attack(&mut sides, (0, 0), 0, &[0], &[0; ROLLS], (&mut 0, 0, 1));
         assert_eq!(
             (outcome.blows[0].kind, outcome.blows[0].damage),
             (REPAIRED, 20)
@@ -458,7 +480,7 @@ mod tests {
             ..shield()
         };
         sides[0][0] = Some(unit(100, Some(once)));
-        let outcome = attack(&mut sides, (0, 0), 0, &[0], &[0; ROLLS], (0, 0, 1));
+        let outcome = attack(&mut sides, (0, 0), 0, &[0], &[0; ROLLS], (&mut 0, 0, 1));
         assert_eq!(outcome.blows[0].kind, RESTORED);
         assert_eq!(sides[0][0].as_ref().and_then(|unit| unit.weapons[0]), None);
     }
@@ -469,7 +491,7 @@ mod tests {
         sides[0][0] = Some(unit(50, Some(gun())));
         sides[1][0] = Some(unit(20, None));
         let rolls = [95; ROLLS];
-        let outcome = attack(&mut sides, (0, 0), 0, &[0], &rolls, (0, 0, 1));
+        let outcome = attack(&mut sides, (0, 0), 0, &[0], &rolls, (&mut 0, 0, 1));
         assert!(!outcome.blows[0].landed());
         assert_eq!(sides[1][0].as_ref().map(|unit| unit.hp), Some(20));
     }

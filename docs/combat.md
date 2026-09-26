@@ -27,7 +27,7 @@ This page covers the real battles. The scripted battle scenes of the opening are
 |---|---|
 | `0x0800C3AC` | A battle: the controller (task `0x0802AC0C`, slot 4) until it reports its end; returns 0 for a win, 1 for a loss, 2 for a retreat |
 | `0x0800B9CC` | A battle against a roaming enemy (entity state 4) |
-| `0x08008D28(n)` | Story battle `n` (records of 36 bytes at ROM `0x67C0F4`), which some fifty events call; the first is in map 12 (`mq0160`, handler `0x080106C4`, flag `0x12B`) |
+| `0x08008D28(n)` | Story battle `n` (below), which some fifty events call; the first is in map 12 (`mq0160`, handler `0x080106C4`, flag `0x12B`) |
 | `0x08008BFC(n)` | The same, fading the field in afterwards |
 
 `0x080329E4(type, group, a, b)` sets the battle up at RAM `0x02005C70`:
@@ -35,6 +35,32 @@ This page covers the real battles. The scripted battle scenes of the opening are
 - the formation;
 - the song (`0x17`);
 - the terrain of each side.
+
+## Story battles
+
+`0x08008D28(n)` plays sound `0x52`, darkens the field (`0x08001524`), keeps the entity
+table and the sprites' palettes, and sets story battle `n` up (`0x080329E4` with type
+1). After the battle it rebuilds the field behind the black screen and hands the
+result to the event (0 won, 1 lost); `0x08008BFC` also fades the field in.
+
+The 42 records of ROM `0x67C0F4` (36 bytes each) give:
+
+| Offset | Content |
+|---|---|
+| `+4` | Six four-byte groups, by slot: a flag and a record of the battle's own six enemy records (28 bytes each at ROM `0x67C6DC + n × 0xA8`, `0xFF` for none). An enemy whose flag is 1 takes trait `0x200`: no critical hit lands on it (`0x0802B728`) |
+| `+0x1C` | The terrain, both sides' |
+| `+0x20` | The song (`0x08033D6C`) |
+| `+0x21` | The mode: 1 leaves the items out of the actor's menu (`battle-menu` 0x1A, 攻撃 and 防御), 2 empties the party's first three part slots when the fight starts, before the passive parts apply (`0x080337F0`); 1, 2 and 3 also set a flag the battle does not read |
+
+Otherwise the battle runs as a roaming one, but for these (bit 0 of `0x02005C70`):
+- the opening's menu is `battle-menu` 0x18 and the round's 0x19, without 退却;
+- the results leave no spoils: the formation's rolls are not drawn, though the kind's
+  roll is (`0x0803666C`, `0x0803680C`).
+
+The staged scenes of the opening (`0x08008E4C`, [battle.md](battle.md)) are a different
+thing: they set bit 0 of `0x0200EB84`, which the attack scenes read for their longer
+pauses (90 frames before the line, 180 after a reaction), their shots that A cannot
+skip and a scene without the player's aim.
 
 ## Roaming enemies
 
@@ -214,14 +240,16 @@ the fight:
 
 | State | What it does |
 |---|---|
-| `0x3F2` | The engage step has ended: song `0x17` |
+| `0x3F2` | The engage step has ended: song `0x17`, or a story battle's |
 | `0x76C` | The end when a side is beaten, the round otherwise |
+| `0x76C` (in a story battle of mode 2) | The party's first three part slots are emptied |
 | `0x1B58` | The round's menu: `battle-menu` 6 and 7, `battle-text` 0x3B, `battle-menu` 5, then the menu, `battle-menu` 3 (0x19 in story battles); 退却 always works |
-| 2000, `0x7DA` | The row advance (task `0x0802F09C`), 5 frames; a side whose front row is empty would move its back row up |
+| 8000, `0x1FA4` | The round's コマンド (the command task `0x0803B7D0`, below): issued, the round starts from 2000; given up, the round's menu comes back |
+| 2000, `0x7DA` | The row advance (task `0x0802F09C`, below), 5 frames when no row moves |
 | `0x8FC`, `0x906` | The effects that ran out (`0x0802FD4C`): once for each part among them, in the units' order, *part*の効果が無くなりました (`battle-text` 87) and the wait, the next two frames after it; the effects forget the part. Without any it reports on its second frame |
 | `0x9C4` | The turn's order, which costs a frame more |
 | `0xBB8`, `0xBD6` | The next actor (`0x0802AF70`): the turn's 16 rolls, its defense dropped, its status check (`0x0802FAA8`, 2 frames a slot) |
-| `0xBEA`, `0xC1C` | It acts (the action task `0x0802E814`): the others are darkened, the message *name*は, then the party's menu (`battle-menu` 4: 攻撃, 防御, アイテム) or the enemy's choice |
+| `0xBEA`, `0xC1C` | It acts (the action task `0x0802E814`): the others are darkened, the message *name*は, then the party's menu (`battle-menu` 4: 攻撃, 防御, アイテム; 0x1A without アイテム in story battles of mode 1 and link battles) or the enemy's choice |
 | `0xED8`, `0xEE2` | It can't act (paralysed, `0x4000`): `battle-text` 0x20 |
 | `0x1194`, `0x119E` | It defends (`0x100`): `battle-text` 0x1A; it takes half the damage until its next action |
 | `0x157C`, `0x15E0` | An item (the item task `0x08038FC4`, below): once used, the units' colors come back and `0x1770` follows; given up, the actor chooses again from `0xBEA` |
@@ -238,19 +266,58 @@ The screen's other changes:
   (24 when paralysed); the panels but the actor's take palette 14. The return's
   rebuild and the round's menu light them again.
 - **Names** (`0x080339C4`): a unit's is its Zoid's, with a letter (`battle-text` 88 +
-  its place among them) when its side has more than one of it. The panels' names are
+  its place among them) when its side has more than one of it, in the opening's
+  を確認しました too. The panels' names are
   printed into window 0 and taken from there: the player's (`battle-text` 0x33) for
   character 0, name 154 + the character's otherwise.
-- **The return** (`0x0802BCA4`): the screen is built while black, 20 frames and 8 a
-  panel, the message window 3 frames before their end; it fades in over 35 frames, and
-  2 frames later come the hit display and the messages. The hit display
-  (`0x0802D36C`) plays sound `0x5A`, loads for a frame, then each hit unit sparks (the
-  battle screen's effect 6, 8 pixels right of and 16 above it) and shakes by −2, 0, 2
-  and 0 pixels three times. The messages (`0x0802C084`) give each target's name, then
-  `battle-text` 2, the damage and 3 (0x25 and 0x26 for a critical hit, 4 for a miss, 6
-  after a beaten one), each with its wait; a panel's bars follow its message. The
-  display ends 7 frames after its sparks, the messages 5 after their last wait, the
-  return 2 after both.
+- **The return** (`0x0802BCA4`): the screen is built while black: for each panel the
+  text system is reset, the name printed and the reset done again, then the panels are
+  drawn and the text system reset once more (`0x08031074`, `0x0802F07C`). Each reset
+  takes 2 or 3 frames by where in its frame it starts, so the build took the original
+  49 to 54 frames for four panels; the port takes 17 frames and 8 a panel, the message
+  window 3 frames before their end. It fades in over 35 frames, and 2 frames later it
+  starts the hit display (task slot 6) and the messages (slot 7), both in the same
+  frame. Once the messages report it ends that task, from the next frame waits for the
+  display's report and ends that one too, and reports two frames later (states
+  `0x1B58`, `0x1BBC`, 8000, `0x2328`).
+- **The hit display** (`0x0802D36C`) runs in stages, each loading its graphics
+  (`0x08032134`), starting a task for each unit concerned and ending as soon as the
+  first of them reports; the next stage starts the frame after:
+  1. the sparks: sound `0x5A` and a frame's load, then each unit hit sparks (the battle
+     screen's effect 6, 8 pixels right of and 16 above it) and shakes by −2, 0, 2 and 0
+     pixels three times; a spark's task sees its animation's end and reports a frame
+     later (`0x0802D9A4`);
+  2. the units whose pilot was dazed (the blow's flag 8): a lowered statistic's glow
+     (`0x0802CD38`, the display's effect 5);
+  3. the paralysed ones (flag 4, `0x0802DAF4`): the display's effect 6 (screen record
+     0) on the unit while its colors darken by 2 a frame from 2 to 22 (flag `0x1D`);
+     once its animation is over the unit takes trait `0x4000` and stays dark;
+  4. the beaten ones (flag `0x8000`, `0x0802DBE4`): the explosion (the effects' record
+     181, whose load holds the main loop for a frame) with sound `0x5B`, `0x5C` or
+     `0x5D` by the largest size among them; each unit vanishes 24 frames in and stays
+     gone. The task reports the frame after.
+  A stage with no unit goes on at once to the next, the last reporting the frame after
+  its load.
+- **The messages** (`0x0802C084`) give each target's name, then `battle-text` 2, the
+  damage and 3 (0x25 and 0x26 for a critical hit, 4 for a miss), with its wait; a
+  panel's bars follow its message. After each wait the task takes a state a frame: the
+  pilot's name and 79 (は頭がクラクラした) when the weapon dazed it, the name and 80
+  (はマヒしてしまった) when it paralysed the unit, the name and 6 (は戦闘不能になった)
+  when it beat it, each with its wait; then the next target's message two frames
+  later, or the report. A weapon that dazes (flag `0x1000`) also leaves effect
+  `0x2000` on the target for its turns: its unit ignores its pilot.
+- **The row advance** (`0x0802F09C`): at each round's start, the party's side then the
+  enemy's, a frame each for the check and a frame for the next side: when no unit of
+  the side's front row still fights (`0x08032A88`: a unit, not out), the figures hide
+  (`0x0802FA58`) and each unit of the back row still fighting moves to the slot in
+  front of it. Its record moves at once; its sprite slides from its place to the new
+  slot's in 15 frames (`0x0802F408`: a fifteenth of the way a frame, truncated, and
+  the place itself on the last), the task sees the moves' end the frame after and
+  puts the side's sprites in their slots the frame after that (`0x080317E4`, the
+  paralysed ones darkened by 24), setting the side's flag in `0x0200EB84` (`0x80` the
+  party's, `0x100` the enemy's). The figures come back at the end (`0x0802FA6C`). A
+  party unit keeps its panel. The results find each formation slot's unit by its
+  pilot (`0x080365C8`), wherever it moved.
 - **The figures** (task `0x0802F8F8`, slot 8): L shows or hides each party unit's
   hit points and energy over it, four orange digits, a slash and three blue ones (at
   most 9999 and 999), 8×8 tiles from 32 pixels left of the unit's place and 16 above
@@ -262,8 +329,8 @@ The screen's other changes:
   as an attack starts (`0x0802FA3C`) and starts it again at the return's end and after
   an aim given up; the game state keeps whether they show (`+0`, bit `0x1000`), so
   they come back in the next battle. The battle menu's other screens hide them for
-  their time (`0x0802FA58`, `0x0802FA6C`), and so does the row advance when rows move,
-  which the port does not model.
+  their time (`0x0802FA58`, `0x0802FA6C`), and so does the row advance when rows
+  move.
 - **After a support part:** the first target's kind picks the display and the
   messages (the table at `0x0802BEB0`). For a raised statistic (kind 1,
   `0x0802CA54` and `0x0802CE98`), each unit it landed on shows a glow on its place
@@ -275,6 +342,19 @@ The screen's other changes:
   レーザー防御, 67 スピード, 68 回避率, by the first of the change's bits `0x10`,
   `0x20`, `0x100`, `0x200`, `0x400`, `0x800`, `0x8000`), the amount, and 72 上がった
   (bit 0) or 73 下がった (bit 1), with its wait.
+  For a lowered statistic (kind 2, `0x0802C8EC`) the glow is the display's effect 5
+  (screen record 3, sound `0x58`), its colors' red and blue raised and green lowered
+  (flags `0x16` and 9) from 0 by 2 a frame to 30 and back; its task reports as it
+  hides, a frame sooner. The displays' effect numbers go through the table at ROM
+  `0x66BA0C` (eight bytes each: the table, the record): effect 0 is screen record 6,
+  1 the effects' record 27 of the table at `0x6F8174`, 2 screen 4, 3 screen 1, 4
+  screen 2, 5 screen 3, 6 screen 0 and 7 screen 5.
+  A part that sets a state (kind 4) or repairs in full (kind 5) shows the raised
+  statistic's glow; its messages (`0x0802D224`, `0x0802D0C0`) give each unit it landed
+  on the name and `battle-text` 81 (はダメージを一切受けない！！) or 82
+  (の運動性能が上がった！！, with the unit's panel after it). As in the other message
+  tasks, every target has its wait, those it missed too. The party has no such part
+  in the traced saves: these two were read from the code alone.
 
 - **Items** (task `0x08038FC4`): アイテム lists the party's battle items, the first
   six of the item counts (`+0x3305`) that are not 0, six a page, each with its name
@@ -298,6 +378,55 @@ The screen's other changes:
   last stays lit, `0x0803CA20`), then `battle-menu` 1 (the reset) and 2 (the message
   window). The panels and the list's clearing reach the screen together, in the
   reset's last frame but one: the reset has the screen's maps copied again.
+
+- **Deck commands** (the round's コマンド, task `0x0803B7D0`): the battle's deck, a copy
+  of the game state's (`+0x349C`) the battle takes at its start and コマンド作成
+  (`0x0802BC6C`), fills window 2 as the deck screen does, the description of the
+  slot's command in the message window, and its menu (`battle-menu` 0xF) runs. A on a
+  command plays sound `0x3E`; a command whose record (twelve bytes at ROM `0x683AC0`:
+  flags, then two displays' descriptors) has flag `0x100` first asks
+  ゾイドを選択してください (`battle-text` 30) and the marker, as an item does. The
+  command then leaves the battle's deck, and its routine (the table at ROM `0x683C4C`)
+  checks it and makes its changes: an error (1 to 4) shows `battle-text` 52 + it
+  ({name}がいません, 部隊に配備されていません, 前衛がいません, 後衛がいません) until A
+  and gives the command up. Otherwise the player's name, 「 (33), the command's name
+  (`item` 77 + n) and 」を発令しました (34) come with sound `0x54` and the wait; the
+  text system is reset, the description comes back, and each descriptor plays its
+  display (task `0x0803C138`): its low bits pick the units (`0x10` all, `0x20` the
+  player, `0x40` the front row, `0x80` the back row, `0x100` the swimmers, `0x200` the
+  fliers, `0x400` all but the L size, `0x800` all but the S size, `0x1000` all but the
+  chosen Zoid, `0x2000` all but the player, the chosen Zoid otherwise; bit 1 the
+  party, bit 4 both sides, the party's first and the enemy's a frame after), its high
+  bits the display: a repair's glow (`0x02000000`), a raise's (`0x04000000`,
+  `0x40000000`), a lowered statistic's (`0x80000000`), a stop's (`0x20000000`: effect
+  3, sound `0x4B`, every channel lowered, flag `0x1D`), a sacrifice (`0x10000000`:
+  the unit's hit points go to 0 and an explosion, the effects' record 181, plays where
+  a hit's spark does, the unit vanishing 24 frames in; `0x0802DCB4`, `0x0802DBE4`) or
+  a revival (`0x08000000`: the beaten units come back with all their hit points and
+  energy, the player with its pilot's bonuses twice; `0x0802E40C`). The revival's
+  display loads effect 7 (screen record 5) and plays sound `0x56`; its panels show
+  the units whole and lit. On its 29th frame a unit's sprite comes back with its
+  colors raised by 32 (`0x0802E618`, flag `0x1E`), then by the whole part of 32 less
+  half a level each frame, written straight into the palette; it reports once its
+  effect's animation is over, and the display the frame after. Neither the
+  commands nor their displays print messages. At the end the party's panels are shown
+  again (after a display on the party), and `battle-menu` 1 and 2.
+  The routines set the round's flags (`0x0200EB84 + 2`: 1 Zi data for a win this round,
+  2 twice the money added, 4 twice the experience, 8 the slowest first, `0x10` a
+  random order, `0x20` no 「格闘」 weapons, `0x40` only them), the units' round state
+  (`+0`: 1 cannot act, as when paralysed, 2 cannot be hit, 4 always hits, 8 spends
+  twice the energy), effects for the round through the support parts' own routine
+  (`0x08032B54`: 攻撃 `0x11`, 命中 `0x21`, 防御 `0x101` and `0x102`, スピード `0x801`
+  and `0x802`, on the unit or, for 王子の条件 and 覇道, on its pilot), hit points and
+  energy. The round's start (`0x0802F5D8`) takes the weapons the flags forbid out of
+  their slots (weapon flag `0x100` is 「格闘」) and doubles the energy of the units that
+  spend twice; its end (`0x08033570`, `0x0802F81C`) clears the flags and the states
+  and gives the weapons back. The money's message shows the amount before it is
+  doubled.
+- **The text system's reset** in battle takes 2 frames, or 3 when the panels' bars
+  changed or the target marker showed since the last one; the port follows that rule,
+  inferred from the traced battles (a repair, a sacrifice and a Zoid's choice took 3,
+  glows and the panels' lighting alone 2), as if the reset waited for their copy.
 
 ## Results
 
@@ -336,8 +465,13 @@ each bonus as it was and as it is (`0x08036270`); the menu (0x17, window 2, run 
 200, 能力の割り振りを終了します (0x31) and a key end it.
 
 **The write-back** (`0x080364DC`). Each formation slot's unit takes its battle unit's
-hit and energy points; a slot whose pilot has no battle unit is left with none, marked
-`0x800` and taken out of the formation (`0x08037B1C`). After a loss the player's unit
+hit and energy points, the battle unit found by the slot's pilot (`0x080365C8`); a
+slot whose pilot has no battle unit is left with none, marked `0x800` and taken out of
+the formation (`0x08037B1C`). After a won battle (result 1) each unit that fought
+gains a training level (`+0x34`, at most 100) and its statistics are computed again
+(`0x08036CB0`); half the level is added in percent, so the first level changes
+nothing. Nothing else goes back: a part used up in the battle empties only its battle
+unit's slot (`0x08033E40`), so the game state keeps it for the next battle. After a loss the player's unit
 (or the first free one) comes back whole and takes the formation's second slot
 (`0x08037AB4`).
 
@@ -456,13 +590,18 @@ The defense is the beam defense against beams (`0x30`), capped at 65:
    starts, `0x08033D94`).
 3. A hit is critical when its roll is also below `(bonus >> 1) + 2`, twice that and
    at least 10 for a keen weapon (`0x80`), never on a target with trait `0x200` from
-   chapter 6 on.
+   chapter 6 on. The bonus is the accuracy past 100 of the last chance to hit that
+   went past it (`0x08034500` keeps it at `0x0200EB84 + 0x229C`); each actor's turn
+   clears it. The original also computes chances for the aim's figures and the
+   enemies' choice; the port takes it from the attack's own targets, which gives the
+   same value unless a target's own chance stays under 100.
 4. A target left without hit points is beaten (`0x400`); it leaves the battle when the
    actor's turn ends, and its experience and money go to the party's reward.
 5. A weapon for its own side (bit 0 clear) always lands and does what its flags say
    (below). A weapon for the other side that always lands (`0x800`) lowers the
    target's accuracy instead of hurting it: effect `0x22` by its power.
-6. A part used up by its use (bit 31) leaves its slot.
+6. A part used up by its use (bit 31: only the special attacks `0xF2`, `0x149`, `0x14F`
+   and `0x236`) leaves its slot for the rest of the battle.
 
 Each target's record (`0x0200EB84 + 0x220C`) keeps what the return shows: a kind
 (`+8`), what changed (`+2`) and an amount (`+4`). The effects go in the first of the
@@ -671,9 +810,12 @@ those as measured.
 The pilot's line is `battle` string `pilot`, the reaction `battle` string 86 + `pilot`
 (ROM `0x755E88`). Variable 3 picks among the string's lines: `(roll >> 1) % 3` from the
 turn's first roll (`0x080421FC`), 4 for a missed target and 3 for a destroyed one.
-Some weapons have their own lines (`0x08042218`: parts `0xF2`, `0x149`, `0x14F`, `0x161`,
-`0x224`, `0x22A`, `0x236`, from ROM `0x756090`), and so do units with a special pilot
-(`+0xCE`, ROM `0x755FE0`); neither is modeled yet.
+A weapon for the attacker's own side makes it say line 3. Some weapons have a line of
+their own (`0x08042218`): `battle` string 216 + *k* (ROM `0x756090`) with variable 3 at
+*k*, for parts `0x149` and `0x14F` (*k* = 0), `0xF2` (1), `0x236` (2), `0x224` (3),
+`0x22A` (4) and `0x161` (5). A unit with a special pilot (`+0xCE`) would speak string
+172 + it (ROM `0x755FE0`), but the battle's units all have none (`0x0802B5D0`,
+`0x0802B728` set `0xFF`): those lines belong to the staged scenes.
 
 When a pilot's expression changes, the portrait disappears for a frame while the
 game loads its tiles, then the new one shows.
@@ -727,10 +869,36 @@ at ROM `0x6D4784`) then moves it and sets off the next one:
 | 14 | A bullet that jumps a screen back and flies in to its place, then sets off the sprite it names |
 | 15 | Fades the blend of the semi-transparent sprites in over 32 frames (`0x080481D4` in its second way: from none of the sprite and all of the layer below to 14 and 9 sixteenths), then plays its part, still showing, until its value's frames have gone; the shield's bubble (sprite `0x2E`, placed on the screen rather than on the rack) |
 | 17 | Drifts by its value until its animation ends, setting off the next at its link step |
+| 8 | The Zoid charges (the melee weapons): its position (`0x0200E288`) and the camera's (`0x0200E284`) speed up by an eighth of a pixel a frame, stage by stage of its value, until the Zoid is 264 pixels past the camera, with its sound on the way |
+| 9, 33 | The Zoid dashes back from where it stands, sets off the next, waits, then lunges forward with shake 1 (5 for 33) and its sound. They run from their spawn, set off or not |
+| 12 | On its link step starts the shot its value names from its start, and leaves the shots to it; hides at its end |
+| 16 | Sets off the next once it has shown for its value's frames; it plays on without holding the shots up |
+| 18 | Slides by a speed across and up or down its value gives until it has gone its value's top bits, setting off the next at its link step |
+| 19 | A bullet from its home, like 13 |
+| 20 | Glides by quarter pixels across and up or down until its animation ends, setting off the next at its link step |
+| 21 | The camera pans 4 pixels a frame for 33 frames, the Zoid with it; it counts its delay from its spawn |
+| 22 | Moves across and bobs by the wave table (ROM `0x6D3B94`) until its animation ends |
+| 23 | Sets off the next at its link step and hides at its end, or loops with its value's bit 15; never holds the shots up |
+| 24 | Plays its animation from the start, sets off the next once at its link step, hides at its end |
+| 25, 31 | Glide as 20 and, on their link step (from it for 31), start the shot their value's bits 10 on name, which then holds the shots up no more (31: themselves) |
+| 27, 32 | Bullets like 14, as many times as their link step counts |
+| 29 | Plays an animation of a mounted weapon (entity 20 + the value's bits 5 on), then sets off the shot its bits 10 on name |
+| 34 | Brightens the Zoid's and the scenery's palettes and the mounted weapons' a level every fifth frame to white, and leaves them so (`0x08047E88`) |
+| 35 | Brightens the Zoid's palettes a level every second frame to white and back |
+| 36 | Starts 128 pixels to the side, sets off the shot its value names at its link step, then backs off a pixel a frame |
+
+The camera (`0x0200E284`) moves the scenery and the Zoid together: the scroll table
+takes it off (adds it on the enemy's side), and so does the Zoid's layer (`0x08044A8C`).
+A view's setup puts it back to 0. The weapons that use these are mostly the melee ones
+(parts `0x8E` to `0xC9`: 8, 9, 29, 33) and the special attacks (35).
 
 The five screen shakes (`0x08044B34` and after, tables at ROM `0x6D4168`, `0x6D41E8`,
 `0x6D4218`, `0x6D4188` and `0x6D4208`) move the Zoid's layer frame by frame. Kinds 1
-and 4 set it and return it to its place; kinds 2, 3 and 5 push it back for good.
+and 4 set it and return it to its place; kinds 2, 3 and 5 push it back for good. They
+run only while the shots do (`0x0200DA70`): once the shots are over a shake stops
+where it is. In the target's view of a critical hit (`0x0200DA96`), a shake of kind 1
+flashes the pilot's portrait (OBJ palette 15, `0x08047F88`): white, then a level less
+each frame back to its colors over 15 frames, again as long as the shake lasts.
 
 The semi-transparent sprites blend 15/16 of their color with 8/16 of the layer below
 (`BLDALPHA` `0x080F`).
@@ -795,6 +963,40 @@ enemies' hit points raised by hand): its message and the task's states give the
 port's timing. The port shows it, with the Command Wolves' and an enemy's, at the
 fourth round's start of a fight where the party only uses its support parts.
 
+The story battles were checked on the first, set up in the reference emulator from a
+roaming battle's meeting (`0x080329E4` given type 1 and battle 0): the opening, the
+enemies' letters, the menus, the song and four rounds of the fight, with A pressed
+every 20 frames. With the port's random numbers resumed from the original's at the
+battle's start, the controller's, the attack scenes' and the display's states, the
+sounds, the lines, the hits and the criticals fall on the same frames but for the
+return's build and a view's setup (below) and the key presses those shift; the aim's,
+the shots', the flashes' and the explosions' frames are identical but for the
+scenery's rewrite line. The roaming battle of the traced save state was replayed the
+same way to its end. Past four rounds the builds' frames have moved the actor's turn
+start and with it the rolls, and the battles part.
+
+The row advance was compared on every frame in story battle 3 (a front enemy and one
+behind it), with a copy of the ROM whose front Zoid has 1 hit point: from the round's
+start to the check that follows, the frames are identical.
+
+The revival was compared on every frame in story battle 3, 勇者の条件 put in the
+deck and issued in the second round, once the first had beaten a party unit: from the
+player's sacrifice to the round's start the states and sounds fall as the original's,
+and the revived unit's return and fade are identical; eight frames differ by a step
+of the effect's animation. The command flow before it ran a frame late there, the
+text system's reset taking 3 frames where the original's took 2 (the bars had
+changed in the port's first round, whose rolls had parted from the original's).
+
+The deck commands were compared on every frame from the save state of the opening's
+menu, one command put in the battle's deck by hand each time and issued from the
+round's menu: 王子のはげまし (the repair), 王子の怒り (the raise), 神の領域 (a Zoid's
+choice and a raise on it), ぬかるみ (lowered, on both sides), 威圧 (stopped, on both
+sides) and 勇者の条件 (the player's sacrifice, and a revival of nobody). From the
+command's choice to the round's start the frames are identical, but for a few pixels
+of the glows' sprites in three frames; the attack scene that follows starts two frames
+early, as it does without a command. 後方支援 starts its displays a frame late and ends
+two frames early (see Differences).
+
 The menu's other screens were compared on every frame from the save state of the
 opening's menu. 部隊編成 left again at once is identical from the choice to the menu's
 return; taking a unit out and fighting, the battle that follows is identical, and so is
@@ -823,9 +1025,12 @@ traced one's speed: each step of its explosion is identical to the original's.
 
 ## Differences
 
-- The return's build before its fade in: the port takes 20 frames and 8 a panel; the
-  original took 49, 51 and 52 frames for four panels in the traced returns, as the
-  CPU time of the panels' text varies.
+- The return's build before its fade in: the port takes 17 frames and 8 a panel; the
+  original took 49 to 54 frames for four panels, as each of its nine text-system
+  resets takes 2 or 3 frames by where in its frame it starts.
+- A view's setup: the scene's first states took the original 4 or 5 frames before
+  `0x1050` (its records' build and a reset), the port 3; its fade in comes on the
+  same frame.
 
 - The menu window appears a frame early. Presenting it cost the original two frames
   (the CPU time of its five lines of text), as happens in the pause menu.
@@ -834,9 +1039,13 @@ traced one's speed: each step of its explosion is identical to the original's.
 - The item list's first page shows a frame early: printing its five lines ran the
   original past its frame, so their window showed a frame later.
 - Giving the item list up, the list and the message window go and come back a frame
-  late, and the action menu too until its cursor shows. The original's reset took two
-  frames there and three once an item was used (and in the field's scripts); the port
-  takes three throughout.
+  late, and the action menu too until its cursor shows: the original's reset took two
+  frames there, where the port's rule gives three (the bars changed in the attack
+  before).
+- 後方支援: printing its long description ran the original past its frame, so its
+  displays start a frame late; the port's round starts two frames early.
+- The attack scene of the first round from the opening's menu starts two frames
+  early, with or without a command.
 - After ステータス the battle screen fades in and its menu comes back a frame early: the
   text system's reset after the panels (`0x0802F07C`) took the original 9 frames there
   and 8 after 部隊編成 or コマンド作成; the port takes the same throughout.
@@ -861,23 +1070,22 @@ traced one's speed: each step of its explosion is identical to the original's.
 
 ## Not modeled yet
 
-- In the results: the battle's flags (`0x0200EB84 + 2`: no spoils, double money,
-  double experience), the training a unit gains when `+0x21E0` is set, the link
-  battles' results (flag `0x20`), and a new unit for a party without one after a loss.
-- The row advance (its fixed frames are).
-- After a support part, the displays and messages of the kinds other than a raised
-  statistic: a lowered one (`0x0802C8ED`; its messages are modeled), a repair
-  (`0x0802C421`, `0x0802C709`), a state (`0x0802D225`) and a full repair
-  (`0x0802D0C1`). A part used up in battle is not taken from the game state.
-- Deck commands; the battle menu's other lines, which show the menu again. The item
-  list's pages and their arrows (`0x080339F8`), which six battle items never need.
+- In the results: the link battles' results (flag `0x20`), a new unit for a party
+  without one after a loss, and result 2 (every enemy with trait `0x1000`, which
+  a retreat sets on the party's units: `0x08032684`); nothing in the port sets it on
+  the enemy's.
+- The item list's pages and their arrows (`0x080339F8`), which six battle items never
+  need.
 - The enemies' ways of choosing other than the first were read from the code alone:
   no enemy of the traced areas uses them.
-- In the attack scenes: the shot behaviors other than 0, 1, 2, 10, 13, 14, 15 and 17
-  (they play as 2), the palette flash of a critical hit, the view that skips the attacker (`0x0200EB84 & 3 == 1`), the
-  weapons' and the special pilots' own lines, and the story battles' scripted aim.
+- In the attack scenes: the behaviors that no weapon's animation uses (5, 6, 7, 11,
+  26, 28, 30; 3 and 4 are the aim's cursors) play as 2.
 - In the aim: the front weapon's hiding while the Zoid fades (the mount's `+0x4A`),
   and the entities the back rack's weapon moves when it fires (`0x08042780`).
-- The round's コマンド (the task `0x0803B7D0`), which issues a deck command, and the
-  deck commands' effects.
-- Story battles (`0x08008D28`).
+- Of the deck commands: the rows' move back that comes before a revival on a side
+  whose back row had moved up (`0x0802E144`, which clears flags `0x80` and `0x100` of
+  `0x0200EB84`), and a revived unit's record built again from the game state
+  (`0x0802B5D0`: its effects and used-up parts; the port keeps them); the link battles, where the opponent's commands come over the cable;
+  and the commands' errors, read from the code alone.
+- The story battles' own start and end on the field (`0x08008D28`): the event side
+  comes with the events that call them.

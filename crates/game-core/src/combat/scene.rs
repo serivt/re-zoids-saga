@@ -65,17 +65,15 @@ const PARTY_ZOID_OFFSET: i32 = 0x70_0000;
 const BLACK: u8 = 16;
 const FADE_STEP: u8 = 2;
 const EFFECT_ALPHA: (u8, u8) = (15, 8);
-/// Frames the attacker waits before speaking: 90 in the story's battles
-/// (`0x08042810`).
+/// Frames the attacker waits before speaking (`0x08042810`; 90 in the
+/// staged scenes, `0x0200EB84` bit 0, which [`crate::battle`] plays).
 const PAUSE_FRAMES: u32 = 30;
-const STORY_PAUSE_FRAMES: u32 = 90;
 /// Frames a view holds once its shots are over (`[sp]`), and the frames A
 /// must be held to skip ahead (`[sp + 4]`).
 const HOLD_FRAMES: u16 = 30;
 const SKIP_HOLD: u16 = 60;
 const HITS_SKIP_HOLD: u16 = 35;
 const REACTION_HOLD: u16 = 50;
-const STORY_REACTION_HOLD: u16 = 180;
 const SKIPPED_REACTION_HOLD: u16 = 10;
 // Scripts of the `system` table (`0x0803E4E8`).
 const VIEW_WINDOWS: usize = 0xB;
@@ -84,6 +82,26 @@ const MESSAGE_WINDOW: u8 = 1;
 /// Where a pilot's reactions start in the `battle` table (ROM
 /// `0x755E88`): its attack lines are `battle` string `pilot`.
 const REACTIONS: usize = 86;
+/// Where the special weapons' lines start in the `battle` table (ROM
+/// `0x756090`): the line of weapon `k` of [`WEAPON_LINES`].
+const WEAPON_LINE_STRINGS: usize = 216;
+/// The weapons with lines of their own (`0x08042218`), by their line.
+const WEAPON_LINES: [(u16, u16); 7] = [
+    (0x149, 0),
+    (0x14F, 0),
+    (0xF2, 1),
+    (0x236, 2),
+    (0x224, 3),
+    (0x22A, 4),
+    (0x161, 5),
+];
+/// The shake whose start flashes the portrait of a critical hit's target,
+/// from level 31 down to 16 over 16 frames (`0x08044B34`, `0x08047F88`).
+const CRITICAL_SHAKE: u8 = 1;
+const PORTRAIT_WHITE: u8 = 0x1F;
+const PORTRAIT_FLASH_FRAMES: u8 = 0x10;
+/// The line a weapon for the attacker's own side makes it say.
+const QUOTE_OWN_SIDE: u16 = 3;
 const QUOTE_DESTROYED: u16 = 3;
 const QUOTE_MISSED: u16 = 4;
 const QUOTE_VARIANTS: u16 = 3;
@@ -207,12 +225,10 @@ pub struct Attack {
     pub weapon: usize,
     /// The targets, in the order their views show.
     pub targets: Vec<SceneUnit>,
-    /// A story battle's: longer pauses, no skipping.
-    pub story: bool,
     /// The turn's first roll (`0x020143BC`), which picks the lines.
     pub roll: u16,
-    /// For the party's attack outside the story's battles, what the
-    /// player's aim chooses from; the weapon and the targets come from it.
+    /// For the party's attack, what the player's aim chooses from; the
+    /// weapon and the targets come from it.
     pub aim: Option<AimSetup>,
 }
 
@@ -290,8 +306,52 @@ struct Stage {
     unit: SceneUnit,
     scenery: Option<BattleImage>,
     zoid: Option<BattleImage>,
+    /// The background palettes as loaded, which a flash brightens.
+    colors: Vec<u16>,
     palette: FullPalette,
     fire: Option<FirePart>,
+}
+
+/// What the scenery's task follows of the shots.
+#[derive(Debug, Clone, Copy)]
+struct Shooting {
+    /// Whether the shots run this frame (`0x0200DA70`): the shakes and the
+    /// portrait's flash go on only while they do.
+    running: bool,
+    /// The target's view of a critical hit (`0x0200DA96`), whose shake of
+    /// kind 1 flashes the pilot's portrait white.
+    critical: bool,
+    /// The portrait's flash (`0x0200DA98`): 0 when none, then the frames
+    /// since it started; and the level of the portrait's palette.
+    flash: u8,
+    level: u8,
+}
+
+impl Default for Shooting {
+    fn default() -> Self {
+        Self {
+            running: false,
+            critical: false,
+            flash: 0,
+            level: crate::windows::NORMAL_LEVEL,
+        }
+    }
+}
+
+/// A flash of the palettes (`0x08047E88`): the first `banks` background
+/// palettes, and the mounted weapons' with `mounts`, at `level`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Flash {
+    banks: u8,
+    mounts: bool,
+    level: u8,
+}
+
+impl Flash {
+    /// A color at the flash's level.
+    fn color(self, color: u16) -> u16 {
+        crate::windows::faded_color(color, self.level)
+    }
 }
 
 /// An attack scene being shown.
@@ -319,6 +379,14 @@ pub struct AttackScene {
     shown_table: [i32; HEIGHT],
     previous_table: [i32; HEIGHT],
     zoid_x: i32,
+    /// The camera's offset (`0x0200E284`), which moves the scenery and the
+    /// Zoid together.
+    camera: i32,
+    /// The palettes' flash, and as the frame shows it.
+    flash: Option<Flash>,
+    shown_flash: Option<Flash>,
+    /// The shots' running, and the portrait's flash they drive.
+    shooting: Shooting,
     shake_offset: i32,
     shake: Option<(u8, usize)>,
     bg1: (i32, i32),
@@ -365,7 +433,14 @@ impl AttackScene {
             stage: None,
             step: Step::Init(0),
             lag: 0,
-            entities: Entities::new(),
+            entities: Entities::with_wave(
+                (0..=u8::MAX)
+                    .map(|index| {
+                        saga_battle::wave(data.bytes(), index)
+                            .map_or(0, |wave| u16::from_ne_bytes(wave.to_ne_bytes()))
+                    })
+                    .collect(),
+            ),
             view: View::Attacker,
             oam: Vec::new(),
             shown: Vec::new(),
@@ -381,6 +456,10 @@ impl AttackScene {
             shown_table: [0; HEIGHT],
             previous_table: [0; HEIGHT],
             zoid_x: 0,
+            camera: 0,
+            flash: None,
+            shown_flash: None,
+            shooting: Shooting::default(),
             shake_offset: 0,
             shake: None,
             bg1: (0, 0),
@@ -464,6 +543,7 @@ impl AttackScene {
     pub fn latch(&mut self) {
         self.shown_bg1 = self.bg1;
         self.shown_brightness = self.brightness;
+        self.shown_flash = self.flash;
         self.shown.clone_from(&self.oam);
     }
 
@@ -494,10 +574,24 @@ impl AttackScene {
                 Request::Sound(sound) => self.sounds.push(u16::from(sound)),
                 Request::Shake(kind) => self.shake = Some((kind, 0)),
                 Request::Blend(eva, evb) => self.alpha = (eva, evb),
+                Request::Zoid(x, camera) => {
+                    self.zoid_x = x;
+                    self.camera = camera;
+                }
+                Request::Flash {
+                    banks,
+                    mounts,
+                    level,
+                } => self.set_flash(Flash {
+                    banks,
+                    mounts,
+                    level,
+                }),
             }
         }
         if self.scenery_task && scenery_runs {
             self.update_scenery(data.bytes());
+            windows.set_portrait_level(self.shooting.level);
         }
         if let Some(aim) = self.aim.as_mut() {
             aim.update(
@@ -633,6 +727,7 @@ impl AttackScene {
     /// scene hands the screen back.
     fn end(&mut self, windows: &mut ScriptWindows<'_>) {
         windows.close_window(None);
+        windows.set_portrait_level(crate::windows::NORMAL_LEVEL);
         self.scenery_task = false;
         self.brightness = BLACK;
         self.events.push(if self.cancelled {
@@ -652,16 +747,18 @@ impl AttackScene {
     ) -> Result<(), ScriptError> {
         match self.step {
             Step::Shots => {
+                self.shooting.running = true;
                 self.update_shots();
                 let mut alive = self.entities.shots_alive();
                 if self.held_a() {
                     if self.skip > 0 {
                         self.skip -= 1;
-                    } else if !self.attack.story {
+                    } else {
                         alive = false;
                     }
                 }
                 if !alive {
+                    self.shooting.running = false;
                     self.step = match self.view {
                         View::Attacker => Step::Hold,
                         View::Target => Step::Reaction,
@@ -735,7 +832,30 @@ impl AttackScene {
     /// Runs the shot entities' behaviors, as every state that waits on
     /// them does.
     fn update_shots(&mut self) {
+        self.entities.zoid_x = self.zoid_x;
         self.entities.update_shots(self.enemy_view);
+    }
+
+    /// The palettes at a flash's level, from those loaded.
+    fn set_flash(&mut self, flash: Flash) {
+        let Some(stage) = self.stage.as_mut() else {
+            return;
+        };
+        let bright = usize::from(flash.banks) * 16;
+        let colors: Vec<u16> = stage
+            .colors
+            .iter()
+            .enumerate()
+            .map(|(index, color)| {
+                if index < bright {
+                    flash.color(*color)
+                } else {
+                    *color
+                }
+            })
+            .collect();
+        stage.palette = FullPalette::from_bgr555(&colors);
+        self.flash = Some(flash);
     }
 
     /// Sets up a view (`0x08042570`, `0x08042B4C`): the scenery its unit
@@ -750,25 +870,37 @@ impl AttackScene {
         self.enemy_view = unit.enemy;
         self.kind = unit.kind;
         self.scenery = unit.scenery();
+        self.shooting = Shooting {
+            critical: view == View::Target && self.hit_of(&unit).critical,
+            ..Shooting::default()
+        };
         self.lines = [0; HEIGHT];
         self.table = [0; HEIGHT];
         self.brightness = BLACK;
         self.shake_offset = 0;
         self.shake = None;
         self.zoid_x = SLIDE_FROM;
+        self.camera = 0;
+        self.flash = None;
         self.bg1.1 = 0;
         self.entities.clear();
         let scenery = data.scenery_image(self.scenery);
         let zoid = u8::try_from(unit.zoid)
             .ok()
             .and_then(|zoid| data.zoid_image(zoid));
-        let mut palette = FullPalette::from_bgr555(&[0]);
+        let mut colors = vec![0u16; 256];
+        let mut load = |start: usize, loaded: &[u16]| {
+            for (slot, color) in colors.iter_mut().skip(start).zip(loaded) {
+                *slot = *color;
+            }
+        };
         if let Some(zoid) = &zoid {
-            palette.write(ZOID_COLORS, &zoid.palette);
+            load(ZOID_COLORS, &zoid.palette);
         }
         if let Some(scenery) = &scenery {
-            palette.write(SCENERY_COLORS, &scenery.palette);
+            load(SCENERY_COLORS, &scenery.palette);
         }
+        let palette = FullPalette::from_bgr555(&colors);
         for rack in 0..effects::MOUNTED_RACKS {
             let part = unit.parts[rack];
             if part == 0 {
@@ -787,15 +919,13 @@ impl AttackScene {
             unit,
             scenery,
             zoid,
+            colors,
             palette,
             fire: saga_battle::fire_part(rom, part & 0x0FFF),
         });
         self.battle_vars(unit.pilot);
     }
 
-    /// The part of the weapon the attacker fires, as the scene lists it
-    /// (`0x0200E23C`): 0 for one without a place on the picture, with
-    /// `0x1000` for the back rack's.
     /// Whether the weapon is for the attacker's own side (bits 1 and 2): the
     /// scene then shows no target's view (`0x0200E24C`).
     fn own_side(&self, rom: &[u8]) -> bool {
@@ -804,6 +934,9 @@ impl AttackScene {
             .is_some_and(|record| record.flags & OWN_SIDE_WEAPON != 0)
     }
 
+    /// The part of the weapon the attacker fires, as the scene lists it
+    /// (`0x0200E23C`): 0 for one without a place on the picture, with
+    /// `0x1000` for the back rack's.
     fn weapon_part(&self, attacker: &SceneUnit) -> u16 {
         let part = attacker.parts.get(self.attack.weapon).copied().unwrap_or(0);
         if self.attack.weapon == effects::BACK_RACK && part != 0 {
@@ -838,17 +971,28 @@ impl AttackScene {
         Ok(())
     }
 
-    /// The attacker's line (`0x08042884`): one of its pilot's three,
-    /// picked by the turn's first roll.
+    /// The attacker's line (`0x08042884`): for a weapon for its own side
+    /// its pilot's fourth; for a weapon with a line of its own that line;
+    /// otherwise one of its pilot's three, picked by the turn's first roll.
+    /// (A special pilot's lines, ROM `0x755FE0`, belong to the staged
+    /// scenes: the battle's units all have none.)
     fn start_quote(
         &mut self,
         rom: &[u8],
         windows: &mut ScriptWindows<'_>,
     ) -> Result<(), ScriptError> {
         let pilot = self.attack.attacker.pilot;
-        let variant = (self.attack.roll >> 1) % QUOTE_VARIANTS;
+        let part = self.weapon_part(&self.attack.attacker);
+        let own_line = WEAPON_LINES.iter().find(|(weapon, _)| *weapon == part);
+        let (string, variant) = if self.own_side(rom) {
+            (usize::from(pilot), QUOTE_OWN_SIDE)
+        } else if let Some(&(_, line)) = own_line {
+            (WEAPON_LINE_STRINGS + usize::from(line), line)
+        } else {
+            (usize::from(pilot), (self.attack.roll >> 1) % QUOTE_VARIANTS)
+        };
         self.battle.select_window(MESSAGE_WINDOW);
-        self.battle.start(usize::from(pilot))?;
+        self.battle.start(string)?;
         let mut vars = [0; 8];
         vars[QUOTE_VARIABLE] = variant;
         vars[PILOT_VARIABLE] = u16::from(pilot);
@@ -873,9 +1017,7 @@ impl AttackScene {
     fn after_reaction(&mut self) {
         self.entities.pause_shots(false);
         self.update_shots();
-        self.hold = if self.attack.story {
-            STORY_REACTION_HOLD
-        } else if self.skip == 0 {
+        self.hold = if self.skip == 0 {
             SKIPPED_REACTION_HOLD
         } else {
             REACTION_HOLD
@@ -986,15 +1128,11 @@ impl AttackScene {
         }
         self.zoid_x = 0;
         match view {
-            View::Attacker if self.attack.aim.is_some() && !self.attack.story => {
+            View::Attacker if self.attack.aim.is_some() => {
                 self.step = Step::AimStart;
             }
             View::Attacker => {
-                self.step = Step::Pause(if self.attack.story {
-                    STORY_PAUSE_FRAMES
-                } else {
-                    PAUSE_FRAMES
-                });
+                self.step = Step::Pause(PAUSE_FRAMES);
             }
             View::Target => {
                 self.skip = HITS_SKIP_HOLD;
@@ -1082,6 +1220,7 @@ impl AttackScene {
             0
         };
         self.run_lines(rom);
+        self.flash_portrait();
         if let Some((kind, step)) = self.shake {
             let steps = saga_battle::shake_steps(rom, kind).unwrap_or_default();
             let value = steps.get(step).map_or(0, |value| i32::from(*value) << 16);
@@ -1099,25 +1238,58 @@ impl AttackScene {
             } else {
                 self.shake = Some((kind, step + 1));
             }
+            if kind == CRITICAL_SHAKE && self.shooting.critical && self.shooting.flash == 0 {
+                self.shooting.flash = 1;
+            }
         }
         for line in 0..MOVING_LINES {
             self.table[line] = if self.enemy_view {
-                self.bg2_x.wrapping_add(self.lines[line])
+                self.bg2_x
+                    .wrapping_add(self.camera)
+                    .wrapping_add(self.lines[line])
             } else {
-                self.bg2_x.wrapping_sub(self.lines[line])
+                self.bg2_x
+                    .wrapping_sub(self.camera)
+                    .wrapping_sub(self.lines[line])
             };
         }
         for entry in &mut self.table[MOVING_LINES..] {
             *entry = self.bg2_x;
         }
         self.bg1.0 = if self.enemy_view {
-            self.zoid_x.wrapping_neg().wrapping_sub(self.shake_offset)
+            self.camera
+                .wrapping_sub(self.zoid_x)
+                .wrapping_sub(self.shake_offset)
         } else {
             self.zoid_x
+                .wrapping_sub(self.camera)
                 .wrapping_sub(PARTY_ZOID_OFFSET)
                 .wrapping_add(self.shake_offset)
         };
         self.counter = self.counter.wrapping_add(1);
+    }
+
+    /// The portrait's flash while the shots run (`0x08044A8C`): from white,
+    /// a level less each frame back to its colors over 15 frames; without
+    /// the shots, the shakes stop.
+    fn flash_portrait(&mut self) {
+        let shooting = &mut self.shooting;
+        if !shooting.running {
+            self.shake = None;
+            return;
+        }
+        if shooting.flash == 0 {
+            return;
+        }
+        shooting.flash += 1;
+        shooting.level = if shooting.flash < PORTRAIT_FLASH_FRAMES {
+            PORTRAIT_WHITE - shooting.flash
+        } else {
+            crate::windows::NORMAL_LEVEL
+        };
+        if shooting.flash > PORTRAIT_FLASH_FRAMES {
+            shooting.flash = 0;
+        }
     }
 
     /// The scenery's line routine (the jump table at `0x080441B8`).
@@ -1244,6 +1416,13 @@ impl AttackScene {
     /// it blends.
     fn object_layer(&self) -> Vec<Option<(Rgb, u8, bool)>> {
         let mut layer: Vec<Option<(Rgb, u8, bool)>> = vec![None; WIDTH * HEIGHT];
+        let flashed: Vec<usize> = match self.shown_flash {
+            Some(flash) if flash.mounts => (0..effects::MOUNTED_RACKS)
+                .filter_map(|rack| self.entities.get(effects::FIRST_MOUNT + rack))
+                .map(|entity| entity.sprite)
+                .collect(),
+            _ => Vec::new(),
+        };
         for shown in &self.shown {
             let Some(sprite) = self.entities.sprites.get(shown.sprite) else {
                 continue;
@@ -1251,7 +1430,10 @@ impl AttackScene {
             let Some(pieces) = sprite.frames.get(shown.frame) else {
                 continue;
             };
-            let palette = Palette::new(sprite.palette.map(Palette::from_bgr555));
+            let flash = self.shown_flash.filter(|_| flashed.contains(&shown.sprite));
+            let palette = Palette::new(sprite.palette.map(|color| {
+                Palette::from_bgr555(flash.map_or(color, |flash| flash.color(color)))
+            }));
             for piece in pieces {
                 draw_piece(&mut layer, sprite, &palette, piece, shown);
             }

@@ -18,7 +18,7 @@ usually abut but the length is never stored. Tables located in Zoids Saga
 | `name` | `0x67601C` | 248 | Zoid and character names (also a few multi-part strings) |
 | `item` | `0x6763FC` | 148 | Items, parts and their effect text |
 | `dialogue` | `0x74FC54` | 1017 | Story and character dialogue, ~300 KB of script; the game indexes this table directly (map objects name entries by index), 29 of the first 40 pointers are null |
-| `battle` | `0x755D30` | 198 | Battle quotes |
+| `battle` | `0x755D30` | 222 | Battle quotes: pilot lines 0–85, reactions 86–171, staged-scene lines 172–215, weapon lines 216–221 (the words after entry 221 are no longer pointers) |
 | `menu` | `0x75B388` | 156 | Menu strings |
 | `battle-menu` | `0x675D94` | 28 | Script strings of the battle menus, which events also call (the box around a found item or a learned command) |
 | `battle-text` | `0x675E04` | 134 | Script strings of battle messages (Ｇ手に入れた and the like), which events also call |

@@ -131,6 +131,7 @@ impl Combat {
             ItemStep::Target => {
                 self.item_menu.target = self.first_target();
                 self.targeting = Some(self.item_menu.target);
+                self.palette_writes += 1;
                 self.message(&[Call::Text(TEXT_WHICH)]);
                 self.acts.pop_back();
                 Task::Item(ItemStep::ChooseTarget)
@@ -336,6 +337,7 @@ impl Combat {
                 self.sounds.push(SOUND_MOVE);
             }
             self.targeting = Some(self.item_menu.target);
+            self.palette_writes += 1;
         }
         if pressed(Button::A) {
             self.use_item();

@@ -17,10 +17,12 @@
 pub mod ai;
 pub mod aim;
 pub mod attack;
+mod commands;
 pub mod deck;
 pub mod effects;
 mod items;
 mod results;
+mod rows;
 pub mod scene;
 mod turn;
 pub mod units;
@@ -29,7 +31,7 @@ use std::collections::VecDeque;
 
 use extraction::saga::SpriteSheet;
 use extraction::saga_combat::{self, Grounds, PanelGraphics, SLOTS};
-use extraction::saga_encounter::{self, Formation};
+use extraction::saga_encounter::{Formation, Lineup, StoryBattle};
 use extraction::saga_formation::FieldLayer;
 use extraction::saga_party;
 use formats::tile::Tileset;
@@ -85,7 +87,12 @@ const TEXT_BANK: u8 = 15;
 
 // Scripts of the battle-menu table.
 const MENU_MAIN: u16 = 0;
+/// The story battles' menu, without 退却 (`0x0802E9CC` state 2000).
+const MENU_MAIN_STORY: u16 = 0x18;
 const MENU_RESET: u16 = 1;
+/// The frames the battle's text-system reset takes when nothing was drawn
+/// since the last one.
+const QUICK_RESET_FRAMES: u32 = 2;
 const MENU_MESSAGE_WINDOW: u16 = 2;
 const MENU_PRESENT: u16 = 5;
 const MENU_DRAW: u16 = 6;
@@ -133,10 +140,9 @@ pub enum Outcome {
     Retreated,
 }
 
-/// A unit on the battle screen.
+/// A unit on the battle screen: its Zoid's status sprite.
 #[derive(Debug, Clone)]
 struct Unit {
-    zoid: u16,
     sheet: Option<SpriteSheet>,
 }
 
@@ -227,6 +233,8 @@ enum Act {
     Pad(usize, u16),
     /// What the item list's menu returned, taken as its script ends.
     ItemChoice,
+    /// The deck's menu returned.
+    CommandChoice,
 }
 
 /// The opening and menu task (`0x0802E9CC`), by the state it waits in.
@@ -327,7 +335,8 @@ pub struct Combat {
     parts: ScriptRunner,
     /// The game-state block the battle writes its results into.
     state: Vec<u8>,
-    formation: Formation,
+    /// The enemies: a roaming formation or a story battle's.
+    lineup: Lineup,
     rom_experience: Vec<u32>,
     /// The levels the battle brought, and their points' sharing out.
     levels: u8,
@@ -341,7 +350,8 @@ pub struct Combat {
     sides: ai::Sides,
     /// The grounds the party and the enemy stand on.
     terrains: (u8, u8),
-    /// A story battle's.
+    /// A story battle's (`0x02005C70` bit 0): no retreat, the story's
+    /// song, and no spoils.
     story: bool,
     /// The game's chapter (the game-state block's byte 2).
     chapter: u8,
@@ -362,6 +372,15 @@ pub struct Combat {
     dim_panels: PanelLight,
     /// The formation screen 部隊編成 opened (task `0x08037B84`, slot 7).
     formation_screen: Option<Box<crate::menu::formation::Formation>>,
+    /// The round's commands: the deck, what the commands left.
+    command_state: commands::CommandState,
+    /// Changes to the panels' bars and the target marker's appearances: a
+    /// text-system reset after any takes a frame more, as if it waited for
+    /// their copy (seen after a repair, a sacrifice and a command's Zoid
+    /// choice; not after glows or the panels' lighting alone).
+    palette_writes: u32,
+    /// The writes at the last reset.
+    reset_signature: u32,
     /// The deck screen コマンド作成 opened (task `0x0803B004`, slot 7).
     deck_screen: Option<Box<deck::DeckScreen>>,
     /// The character screen ステータス opened (task `0x08052284`, slot 6).
@@ -370,11 +389,8 @@ pub struct Combat {
     /// shows: the maps the panels were drawn to reach the screen with the
     /// item list's reset.
     panels_held: Option<u8>,
-    /// The spark a hit unit shows (the battle screen's effect 6).
-    spark: Option<extraction::saga_battle::EffectSprite>,
-    /// The glow a unit a support part raised shows, and a repaired one's.
-    glow: Option<extraction::saga_battle::EffectSprite>,
-    mend: Option<extraction::saga_battle::EffectSprite>,
+    /// The screen effects the displays show.
+    effect_sprites: turn::EffectSprites,
     /// The figures L shows over the party's units.
     figure_glyphs: Option<extraction::saga_battle::UnitLabels>,
     /// Whether the figures' task runs (`0x0802F8F8`, slot 8), whether they
@@ -399,6 +415,10 @@ pub struct Combat {
     /// The sparks as the frame shows them: the sprites' OAM of the frame
     /// before.
     shown_sparks: Vec<turn::Spark>,
+    /// The units an explosion took off the screen, and the sprites moving
+    /// up a row, as the frame shows them.
+    shown_gone: [[bool; SLOTS]; 2],
+    shown_row_moves: Vec<rows::RowMove>,
     /// Frames the main loop is held up for (a load), in which nothing
     /// runs.
     lag: u32,
@@ -436,6 +456,25 @@ impl Combat {
         data: &GameData<'_>,
         state: &mut [u8],
         formation: &Formation,
+        terrains: (u8, u8),
+    ) -> Self {
+        Self::with_lineup(data, state, Lineup::Roaming(*formation), terrains)
+    }
+
+    /// Story battle `battle` (`0x08008D28`), both sides on its terrain;
+    /// otherwise as [`Combat::new`].
+    #[must_use]
+    pub fn story(data: &GameData<'_>, state: &mut [u8], battle: StoryBattle) -> Self {
+        let terrain = battle.terrain();
+        let mut combat = Self::with_lineup(data, state, Lineup::Story(battle), (terrain, terrain));
+        combat.story = true;
+        combat
+    }
+
+    fn with_lineup(
+        data: &GameData<'_>,
+        state: &mut [u8],
+        lineup: Lineup,
         (player_terrain, enemy_terrain): (u8, u8),
     ) -> Self {
         let rom = data.bytes();
@@ -445,13 +484,9 @@ impl Combat {
                 .flatten()
                 .unwrap_or_default()
         };
-        let (panels, [player, enemy]) = screen_units(data, state, formation);
-        let sides = battle_units(rom, state, formation);
-        let anchors = std::array::from_fn(|side| {
-            std::array::from_fn(|slot| {
-                saga_combat::slot_anchor(rom, side == ENEMY, slot).unwrap_or_default()
-            })
-        });
+        let (panels, [player, enemy]) = screen_units(data, state, &lineup);
+        let sides = battle_units(rom, state, &lineup);
+        let anchors = slot_anchors(rom);
         let grounds = (
             saga_combat::grounds(rom, player_terrain).map(|Grounds { player, .. }| player),
             saga_combat::grounds(rom, enemy_terrain).map(|Grounds { enemy, .. }| enemy),
@@ -478,7 +513,7 @@ impl Combat {
             items: ScriptRunner::named(ITEM_TABLE, offsets(ITEM_TABLE)).with_quick_redraws(),
             parts: ScriptRunner::named(PART_TABLE, offsets(PART_TABLE)).with_quick_redraws(),
             state: state.to_vec(),
-            formation: *formation,
+            lineup,
             rom_experience: results::experience_table(rom),
             levels: 0,
             allocation: results::Allocation::default(),
@@ -500,9 +535,10 @@ impl Combat {
             formation_screen: None,
             status_screen: None,
             deck_screen: None,
-            spark: extraction::saga_battle::screen_effect(rom, turn::SPARK),
-            glow: extraction::saga_battle::screen_effect(rom, turn::GLOW),
-            mend: extraction::saga_battle::screen_effect(rom, turn::MEND),
+            command_state: commands::CommandState::new(state, rom),
+            palette_writes: 0,
+            reset_signature: 0,
+            effect_sprites: turn::EffectSprites::load(rom),
             figure_glyphs: extraction::saga_battle::unit_labels(rom),
             figures_task: false,
             figures: None,
@@ -516,6 +552,8 @@ impl Combat {
             marker: extraction::saga_battle::screen_sprite(rom, MARKER_SPRITE),
             neighbour_slots: extraction::saga_battle::neighbours(rom),
             shown_sparks: Vec::new(),
+            shown_gone: [[false; SLOTS]; 2],
+            shown_row_moves: Vec::new(),
             lag: 0,
             shown_panels: (Vec::new(), PanelLight::Own),
             acts: VecDeque::new(),
@@ -537,6 +575,13 @@ impl Combat {
             input: Input::default(),
             previous: Input::default(),
         }
+    }
+
+    /// Draws from `rng` from now on, the vertical blank counter at
+    /// `vblank` (IWRAM `0x03002338`): to replay a battle of the original's.
+    pub fn resume_random(&mut self, rng: Rng, vblank: u16) {
+        self.rng = rng;
+        self.vblank = vblank;
     }
 
     /// The game-state block with the battle's results written in, which
@@ -599,6 +644,8 @@ impl Combat {
             .as_ref()
             .map(|display| display.sparks.clone())
             .unwrap_or_default();
+        self.shown_gone = self.fight.gone;
+        self.shown_row_moves.clone_from(&self.fight.row_moves);
         if let Some(scene) = self.fight.scene.as_mut() {
             scene.latch();
         }
@@ -788,14 +835,34 @@ impl Combat {
             self.step_fight_task();
         }
         self.run_acts(rom, windows)?;
-        // The item task goes on in the frame its last call returns.
-        if matches!(self.task, turn::Task::Item(items::ItemStep::Closed(_)))
-            && self.running.is_none()
+        // The item and command tasks go on in the frame their last call
+        // returns.
+        if matches!(
+            self.task,
+            turn::Task::Item(items::ItemStep::Closed(_))
+                | turn::Task::Command(
+                    commands::CommandStep::Show(_) | commands::CommandStep::Closed(_)
+                )
+        ) && self.running.is_none()
             && self.acts.is_empty()
         {
             self.step_fight_task();
         }
         Ok(())
+    }
+
+    /// What a menu's return does, in the frame it returns.
+    fn returned(&mut self, call: Call) {
+        match call {
+            Call::Menu(MENU_MAIN | MENU_MAIN_STORY) => self.choose(self.menu.vars()[1]),
+            Call::Menu(
+                turn::MENU_ROUND
+                | turn::MENU_ROUND_STORY
+                | turn::MENU_ACTION
+                | turn::MENU_ACTION_NO_ITEMS,
+            ) => self.choose_in_fight(self.menu.vars()[1]),
+            _ => {}
+        }
     }
 
     fn run_acts(&mut self, rom: &[u8], windows: &mut ScriptWindows<'_>) -> Result<(), ScriptError> {
@@ -811,19 +878,23 @@ impl Combat {
                     return Ok(());
                 }
                 self.running = None;
-                match call {
-                    Call::Menu(MENU_MAIN) => self.choose(self.menu.vars()[1]),
-                    Call::Menu(turn::MENU_ROUND | turn::MENU_ROUND_STORY | turn::MENU_ACTION) => {
-                        self.choose_in_fight(self.menu.vars()[1]);
-                    }
-                    _ => {}
-                }
+                self.returned(call);
             }
             let Some(act) = self.acts.pop_front() else {
                 return Ok(());
             };
             match act {
                 Act::Call(call) => {
+                    if matches!(call, Call::Menu(MENU_RESET)) {
+                        let signature = self.palette_writes;
+                        let frames = if signature == self.reset_signature {
+                            QUICK_RESET_FRAMES
+                        } else {
+                            QUICK_RESET_FRAMES + 1
+                        };
+                        self.menu.set_reset_frames(frames);
+                        self.reset_signature = signature;
+                    }
                     let printing_names = self.printing_names();
                     let print_window = self.print_window;
                     let runner = self.runner(call);
@@ -848,6 +919,7 @@ impl Combat {
                 Act::Allocation => self.allocate(),
                 Act::PrintWindow(id) => self.print_window = id,
                 Act::ItemChoice => self.take_item_choice(),
+                Act::CommandChoice => self.take_command_choice(),
                 Act::Pad(column, text) => {
                     let length = windows
                         .windows()
@@ -1008,6 +1080,7 @@ impl Combat {
             self.level = BLACK;
             self.shown_level = BLACK;
             self.deck_screen = None;
+            self.command_state.deck = commands::deck_of(&self.state);
             self.opening = Opening::Rebuild(self.frame);
         }
         Ok(())
@@ -1089,8 +1162,8 @@ impl Combat {
     /// (`0x0802B5D0`, `0x08031074`).
     fn take_party(&mut self, rom: &[u8]) {
         let data = GameData::new(rom);
-        let (panels, [player, _]) = screen_units(&data, &mut self.state, &self.formation);
-        let [party, _] = battle_units(rom, &self.state, &self.formation);
+        let (panels, [player, _]) = screen_units(&data, &mut self.state, &self.lineup);
+        let [party, _] = battle_units(rom, &self.state, &self.lineup);
         self.panels = panels;
         self.units[PLAYER] = player;
         self.sides[ai::PARTY] = party;
@@ -1152,15 +1225,7 @@ impl Combat {
                     self.opening = Opening::Check(0);
                 }
             }
-            Opening::Check(slot) => {
-                if let Some(unit) = &self.units[ENEMY][slot] {
-                    let zoid = unit.zoid;
-                    self.message(&[Call::Name(zoid), Call::Text(TEXT_CONFIRMED)]);
-                    self.opening = Opening::AwaitConfirmed(slot);
-                } else {
-                    self.opening = Opening::Next(slot);
-                }
-            }
+            Opening::Check(slot) => self.check_enemy(slot),
             Opening::AwaitConfirmed(slot) => {
                 if self.wait_done() {
                     self.opening = Opening::Next(slot);
@@ -1183,7 +1248,12 @@ impl Combat {
                 }
             }
             Opening::Menu => {
-                self.acts.push_back(Act::Call(Call::Menu(MENU_MAIN)));
+                let menu = if self.story {
+                    MENU_MAIN_STORY
+                } else {
+                    MENU_MAIN
+                };
+                self.acts.push_back(Act::Call(Call::Menu(menu)));
             }
             Opening::Retreat => {
                 self.outcome = Some(Outcome::Retreated);
@@ -1219,6 +1289,19 @@ impl Combat {
     /// Goes on from the menu's line `line` in the frame the menu returns
     /// (the jump table at `0x0802ED08`): 退却 retreats; the other lines are
     /// not modeled yet and show the menu again.
+    /// The message of the enemy in slot `slot`, if there is one: its name,
+    /// with its letter, and を確認しました.
+    fn check_enemy(&mut self, slot: usize) {
+        if self.units[ENEMY][slot].is_none() {
+            self.opening = Opening::Next(slot);
+            return;
+        }
+        let mut calls = self.unit_name(Some((ENEMY, slot)));
+        calls.push(Call::Text(TEXT_CONFIRMED));
+        self.message(&calls);
+        self.opening = Opening::AwaitConfirmed(slot);
+    }
+
     fn choose(&mut self, line: u16) {
         self.choice = line;
         self.opening = match line {
@@ -1339,12 +1422,19 @@ impl Combat {
                 let fighting = self.sides[side][slot]
                     .as_ref()
                     .is_none_or(units::BattleUnit::fighting);
-                if !fighting {
+                let vanished = self.shown_gone[side][slot]
+                    || self
+                        .shown_sparks
+                        .iter()
+                        .any(|spark| spark.side == side && spark.slot == slot && spark.vanished());
+                if !fighting || vanished {
                     continue;
                 }
                 if let Some(sheet) = unit.as_ref().and_then(|unit| unit.sheet.as_ref()) {
                     placed.push(Placed {
-                        anchor: self.anchors[side][slot],
+                        anchor: self
+                            .row_move_at(side, slot)
+                            .unwrap_or(self.anchors[side][slot]),
                         mirrored: side == ENEMY,
                         sheet,
                         dim: self.dims[side][slot],
@@ -1628,20 +1718,28 @@ fn screen_graphics(data: &GameData<'_>) -> (Option<PanelGraphics>, Option<Tilese
     )
 }
 
+/// Where each side's slots stand on the screen (ROM `0x66B484`).
+fn slot_anchors(rom: &[u8]) -> [[(i32, i32); SLOTS]; 2] {
+    std::array::from_fn(|side| {
+        std::array::from_fn(|slot| {
+            saga_combat::slot_anchor(rom, side == ENEMY, slot).unwrap_or_default()
+        })
+    })
+}
+
 /// The battle screen's units and the party's panels: each unit's Zoid and
 /// status sprite, and each party unit's bars, its statistics computed
 /// again.
 fn screen_units(
     data: &GameData<'_>,
     state: &mut [u8],
-    formation: &Formation,
+    lineup: &Lineup,
 ) -> (Vec<Panel>, [[Option<Unit>; SLOTS]; 2]) {
     let rom = data.bytes();
     let mut sheets: Vec<(u16, SpriteSheet)> = Vec::new();
     let mut unit = |zoid: u16| {
         if let Some((_, sheet)) = sheets.iter().find(|(known, _)| *known == zoid) {
             return Unit {
-                zoid,
                 sheet: Some(sheet.clone()),
             };
         }
@@ -1649,7 +1747,7 @@ fn screen_units(
         if let Some(sheet) = &sheet {
             sheets.push((zoid, sheet.clone()));
         }
-        Unit { zoid, sheet }
+        Unit { sheet }
     };
     let mut panels = Vec::new();
     let mut player: [Option<Unit>; SLOTS] = Default::default();
@@ -1671,7 +1769,9 @@ fn screen_units(
         }
     }
     let enemy: [Option<Unit>; SLOTS] = std::array::from_fn(|slot| {
-        saga_encounter::enemy_record(rom, formation, slot).map(|record| unit(u16::from(record[0])))
+        lineup
+            .enemy_record(rom, slot)
+            .map(|record| unit(u16::from(record[0])))
     });
     (panels, [player, enemy])
 }
@@ -1692,28 +1792,29 @@ const LABEL_SLASH: usize = 20;
 /// Where the figures' first tile is from the unit's place.
 const LABEL_OFFSET: (i32, i32) = (-32, -16);
 
-/// A BGR555 color as a glow changes it (`0x08031E90`): for a raised
-/// statistic, red raised by the amount, at most 31, then lowered by it, at
-/// least 0 (flags 6, then 5), so the brightest reds dim; for a repair, blue
-/// raised and red and green lowered (flags `0x12`, then `0xD`).
+/// A BGR555 color as a glow changes it (`0x08031E90`, a pass a flag):
+/// bits 4, 8 and `0x10` pick red, green and blue, bit 0 lowers them by the
+/// amount, at least 0, and they are raised otherwise, at most 31; so a
+/// raise's brightest reds dim (6, then 5).
 fn tint_color(color: u16, tint: Option<(turn::Glow, u8)>) -> u16 {
     let Some((glow, amount)) = tint.filter(|(_, amount)| *amount > 0) else {
         return color;
     };
     let amount = u16::from(amount);
-    let channel = |shift: u16| (color >> shift) & 0x1F;
-    let (red, green, blue) = match glow {
-        turn::Glow::Raise => (
-            (channel(0) + amount).min(0x1F).saturating_sub(amount),
-            channel(5),
-            channel(10),
-        ),
-        turn::Glow::Mend => (
-            channel(0).saturating_sub(amount),
-            channel(5).saturating_sub(amount),
-            (channel(10) + amount).min(0x1F),
-        ),
-    };
+    let mut channels = [color & 0x1F, (color >> 5) & 0x1F, (color >> 10) & 0x1F];
+    for &flags in glow.flags() {
+        for (index, channel) in channels.iter_mut().enumerate() {
+            if flags & (4 << index) == 0 {
+                continue;
+            }
+            *channel = if flags & 1 != 0 {
+                channel.saturating_sub(amount)
+            } else {
+                (*channel + amount).min(0x1F)
+            };
+        }
+    }
+    let [red, green, blue] = channels;
     red | green << 5 | blue << 10 | (color & 0x8000)
 }
 
@@ -1770,14 +1871,16 @@ fn draw_name(
 }
 
 /// The units that fight: the party's formation and the enemy's.
-fn battle_units(rom: &[u8], state: &[u8], formation: &Formation) -> ai::Sides {
+fn battle_units(rom: &[u8], state: &[u8], lineup: &Lineup) -> ai::Sides {
     let formation_slots = saga_party::formation(state);
+    let unarmed = lineup.story().is_some_and(StoryBattle::unarmed);
     [
         std::array::from_fn(|slot| {
-            formation_slots[slot]
-                .and_then(|(unit, character)| units::BattleUnit::party(rom, state, unit, character))
+            formation_slots[slot].and_then(|(unit, character)| {
+                units::BattleUnit::party(rom, state, unit, character, unarmed)
+            })
         }),
-        std::array::from_fn(|slot| units::BattleUnit::enemy(rom, state, formation, slot)),
+        std::array::from_fn(|slot| units::BattleUnit::enemy(rom, state, lineup, slot)),
     ]
 }
 

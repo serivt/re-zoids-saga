@@ -14,6 +14,14 @@ pub struct Rng {
 }
 
 impl Rng {
+    /// A generator resumed from a state and a call counter, as the
+    /// original holds them at IWRAM `0x0300233C` and EWRAM `0x0200607C`:
+    /// to replay a stretch of the original's play.
+    #[must_use]
+    pub const fn resumed(state: u16, calls: u16) -> Self {
+        Self { state, calls }
+    }
+
     /// Seeds the state from a frame counter the way the original does.
     pub fn seed(&mut self, frame: u16) {
         self.state = frame.wrapping_add((frame ^ 0xFF).wrapping_shl(8));

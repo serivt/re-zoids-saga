@@ -16,7 +16,7 @@
 
 use extraction::saga::EXPERIENCE_TABLE;
 use extraction::saga_combat::SLOTS;
-use extraction::saga_encounter::{self, Formation};
+use extraction::saga_encounter::{self, Formation, Lineup};
 use extraction::saga_party;
 
 use super::ai::PARTY;
@@ -64,6 +64,9 @@ const UNIT_HP: usize = 8;
 const UNIT_EP: usize = 0xC;
 const UNIT_MOST_HP: usize = 0x28;
 const UNIT_MOST_EP: usize = 0x2C;
+/// A unit's training level, which each won battle raises (`0x080364DC`).
+const UNIT_TRAINING: usize = 0x34;
+const MOST_TRAINING: u8 = 100;
 const IN_USE: u16 = 1;
 const IN_FORMATION: u16 = 2;
 /// A unit beaten for good: no hit points, out of the formation.
@@ -198,7 +201,18 @@ impl Combat {
             }
             Results::Victory => {
                 let money = self.fight.money;
-                add(&mut self.state, MONEY, money);
+                // 調達の達人 doubles what is added, not what the message
+                // shows (`0x08035940`).
+                let doubled = self.command_state.flags & super::commands::DOUBLE_MONEY != 0;
+                add(
+                    &mut self.state,
+                    MONEY,
+                    if doubled {
+                        money.saturating_mul(2)
+                    } else {
+                        money
+                    },
+                );
                 self.message_key(&[Call::Text(TEXT_WON)]);
                 let mut calls = number(i32::try_from(money).unwrap_or(i32::MAX));
                 calls.push(Call::Text(TEXT_MONEY));
@@ -243,7 +257,7 @@ impl Combat {
                 }
             }
             Results::Finish => {
-                self.write_back();
+                self.write_back(rom);
                 if self.outcome == Some(Outcome::Lost) {
                     self.recover_player();
                 }
@@ -259,6 +273,10 @@ impl Combat {
 
     /// State `0xBB8`: the experience, and the levels it brings.
     fn step_experience(&mut self) {
+        // 英雄の証 doubles the experience before its message (`0x08035BE0`).
+        if self.command_state.flags & super::commands::DOUBLE_EXPERIENCE != 0 {
+            self.fight.experience = self.fight.experience.saturating_mul(2);
+        }
         let experience = self.fight.experience;
         add(&mut self.state, EXPERIENCE, experience);
         let mut calls = number(i32::try_from(experience).unwrap_or(i32::MAX));
@@ -295,6 +313,38 @@ impl Combat {
         };
     }
 
+    /// What a roaming formation can leave (`0x0803666C`): a unit of it,
+    /// the leader or one of its members, gives its Zi data and one of its
+    /// three weapons; the formation gives an item and a core. A story
+    /// battle leaves none and draws nothing here.
+    fn formation_spoils(&mut self, rom: &[u8], formation: &Formation) -> FormationSpoils {
+        let spoil = |value: u8| (value != NO_SPOIL).then_some(value);
+        let members: Vec<usize> = (0..SLOTS)
+            .filter(|member| formation.get(MEMBER_RECORD + member * MEMBER_LEN) != Some(&NO_SPOIL))
+            .collect();
+        let pick = if members.is_empty() {
+            None
+        } else {
+            let count = u16::try_from(members.len() + 1).unwrap_or(1);
+            let roll = usize::from(self.rng.next(self.vblank) % count);
+            roll.checked_sub(1).map(|at| members[at])
+        };
+        let record = unit_record(rom, formation, pick);
+        let drop = self.rng.next(self.vblank) % WEAPON_DROPS;
+        let part = record.and_then(|record| {
+            let at = 4 + usize::from(drop) * 4;
+            let chance = u16::from_le_bytes([record[at], record[at + 1]]);
+            let part = u16::from_le_bytes([record[at + 2], record[at + 3]]);
+            (part != 0xFFFF && chance != 0).then(|| part.to_le_bytes()[0])
+        });
+        FormationSpoils {
+            item: spoil(formation[FORMATION_ITEM]),
+            core: spoil(formation[FORMATION_CORE]),
+            part,
+            zi_data: record.and_then(|record| spoil(record[0])),
+        }
+    }
+
     /// A message, then a key (`battle-menu` 6, 7, the calls, 5 and 0x14).
     fn message_key(&mut self, calls: &[Call]) {
         self.acts.push_back(Act::Call(Call::Menu(super::MENU_DRAW)));
@@ -309,34 +359,18 @@ impl Combat {
     }
 
     /// The spoils' roll once the money's message is read (`0x0803666C`,
-    /// `0x0803680C`): a unit of the formation, the leader or one of its
-    /// members, gives its Zi data and one of its three weapons; the
-    /// formation gives an item and a core. A roll of 20 picks which the
-    /// battle leaves.
+    /// `0x0803680C`): a roll of 20 picks which of the formation's spoils
+    /// the battle leaves.
     pub(super) fn roll_spoils(&mut self, rom: &[u8]) {
-        let formation = self.formation;
-        let item = formation[FORMATION_ITEM];
-        let core = formation[FORMATION_CORE];
-        let members: Vec<usize> = (0..SLOTS)
-            .filter(|member| formation.get(MEMBER_RECORD + member * MEMBER_LEN) != Some(&NO_SPOIL))
-            .collect();
-        let pick = if members.is_empty() {
-            None
-        } else {
-            let count = u16::try_from(members.len() + 1).unwrap_or(1);
-            let roll = usize::from(self.rng.next(self.vblank) % count);
-            roll.checked_sub(1).map(|at| members[at])
+        let found = match self.lineup {
+            Lineup::Roaming(formation) => self.formation_spoils(rom, &formation),
+            Lineup::Story(_) => FormationSpoils::default(),
         };
-        let record = unit_record(rom, &formation, pick);
-        let zi_data = record.map_or(NO_SPOIL, |record| record[0]);
-        let drop = self.rng.next(self.vblank) % WEAPON_DROPS;
-        let part = record.and_then(|record| {
-            let at = 4 + usize::from(drop) * 4;
-            let chance = u16::from_le_bytes([record[at], record[at + 1]]);
-            let part = u16::from_le_bytes([record[at + 2], record[at + 3]]);
-            (part != 0xFFFF && chance != 0).then(|| part.to_le_bytes()[0])
-        });
-        let roll = self.rng.next(self.vblank) % SPOIL_ROLLS;
+        let mut roll = self.rng.next(self.vblank) % SPOIL_ROLLS;
+        // データ収集 always gives the table's first kind (`0x0803682C`).
+        if self.command_state.flags & super::commands::ZI_DATA != 0 {
+            roll = 0;
+        }
         let table = if self.state.get(CHAPTER) == Some(&LATE_CHAPTER) {
             LATE_SPOIL_KINDS
         } else {
@@ -344,10 +378,10 @@ impl Combat {
         };
         let kind = rom.get(table + usize::from(roll)).copied().unwrap_or(0);
         let spoil = match kind {
-            1 if item != NO_SPOIL => Some(Spoil::Item(item)),
-            2 if core != NO_SPOIL => Some(Spoil::Core(core)),
-            3 => part.map(Spoil::Part),
-            4 if zi_data != NO_SPOIL => Some(Spoil::ZiData(zi_data)),
+            1 => found.item.map(Spoil::Item),
+            2 => found.core.map(Spoil::Core),
+            3 => found.part.map(Spoil::Part),
+            4 => found.zi_data.map(Spoil::ZiData),
             _ => None,
         };
         self.results = match spoil {
@@ -545,15 +579,24 @@ impl Combat {
     }
 
     /// The units' hit and energy points back into the game state
-    /// (`0x080364DC`): a formation slot whose unit did not fight is left
-    /// wrecked and taken out.
-    fn write_back(&mut self) {
+    /// (`0x080364DC`): a formation slot whose pilot's unit did not fight is
+    /// left wrecked and taken out. After a won battle (result 1) each unit
+    /// that fought gains a training level, up to 100, and its statistics
+    /// are computed again (`0x08036CB0`).
+    fn write_back(&mut self, rom: &[u8]) {
+        let won = self.outcome == Some(Outcome::Won);
         for (slot, entry) in saga_party::formation(&self.state).iter().enumerate() {
-            let Some((unit, _)) = *entry else {
+            let Some((unit, character)) = *entry else {
                 continue;
             };
             let at = UNITS + usize::from(unit) * UNIT_LEN;
-            if let Some(fighter) = self.sides[PARTY][slot].as_ref() {
+            // The battle's unit is found by its pilot (`0x080365C8`): the
+            // row advance may have moved it.
+            let fighter = self.sides[PARTY]
+                .iter()
+                .flatten()
+                .find(|fighter| fighter.character == character);
+            if let Some(fighter) = fighter {
                 let (hp, ep) = (fighter.hp.max(0), fighter.ep.max(0));
                 set_word(
                     &mut self.state,
@@ -565,6 +608,12 @@ impl Combat {
                     at + UNIT_EP,
                     u32::try_from(ep).unwrap_or(0),
                 );
+                if won {
+                    let training = at + UNIT_TRAINING;
+                    self.state[training] =
+                        self.state[training].saturating_add(1).min(MOST_TRAINING);
+                    saga_party::refresh_stats(rom, &mut self.state, character, unit);
+                }
             } else {
                 set_word(&mut self.state, at + UNIT_HP, 0);
                 set_word(&mut self.state, at + UNIT_EP, 0);
@@ -630,6 +679,15 @@ impl Combat {
         let pilot = half(&self.state, CHARACTERS) | CHARACTER_IN_FORMATION;
         set_half(&mut self.state, CHARACTERS, pilot);
     }
+}
+
+/// What a battle can leave, before the roll picks one.
+#[derive(Debug, Clone, Copy, Default)]
+struct FormationSpoils {
+    item: Option<u8>,
+    core: Option<u8>,
+    part: Option<u8>,
+    zi_data: Option<u8>,
 }
 
 /// The record of the formation's unit `member`, or of its leader

@@ -20,6 +20,15 @@
 //! A battle lost on the field takes the party to its area's return point
 //! (`0x08006E08`, read against the warp a reference emulator made after a
 //! loss).
+//!
+//! The story's battles (`0x08008D28`, set up by `0x080329E4`) take their
+//! enemies from the 36-byte records of ROM `0x67C0F4` instead: six
+//! four-byte groups from `+4`, each a flag and a record of the battle's own
+//! six enemy records (ROM `0x67C6DC + battle × 0xA8`, `0xFF` for none), the
+//! terrain of both sides at `+0x1C`, the song at `+0x20` and a mode at
+//! `+0x21` (read by `0x0802B728`, `0x08033D6C`, `0x0802E814` and the
+//! battle's controller; checked against a battle a reference emulator set
+//! up as the first of them).
 
 const FORMATION_TABLES: usize = 0x0068_38C8;
 const AREA_TABLE_LEN: usize = 0x30;
@@ -44,6 +53,22 @@ const RETURN_POINTS: usize = 0x0032_8D6C;
 const RETURN_POINT_LEN: usize = 8;
 const RETURN_POINT_COUNT: usize = 23;
 const ROM_BASE: u32 = 0x0800_0000;
+const STORY_BATTLES: usize = 0x0067_C0F4;
+const STORY_ENEMIES: usize = 0x0067_C6DC;
+const STORY_ENEMIES_LEN: usize = SLOTS * ENEMY_RECORD_LEN;
+/// Story battles the table holds.
+pub const STORY_BATTLE_COUNT: usize = 42;
+const STORY_TERRAIN: usize = 0x1C;
+const STORY_SONG: usize = 0x20;
+const STORY_MODE: usize = 0x21;
+/// A slot's flag that makes its enemy one criticals never hit
+/// (`0x0802B728` sets its trait `0x200`).
+const GUARDED: u8 = 1;
+/// The modes: no items in the actor's menu (`battle-menu` 0x1A), and the
+/// party's first three part slots emptied when the fight starts
+/// (`0x080337F0`).
+const MODE_NO_ITEMS: u8 = 1;
+const MODE_UNARMED: u8 = 2;
 /// Rolls below this (of 100) pick a formation of class 0.
 const COMMON_ROLLS: u16 = 60;
 /// Rolls below this pick class 1, the rest class 2.
@@ -52,6 +77,104 @@ const UNCOMMON_ROLLS: u16 = 95;
 /// A formation as the area's table holds it: 36 bytes, which the battle
 /// reads again when it starts.
 pub type Formation = [u8; FORMATION_LEN];
+
+/// A story battle's record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoryBattle {
+    /// Its number in the table.
+    pub index: u8,
+    record: [u8; FORMATION_LEN],
+}
+
+impl StoryBattle {
+    /// The terrain both sides stand on.
+    #[must_use]
+    pub const fn terrain(&self) -> u8 {
+        self.record[STORY_TERRAIN]
+    }
+
+    /// The song the fight plays.
+    #[must_use]
+    pub const fn song(&self) -> u8 {
+        self.record[STORY_SONG]
+    }
+
+    /// Whether the actor's menu leaves the items out.
+    #[must_use]
+    pub const fn without_items(&self) -> bool {
+        self.record[STORY_MODE] == MODE_NO_ITEMS
+    }
+
+    /// Whether the party fights without the parts of its first three
+    /// slots.
+    #[must_use]
+    pub const fn unarmed(&self) -> bool {
+        self.record[STORY_MODE] == MODE_UNARMED
+    }
+}
+
+/// Story battle `index` (`0x080329E4` with bit 0 of the type), `None`
+/// past the table or outside `rom`.
+#[must_use]
+pub fn story_battle(rom: &[u8], index: u8) -> Option<StoryBattle> {
+    if usize::from(index) >= STORY_BATTLE_COUNT {
+        return None;
+    }
+    let start = STORY_BATTLES + usize::from(index) * FORMATION_LEN;
+    Some(StoryBattle {
+        index,
+        record: rom.get(start..start + FORMATION_LEN)?.try_into().ok()?,
+    })
+}
+
+/// The enemies a battle brings: a roaming formation, or a story battle's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lineup {
+    /// A formation a map Zoid stood for.
+    Roaming(Formation),
+    /// A story battle.
+    Story(StoryBattle),
+}
+
+impl Lineup {
+    /// The enemy record of slot `slot`, `None` for an empty slot or a
+    /// record outside `rom` (`0x0802B728`).
+    #[must_use]
+    pub fn enemy_record(&self, rom: &[u8], slot: usize) -> Option<[u8; ENEMY_RECORD_LEN]> {
+        match self {
+            Self::Roaming(formation) => enemy_record(rom, formation, slot),
+            Self::Story(battle) => {
+                let at = MEMBERS + slot * MEMBER_LEN + 1;
+                let record = *battle.record.get(at)?;
+                if slot >= SLOTS || record == NO_RECORD {
+                    return None;
+                }
+                let start = STORY_ENEMIES
+                    + usize::from(battle.index) * STORY_ENEMIES_LEN
+                    + usize::from(record) * ENEMY_RECORD_LEN;
+                rom.get(start..start + ENEMY_RECORD_LEN)?.try_into().ok()
+            }
+        }
+    }
+
+    /// Whether the enemy of slot `slot` is one criticals never hit.
+    #[must_use]
+    pub fn guarded(&self, slot: usize) -> bool {
+        match self {
+            Self::Roaming(_) => false,
+            Self::Story(battle) => battle.record.get(MEMBERS + slot * MEMBER_LEN) == Some(&GUARDED),
+        }
+    }
+
+    /// The story battle, for one.
+    #[must_use]
+    pub const fn story(&self) -> Option<&StoryBattle> {
+        match self {
+            Self::Roaming(_) => None,
+            Self::Story(battle) => Some(battle),
+        }
+    }
+}
 
 /// The twelve formations map Zoids of sprite column `column` may stand
 /// for in area `area` (the map record id's low byte). `None` when the
@@ -230,6 +353,32 @@ mod tests {
         assert!(enemy_record(&rom, &found[0], 0).is_some());
         assert!(enemy_record(&rom, &found[0], 1).is_none());
         assert!(enemy_record(&rom, &found[1], 0).is_none());
+    }
+
+    #[test]
+    fn a_story_battle_brings_its_own_enemy_records() {
+        let mut rom = vec![0; STORY_ENEMIES + STORY_BATTLE_COUNT * STORY_ENEMIES_LEN];
+        let at = STORY_BATTLES + 3 * FORMATION_LEN;
+        for slot in 0..SLOTS {
+            rom[at + MEMBERS + slot * MEMBER_LEN + 1] = NO_RECORD;
+        }
+        rom[at + MEMBERS + 2 * MEMBER_LEN] = GUARDED;
+        rom[at + MEMBERS + 2 * MEMBER_LEN + 1] = 1;
+        rom[at + STORY_TERRAIN] = 7;
+        rom[at + STORY_SONG] = 0x1B;
+        rom[at + STORY_MODE] = MODE_NO_ITEMS;
+        rom[STORY_ENEMIES + 3 * STORY_ENEMIES_LEN + ENEMY_RECORD_LEN] = 0x46;
+        let battle = story_battle(&rom, 3).unwrap();
+        assert_eq!((battle.terrain(), battle.song()), (7, 0x1B));
+        assert!(battle.without_items() && !battle.unarmed());
+        let lineup = Lineup::Story(battle);
+        assert_eq!(
+            lineup.enemy_record(&rom, 2).map(|record| record[0]),
+            Some(0x46)
+        );
+        assert!(lineup.enemy_record(&rom, 0).is_none());
+        assert!(lineup.guarded(2) && !lineup.guarded(0));
+        assert!(story_battle(&rom, 42).is_none());
     }
 
     #[test]

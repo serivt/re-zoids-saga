@@ -29,7 +29,7 @@ pub const STRING_TABLES: &[StringTable] = &[
     StringTable {
         name: "battle",
         offset: 0x0075_5D30,
-        count: 198,
+        count: 222,
     },
     StringTable {
         name: "menu",

@@ -11,7 +11,7 @@
 //! on the world map and the damage of its three attacks.
 
 use extraction::saga_combat::{self, SLOTS};
-use extraction::saga_encounter::{self, Formation};
+use extraction::saga_encounter::Lineup;
 use extraction::saga_party::{self, PILOT_VALUES, percent};
 
 /// The character that stands for no pilot in the statistics routine.
@@ -25,6 +25,11 @@ const OWN_SIDE: u32 = 2;
 const SELF_KIND: u8 = 0xF;
 const BEAM: u32 = 0x30;
 const ANTI_AIR: u32 = 0x200;
+/// The part slots a story battle's mode 2 empties: the three racks.
+const RACKS: usize = 3;
+/// The trait a story battle's flagged enemies take (`0x0802B728`): no
+/// critical hit lands on them.
+const GUARDED: u16 = 0x200;
 const PIERCING: u32 = 0x400;
 const SURE_HIT: u32 = 0x4000_0800;
 const BEAM_DEFENSE_PARTS: u32 = 0xC000;
@@ -309,8 +314,11 @@ impl BattleUnit {
     /// battle takes it once its statistics are computed again: its full hit
     /// points with the pilot's durability, its energy, SP and DF without
     /// the pilot, whose other bonuses each turn adds (`0x0802B5D0`).
+    /// `unarmed` takes the parts of its first three slots off before the
+    /// passive ones apply, as a story battle's mode 2 does when the fight
+    /// starts (`0x080337F0`, before `0x08033718`).
     #[must_use]
-    pub fn party(rom: &[u8], state: &[u8], unit: u8, character: u8) -> Option<Self> {
+    pub fn party(rom: &[u8], state: &[u8], unit: u8, character: u8, unarmed: bool) -> Option<Self> {
         let record = saga_party::unit_record(state, unit)?;
         let mut unpiloted = state.to_vec();
         saga_party::refresh_stats(rom, &mut unpiloted, NO_CHARACTER, unit);
@@ -322,7 +330,13 @@ impl BattleUnit {
         let word = |at: usize| {
             i32::from_le_bytes([record[at], record[at + 1], record[at + 2], record[at + 3]])
         };
-        let parts: [u16; SLOTS] = std::array::from_fn(|slot| half(UNIT_PARTS + slot * 4 + 2));
+        let parts: [u16; SLOTS] = std::array::from_fn(|slot| {
+            if unarmed && slot < RACKS {
+                NO_PART
+            } else {
+                half(UNIT_PARTS + slot * 4 + 2)
+            }
+        });
         let df = bare_short(UNIT_STATS + 10);
         let mut unit = Self {
             zoid: half(UNIT_ZOID),
@@ -351,10 +365,10 @@ impl BattleUnit {
         Some(unit)
     }
 
-    /// The enemy of slot `slot` of `formation`, if it has one.
+    /// The enemy of slot `slot` of `lineup`, if it has one.
     #[must_use]
-    pub fn enemy(rom: &[u8], state: &[u8], formation: &Formation, slot: usize) -> Option<Self> {
-        let record = saga_encounter::enemy_record(rom, formation, slot)?;
+    pub fn enemy(rom: &[u8], state: &[u8], lineup: &Lineup, slot: usize) -> Option<Self> {
+        let record = lineup.enemy_record(rom, slot)?;
         let zoid = u16::from(record[0]);
         let zoid_record = saga_combat::zoid_battle_record(rom, zoid)?;
         let half = |at: usize| u16::from_le_bytes([record[at], record[at + 1]]);
@@ -398,7 +412,11 @@ impl BattleUnit {
         let df = df.min(MAX_HALVES.1);
         let mut unit = Self {
             zoid,
-            traits: zoid_record.traits,
+            traits: if lineup.guarded(slot) {
+                zoid_record.traits | GUARDED
+            } else {
+                zoid_record.traits
+            },
             status: 0,
             hp,
             ep,
@@ -644,8 +662,50 @@ pub fn hit_chance(
     weapon: usize,
     terrain: u8,
 ) -> u16 {
-    let (attacker, stats) = attacker;
-    let (target, target_stats) = target;
+    let chance = raw_chance(attacker, target, weapon, terrain);
+    let (attacker, _) = attacker;
+    let (target, _) = target;
+    let flags = attacker
+        .weapons
+        .get(weapon)
+        .copied()
+        .flatten()
+        .map_or(0, |weapon| weapon.flags);
+    let mut chance =
+        u16::try_from(chance.clamp(i32::from(MIN_HIT), i32::from(MAX_HIT))).unwrap_or(MIN_HIT);
+    if attacker.status & SURE_TO_HIT != 0 {
+        chance = SURE;
+    }
+    if target.status & UNTOUCHABLE != 0 {
+        chance = 0;
+    }
+    if flags & SURE_HIT != 0 {
+        chance = SURE;
+    }
+    chance
+}
+
+/// The accuracy past 100 a chance to hit leaves (`0x08034500` keeps it at
+/// `0x0200EB84 + 0x229C`, which the critical hits read), when it goes
+/// past.
+#[must_use]
+pub fn accuracy_excess(
+    attacker: (&BattleUnit, &Derived),
+    target: (&BattleUnit, &Derived),
+    weapon: usize,
+    terrain: u8,
+) -> Option<u16> {
+    let chance = raw_chance(attacker, target, weapon, terrain);
+    (chance > i32::from(MAX_HIT)).then(|| u16::try_from(chance - 100).unwrap_or(u16::MAX))
+}
+
+/// The weapon's accuracy less the target's evasion, before its bounds.
+fn raw_chance(
+    (attacker, stats): (&BattleUnit, &Derived),
+    (target, target_stats): (&BattleUnit, &Derived),
+    weapon: usize,
+    terrain: u8,
+) -> i32 {
     let flags = attacker
         .weapons
         .get(weapon)
@@ -660,19 +720,7 @@ pub fn hit_chance(
         evasion += TRAIT_EVASION;
     }
     let accuracy = i32::from(stats.accuracy.get(weapon).copied().unwrap_or(0));
-    let chance = accuracy - i32::from(evasion) - i32::from(target_stats.evasion_bonus);
-    let mut chance =
-        u16::try_from(chance.clamp(i32::from(MIN_HIT), i32::from(MAX_HIT))).unwrap_or(MIN_HIT);
-    if attacker.status & SURE_TO_HIT != 0 {
-        chance = SURE;
-    }
-    if target.status & UNTOUCHABLE != 0 {
-        chance = 0;
-    }
-    if flags & SURE_HIT != 0 {
-        chance = SURE;
-    }
-    chance
+    accuracy - i32::from(evasion) - i32::from(target_stats.evasion_bonus)
 }
 
 /// The damage, in 16.16, of `attacker`'s weapon in slot `weapon` on

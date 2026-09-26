@@ -222,6 +222,8 @@ pub struct ScriptRunner {
     /// frame, the time the original takes to redraw the menus' crowded
     /// windows.
     slow_redraw: bool,
+    /// The frames the text system's reset takes.
+    reset_frames: u32,
 }
 
 impl ScriptRunner {
@@ -251,7 +253,13 @@ impl ScriptRunner {
             wait: Wait::Done,
             previous: Input::default(),
             slow_redraw: true,
+            reset_frames: RESET_FRAMES,
         }
+    }
+
+    /// Sets the frames the text system's reset takes from the next one on.
+    pub fn set_reset_frames(&mut self, frames: u32) {
+        self.reset_frames = frames.max(2);
     }
 
     /// Makes closing a window cost one frame even while others stay open:
@@ -655,7 +663,7 @@ impl ScriptRunner {
                     self.vars = [0; VARIABLES];
                 }
                 self.wait = Wait::Reset {
-                    left: RESET_FRAMES,
+                    left: self.reset_frames,
                     mode,
                 };
             }

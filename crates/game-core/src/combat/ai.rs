@@ -227,7 +227,7 @@ pub fn choose(
             if lethal.is_empty() {
                 most_targets(ways.offensive())
             } else {
-                or_else(flagged(lethal, unit, SKIMMING), || {
+                or_else(flagged(lethal, unit, MELEE), || {
                     most_targets(ways.offensive())
                 })
             }
@@ -286,9 +286,10 @@ pub fn choose(
     }
 }
 
-/// Weapon flags some ways look for: `0x100`, a weapon that always lands
+/// Weapon flags some ways look for: `0x100`, a fighting (格闘) weapon, as
+/// the deck commands' descriptions name it; one that always lands
 /// (`0x800`), a piercing one (`0x400`).
-const SKIMMING: u32 = 0x100;
+const MELEE: u32 = 0x100;
 const SURE: u32 = 0x800;
 const PIERCING: u32 = 0x400;
 /// The part way 8 looks for first (`0x0805B0BC` with `0x224`).

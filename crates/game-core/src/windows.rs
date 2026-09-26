@@ -300,6 +300,25 @@ pub struct ScriptWindows<'rom> {
     metrics: TextMetrics,
     /// The windows the screen shows, kept by [`ScriptWindows::latch`].
     shown: Option<Vec<Option<Window>>>,
+    /// How bright the portraits' palette is, 16 as loaded: its copy
+    /// reaches the screen in the frame it is made, unlike the windows'.
+    portrait_level: u8,
+}
+
+/// A palette level that leaves the colors as loaded.
+pub const NORMAL_LEVEL: u8 = 16;
+
+/// A BGR555 color at a palette level, as the battle scenes' palette fades
+/// write it (`0x08047E88`, `0x08047F88`): each level above 16 adds 2 to
+/// each channel, up to 31, each below takes 2 off, down to 0.
+#[must_use]
+pub fn faded_color(color: u16, level: u8) -> u16 {
+    let step = (i32::from(level) - i32::from(NORMAL_LEVEL)) * 2;
+    let channel = |shift: u16| {
+        let value = i32::from((color >> shift) & 0x1F) + step;
+        u16::try_from(value.clamp(0, 0x1F)).unwrap_or(0) << shift
+    };
+    channel(0) | channel(5) | channel(10)
 }
 
 impl<'rom> ScriptWindows<'rom> {
@@ -316,7 +335,13 @@ impl<'rom> ScriptWindows<'rom> {
             extensions: SharedExtensions::default(),
             metrics: TextMetrics::default(),
             shown: None,
+            portrait_level: NORMAL_LEVEL,
         }
+    }
+
+    /// Sets the portraits' palette to `level` (see [`faded_color`]).
+    pub fn set_portrait_level(&mut self, level: u8) {
+        self.portrait_level = level;
     }
 
     /// Lays text out with `metrics` from now on.
@@ -417,7 +442,7 @@ impl<'rom> ScriptWindows<'rom> {
     /// Draws every presented window over `frame`, in the order they were
     /// opened so later windows cover earlier ones, as one tilemap would.
     pub fn draw(&self, frame: &mut Frame, skin: &WindowPainter, painter: &TextPainter) {
-        Self::draw_set(&self.windows, frame, skin, painter);
+        Self::draw_set(&self.windows, frame, skin, painter, self.portrait_level);
     }
 
     /// Keeps the windows as they are for [`ScriptWindows::draw_shown`]: on
@@ -440,6 +465,7 @@ impl<'rom> ScriptWindows<'rom> {
             frame,
             skin,
             painter,
+            self.portrait_level,
         );
     }
 
@@ -448,6 +474,7 @@ impl<'rom> ScriptWindows<'rom> {
         frame: &mut Frame,
         skin: &WindowPainter,
         painter: &TextPainter,
+        portrait_level: u8,
     ) {
         let mut order: Vec<(usize, &Window)> = windows
             .iter()
@@ -475,14 +502,10 @@ impl<'rom> ScriptWindows<'rom> {
                 } else {
                     origin
                 };
-                draw_sprite(
-                    frame,
-                    corner.0,
-                    corner.1,
-                    &portrait.image,
-                    &portrait.palette,
-                    false,
-                );
+                let palette = portrait
+                    .palette
+                    .map(|color| faded_color(color, portrait_level));
+                draw_sprite(frame, corner.0, corner.1, &portrait.image, &palette, false);
             }
             for (row, line) in window.shown_lines().iter().enumerate() {
                 let y = origin.1 + i32::try_from(row * LINE_HEIGHT).unwrap_or(i32::MAX);
