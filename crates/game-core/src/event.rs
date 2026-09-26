@@ -31,6 +31,10 @@ const FADE_IN_DELAY: u8 = 1;
 /// decompressions it waits a frame after, and the frame it returns on.
 const LOAD_FRAMES: u32 = 6;
 
+/// A [`Op::LoadMap`] player cell that keeps the player where it stands
+/// (the handlers that pass the player entity's own cell).
+pub const HERE: (usize, usize) = (usize::MAX, usize::MAX);
+
 /// One step of an event program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
@@ -217,6 +221,23 @@ pub enum Op {
         /// Facing on arrival.
         facing: Option<Direction>,
     },
+    /// Fights story battle `n` (`0x08008D28`, the battle module in story
+    /// mode), holding the game until it hands back.
+    StoryBattle(u8),
+    /// Runs `then` when the last battle was lost (`0x08008D28` returned 1),
+    /// `otherwise` else.
+    IfLost {
+        /// Program run after a defeat.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Takes the beaten party to its area's return point facing up
+    /// (`0x08006E08`, then `0x08007188`), running the map's handler.
+    WarpHome,
+    /// Gives actor `actor` sprite `sprite` and starts its animation of the
+    /// same facing (`0x080089A0`).
+    Sprite(usize, usize),
     /// Forms the party around the Zoid picked in the hangar
     /// (`0x08037644`: 0 the Shield Liger, 1 the Saber Tiger, 2 the Raynos).
     FormParty(u8),
@@ -243,8 +264,9 @@ pub trait EventHost {
     fn flag(&self, flag: u16) -> bool;
     /// Sets or clears game flag `flag`.
     fn set_flag(&mut self, flag: u16, set: bool);
-    /// Starts dialogue string `index`; the game holds until it ends.
-    fn start_dialogue(&mut self, index: u16);
+    /// Starts dialogue string `index`, as a task's call when `called`; the
+    /// game holds until it ends.
+    fn start_dialogue(&mut self, index: u16, called: bool);
     /// Starts battle scene `scene`; the game holds until it ends.
     fn start_battle(&mut self, scene: u8);
     /// Opens `shop`; the game holds until it closes.
@@ -289,6 +311,14 @@ pub trait EventHost {
     /// Takes the player to `cell` of `map` with its own objects and runs the
     /// map's handler; returns how many objects the map places.
     fn warp(&mut self, map: usize, cell: (usize, usize), facing: Option<Direction>) -> usize;
+    /// Starts story battle `battle`; the game holds until it hands back.
+    fn start_story_battle(&mut self, battle: u8);
+    /// Whether the last battle was lost.
+    fn battle_lost(&self) -> bool;
+    /// The area's return point: its map and cell (`0x08006E08`).
+    fn return_point(&self) -> Option<(usize, (usize, usize))>;
+    /// Gives actor `actor` sprite `sprite` (`0x080089A0`).
+    fn set_sprite(&mut self, actor: usize, sprite: usize);
 }
 
 /// A program running in a task, where it is and how many more times it
@@ -361,6 +391,10 @@ enum Hold {
         delay: u8,
         /// Frames held once the brightness is normal.
         settle: u8,
+        /// Whether the tasks already run in the frame the brightness is
+        /// normal, while the world is still held: after a warp, but not
+        /// after a map its handler loaded again.
+        tasks_first: bool,
     },
 }
 
@@ -469,6 +503,12 @@ impl Events {
 
     /// Starts `program` in `slot`, replacing what runs there.
     pub fn spawn(&mut self, slot: usize, program: &'static [Op]) {
+        // The original's load runs within the task's own call: a map's
+        // handler spawning into that task's slot is overwritten when the
+        // task, going on, next yields.
+        if matches!(self.hold, Some(Hold::Loading { slot: loading, .. }) if loading == slot) {
+            return;
+        }
         if let Some(task) = self.tasks.get_mut(slot) {
             *task = Some(Task::new(program));
         }
@@ -498,7 +538,11 @@ impl Events {
     /// Holds the game while the screen brightens one level a frame, after
     /// `delay` frames at the level it has and `settle` frames once normal.
     pub fn fade_in_after(&mut self, delay: u8, settle: u8) {
-        self.hold = Some(Hold::FadeIn { delay, settle });
+        self.hold = Some(Hold::FadeIn {
+            delay,
+            settle,
+            tasks_first: settle > 0,
+        });
     }
 
     /// Holds the game while the screen darkens one level a frame to black,
@@ -534,9 +578,7 @@ impl Events {
                     });
                     return HoldStep::Held;
                 }
-                self.hold = None;
-                self.run_task(slot, host);
-                self.run_slots(slot + 1, host);
+                self.end_loading(slot, host);
                 HoldStep::Held
             }
             Some(Hold::FadeOut { delay, resume }) if delay > 0 => {
@@ -559,10 +601,15 @@ impl Events {
                 self.run_slots(slot + 1, host);
                 HoldStep::Held
             }
-            Some(Hold::FadeIn { delay, settle }) if delay > 0 => {
+            Some(Hold::FadeIn {
+                delay,
+                settle,
+                tasks_first,
+            }) if delay > 0 => {
                 self.hold = Some(Hold::FadeIn {
                     delay: delay - 1,
                     settle,
+                    tasks_first,
                 });
                 HoldStep::Held
             }
@@ -571,28 +618,57 @@ impl Events {
                     self.hold = Some(Hold::FadeIn {
                         delay: 0,
                         settle: settle - 1,
+                        tasks_first: false,
                     });
                     return HoldStep::Held;
                 }
                 self.hold = None;
                 HoldStep::Released
             }
-            Some(Hold::FadeIn { settle, .. }) => {
-                self.brightness -= 1;
-                if self.brightness > 0 {
-                    return HoldStep::Held;
-                }
-                if settle > 0 {
-                    self.hold = Some(Hold::FadeIn {
-                        delay: 0,
-                        settle: settle - 1,
-                    });
-                    return HoldStep::Held;
-                }
-                self.hold = None;
-                HoldStep::Released
-            }
+            Some(Hold::FadeIn {
+                settle,
+                tasks_first,
+                ..
+            }) => self.brighten(settle, tasks_first, host),
         }
+    }
+
+    /// The end of a load: the task that made it goes on, then the tasks
+    /// after it run.
+    fn end_loading(&mut self, slot: usize, host: &mut impl EventHost) {
+        self.hold = None;
+        self.run_task(slot, host);
+        self.run_slots(slot + 1, host);
+    }
+
+    /// A level of a fade in; on reaching normal brightness, the frames
+    /// held after it begin.
+    fn brighten(&mut self, settle: u8, tasks_first: bool, host: &mut impl EventHost) -> HoldStep {
+        self.brightness -= 1;
+        if self.brightness > 0 {
+            return HoldStep::Held;
+        }
+        if settle == 0 {
+            self.hold = None;
+            return HoldStep::Released;
+        }
+        // The tasks and the actors' animations may run in the frame the
+        // screen is bright again; the rest of the world only from the next.
+        self.hold = None;
+        if tasks_first {
+            if let Some(field) = host.field() {
+                field.tick_animations();
+            }
+            self.run_slots(0, host);
+        }
+        if self.hold.is_none() {
+            self.hold = Some(Hold::FadeIn {
+                delay: 0,
+                settle: settle - 1,
+                tasks_first: false,
+            });
+        }
+        HoldStep::Held
     }
 
     /// Runs every task for one frame, in slot order.
@@ -668,6 +744,8 @@ impl Events {
             | Op::Battle(_)
             | Op::Shop(_)
             | Op::Combat
+            | Op::StoryBattle(_)
+            | Op::WarpHome
             | Op::Freeze(_)
             | Op::Script(..)
             | Op::AwaitArrival(_)
@@ -683,11 +761,16 @@ impl Events {
             | Op::IfCommand { .. }
             | Op::IfArea { .. }
             | Op::IfChoice { .. }
+            | Op::IfLost { .. }
             | Op::IfChestMoney { .. }
             | Op::Call(_)
             | Op::Repeat(..)
             | Op::Spawn(..)
             | Op::End => self.branch(slot, op, host),
+            Op::Sprite(actor, sprite) => {
+                host.set_sprite(actor, sprite);
+                Flow::Next
+            }
             Op::Brightness(level) => {
                 self.brightness = level.min(BLACK);
                 if let Some(task) = self.tasks[slot].as_mut() {
@@ -736,7 +819,12 @@ impl Events {
                 }
                 return Flow::Yield;
             }
-            Op::Dialogue(_) | Op::Script(..) | Op::Battle(_) | Op::Shop(_) | Op::Combat => {
+            Op::Dialogue(_)
+            | Op::Script(..)
+            | Op::Battle(_)
+            | Op::Shop(_)
+            | Op::Combat
+            | Op::StoryBattle(_) => {
                 self.advance(slot);
                 self.hold = Some(start_hold(slot, op, host));
                 return Flow::Yield;
@@ -783,6 +871,13 @@ impl Events {
                 let count = host.warp(map, cell, facing);
                 return self.hold_loading(slot, count);
             }
+            Op::WarpHome => {
+                let Some((map, cell)) = host.return_point() else {
+                    return Flow::Next;
+                };
+                let count = host.warp(map, cell, Some(Direction::Up));
+                return self.hold_loading(slot, count);
+            }
             Op::AwaitArrival(actor) => host
                 .field()
                 .and_then(|field| field.actor(actor).map(Actor::idle))
@@ -814,9 +909,13 @@ impl Events {
     fn hold_loading(&mut self, slot: usize, count: usize) -> Flow {
         let frames = LOAD_FRAMES + u32::try_from(count).unwrap_or(u32::MAX);
         if slot == IMMEDIATE {
-            if let Some(Hold::FadeIn { delay, settle }) = self.hold {
+            if let Some(Hold::FadeIn { delay, settle, .. }) = self.hold {
                 let delay = delay.saturating_add(u8::try_from(frames).unwrap_or(u8::MAX));
-                self.hold = Some(Hold::FadeIn { delay, settle });
+                self.hold = Some(Hold::FadeIn {
+                    delay,
+                    settle,
+                    tasks_first: false,
+                });
             }
             return Flow::Next;
         }
@@ -855,6 +954,7 @@ impl Events {
                 taken(vars[1] == 0 && vars[0] != 0, then, otherwise)
             }
             Op::IfChestMoney { then, otherwise } => taken(host.chest_money() > 0, then, otherwise),
+            Op::IfLost { then, otherwise } => taken(host.battle_lost(), then, otherwise),
             Op::Call(program) => program,
             Op::Repeat(times, program) => {
                 if times == 0 {
@@ -959,11 +1059,7 @@ fn command_actor(field: &mut Field, op: Op) {
                 actor.nudge(offset);
             }
         }
-        Op::Place(actor, cell) => {
-            if let Some(actor) = field.actor_mut(actor) {
-                actor.place(cell);
-            }
-        }
+        Op::Place(actor, cell) => field.place_actor(actor, cell),
         Op::Show(actor) => {
             if let Some(actor) = field.actor_mut(actor) {
                 actor.visible = true;
@@ -996,10 +1092,7 @@ fn command_actor(field: &mut Field, op: Op) {
                 actor.animation_shift = shift;
             }
         }
-        Op::Pan(dx, dy) => {
-            field.pan.0 += dx;
-            field.pan.1 += dy;
-        }
+        Op::Pan(dx, dy) => field.pan_by(dx, dy),
         _ => {}
     }
 }
@@ -1024,8 +1117,12 @@ fn start_hold(slot: usize, op: Op, host: &mut impl EventHost) -> Hold {
             host.start_combat();
             Hold::Combat(slot)
         }
+        Op::StoryBattle(battle) => {
+            host.start_story_battle(battle);
+            Hold::Combat(slot)
+        }
         Op::Dialogue(index) => {
-            host.start_dialogue(index);
+            host.start_dialogue(index, slot < IMMEDIATE);
             Hold::Dialogue(slot)
         }
         _ => Hold::Dialogue(slot),
@@ -1058,7 +1155,7 @@ mod tests {
             }
         }
 
-        fn start_dialogue(&mut self, index: u16) {
+        fn start_dialogue(&mut self, index: u16, _called: bool) {
             self.log.push(format!("dialogue {index}"));
         }
 
@@ -1142,9 +1239,56 @@ mod tests {
             self.log.push(format!("warp {map}"));
             1
         }
+
+        fn start_story_battle(&mut self, battle: u8) {
+            self.log.push(format!("story battle {battle}"));
+        }
+
+        fn battle_lost(&self) -> bool {
+            false
+        }
+
+        fn return_point(&self) -> Option<(usize, (usize, usize))> {
+            Some((20, (4, 4)))
+        }
+
+        fn set_sprite(&mut self, actor: usize, sprite: usize) {
+            self.log.push(format!("sprite {actor} {sprite}"));
+        }
     }
 
     const WAITING: &[Op] = &[Op::Music(1), Op::Wait(3), Op::Music(2), Op::End];
+
+    const REPLACED: &[Op] = &[Op::Music(9), Op::End];
+    const WARPING: &[Op] = &[
+        Op::Warp {
+            map: 17,
+            cell: (4, 6),
+            facing: None,
+        },
+        Op::Music(3),
+        Op::Wait(60),
+        Op::Music(4),
+        Op::End,
+    ];
+
+    #[test]
+    fn a_task_spawned_into_a_loading_tasks_slot_is_lost() {
+        let mut events = Events::new();
+        let mut host = Host {
+            flags: vec![],
+            log: vec![],
+        };
+        events.spawn(MAP_TASK, WARPING);
+        events.update(&mut host);
+        events.spawn(MAP_TASK, REPLACED);
+        while events.update_hold(false, &mut host) == HoldStep::Held {}
+        events.update(&mut host);
+        for _ in 0..60 {
+            events.update(&mut host);
+        }
+        assert_eq!(host.log, ["warp 17", "music 3", "music 4"]);
+    }
 
     #[test]
     fn waits_resume_that_many_frames_later() {

@@ -348,6 +348,10 @@ pub struct Combat {
     pause: u8,
     /// The units that fight.
     sides: ai::Sides,
+    /// The party's units as a revival builds them again from the game
+    /// state (`0x0802B5D0`), whole, by formation slot, with their figures.
+    revived: [Option<units::BattleUnit>; SLOTS],
+    revived_figures: [Option<Unit>; SLOTS],
     /// The grounds the party and the enemy stand on.
     terrains: (u8, u8),
     /// A story battle's (`0x02005C70` bit 0): no retreat, the story's
@@ -501,7 +505,7 @@ impl Combat {
             frame_tiles,
             banks,
             panels,
-            units: [player, enemy],
+            units: [player.clone(), enemy],
             anchors,
             menu: ScriptRunner::named(BATTLE_MENU_TABLE, offsets(BATTLE_MENU_TABLE))
                 .with_quick_redraws(),
@@ -519,6 +523,8 @@ impl Combat {
             allocation: results::Allocation::default(),
             print_window: MESSAGE_WINDOW,
             pause: 0,
+            revived: revived_units(rom, state),
+            revived_figures: player.clone(),
             sides,
             terrains: (player_terrain, enemy_terrain),
             story: false,
@@ -1165,8 +1171,10 @@ impl Combat {
         let (panels, [player, _]) = screen_units(&data, &mut self.state, &self.lineup);
         let [party, _] = battle_units(rom, &self.state, &self.lineup);
         self.panels = panels;
+        self.revived_figures.clone_from(&player);
         self.units[PLAYER] = player;
         self.sides[ai::PARTY] = party;
+        self.revived = revived_units(rom, &self.state);
         self.build_frames =
             BUILD_FRAMES + BUILD_PER_PANEL * u32::try_from(self.panels.len()).unwrap_or(0);
     }
@@ -1882,6 +1890,20 @@ fn battle_units(rom: &[u8], state: &[u8], lineup: &Lineup) -> ai::Sides {
         }),
         std::array::from_fn(|slot| units::BattleUnit::enemy(rom, state, lineup, slot)),
     ]
+}
+
+/// The party's units as a revival builds them from the game state
+/// (`0x0802B5D0`, `0x0803376C`): the whole party's parts, with all their hit
+/// points and energy.
+fn revived_units(rom: &[u8], state: &[u8]) -> [Option<units::BattleUnit>; SLOTS] {
+    let formation_slots = saga_party::formation(state);
+    std::array::from_fn(|slot| {
+        let (unit, character) = formation_slots[slot]?;
+        let mut unit = units::BattleUnit::party(rom, state, unit, character, false)?;
+        unit.hp = unit.max_hp;
+        unit.ep = unit.max_ep;
+        Some(unit)
+    })
 }
 
 /// Draws a field layer over the frame, scrolled `scroll` pixels up (the

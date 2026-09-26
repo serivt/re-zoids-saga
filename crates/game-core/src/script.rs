@@ -222,6 +222,10 @@ pub struct ScriptRunner {
     /// frame, the time the original takes to redraw the menus' crowded
     /// windows.
     slow_redraw: bool,
+    /// Whether the strings run as a task's call (`0x08008B58`) on a Zoid
+    /// map, where redrawing the windows a close leaves open fits in the
+    /// close's own frame.
+    called: bool,
     /// The frames the text system's reset takes.
     reset_frames: u32,
 }
@@ -253,8 +257,14 @@ impl ScriptRunner {
             wait: Wait::Done,
             previous: Input::default(),
             slow_redraw: true,
+            called: false,
             reset_frames: RESET_FRAMES,
         }
+    }
+
+    /// Runs the next strings as a task's call or not (see `called`).
+    pub fn set_called(&mut self, called: bool) {
+        self.called = called;
     }
 
     /// Sets the frames the text system's reset takes from the next one on.
@@ -669,7 +679,8 @@ impl ScriptRunner {
             }
             Instruction::CloseWindow { id } => {
                 host.close_window(id);
-                let redrawn = self.slow_redraw && (0..WINDOWS).any(|id| host.is_open(id));
+                let redrawn =
+                    self.slow_redraw && !self.called && (0..WINDOWS).any(|id| host.is_open(id));
                 self.wait = Wait::Frames(1 + u32::from(redrawn));
             }
             Instruction::Present { id } => {

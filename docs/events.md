@@ -93,11 +93,23 @@ frames.
 | Moment | Measured |
 |---|---|
 | Entering a map | Held at 31 for a frame, then one level less each frame; the world runs in the frame the level reaches 0 |
-| Taking an exit, arrival at frame R | Level 1 at R+2 … level 31 and the load at R+32; black until R+42; level 30 at R+43 … 0 at R+73; the world runs at R+74 |
+| Taking an exit, arrival at frame R | Level 1 at R+2 … level 31 and the load at R+32; black until R+42; level 30 at R+43 … 0 at R+73; the world runs at R+74. The tasks the map's handler spawned and the actors' animations already run at R+73, unless the handler loaded the map again (Arcana), whose tasks run with the world |
 | Cutscene load, event warp | 6 frames plus one per object |
 | Exit onto the world map (map 1) | Level 30 six frames later than a room's: the load takes longer |
 | Input | The game acts on the buttons of the frame before |
 | Display | A frame shows the field, the windows and the brightness as the frame before left them (see [field.md](field.md), Drawing) |
+
+A task's dialogue call runs the script's first step within the call, in the frame the
+task makes it, and a task that goes on after one dialogue into another starts the next
+in the frame the first ends. Closing a window that leaves another open redraws that
+one: a dialogue started by speaking to someone takes a second frame for it, and so
+does a task's call in the rooms and towns (the castle, Arcana) and on a Zoid map with
+four sprites or more on the screen (the factory's hall once Blood's squad is in); on a
+Zoid map with fewer (the world map, the factory's door, the hall before the squad
+comes in) the redraw fits in the close's own frame, and the window being cleared
+shows half gone on the screen. From the key to the call's return that makes 3 frames
+for a box without a portrait and 4 or 5 for one with a portrait. The port takes the
+map's kind and the sprites drawn as the measure of the time the frame has left.
 
 Script operations cost frames too (see [formats/script-text.md](formats/script-text.md)).
 The original's real costs vary with the CPU time each frame takes. For example, a window
@@ -143,6 +155,10 @@ A map load shows chests whose flag is set already open.
 | Map 29, Roman | Teaches 包囲攻撃, deck command 26 | |
 | Map 25, item shop | The keeper behind the counter opens item shop 1 (`0x080090F0`, see [shop.md](shop.md)) | |
 | Map 26, armaments shop | The keeper opens armaments shop 1 (`0x080090FC`); the old man teaches 節電, deck command 22 | |
+| Map 7, the castle grounds | The first time after Arcana (handler `0x080104A0`): song 4, the Gustav faces up and stands still, and its task (`0x08010514`) pans the camera up two pixels a frame for 100 frames and back down for 100, waits a second, plays dialogue `0x51` (Jack finds the guard thin, Regina recalls the underground factory's entrance), waits a second more and hands back | `0x129` |
+| Map 16, the factory's door | Until it is opened the door (object 1, off the map otherwise) stands at (4, 0) (handler `0x08010588`). After Arcana its task (`0x080105F0`) waits for the Gustav on (4, 1): it stops, Regina gives the pass code (dialogue `0x52`), a second later the door plays its opening once with sound `0x6D`, a second later sound `0x82` and the Gustav drives through the door's cell at half a pixel a frame, whole animation ticks, the controls back a frame later. The door's cell is the exit to map 13 | `0x12A` |
+| Maps 12 and 13, the factory's hall | Until Blood's squad is beaten, entering reloads map 12 with the player where it stands and Blood and three soldiers below the map (handler `0x080106C4`, list ROM `0x0832AD80`). The task (`0x08010754`) waits for the Gustav on (4, 1), brings it down a cell (dialogue `0x53`), pans the camera down 128 pixels, starts song 9 and walks the soldiers and Blood in two by two to their places; the camera comes back up 32 pixels, Blood speaks (`0x54`) and story battle 0 follows. Lost, the party goes to its return point. Won: song 4, the hall reloads as map 13 with the Gustav on (4, 3) and the four others (`0x0832ADD0`), the Gustav is placed on (4, 2) without the camera following, and after the fade in and two seconds the two wrecked soldiers play their wreck and explode (sprite `0xFD` through `0x080089A0`, sound `0x5A`); the camera goes up, dialogue `0x55`, the Gustav dashes out the top (two pixels a frame) and hides, `0x56`, Blood and the last soldier dash out the same way (the code moves Blood again where it meant the soldier), the screen darkens and the party warps to map 17 at (4, 6) | `0x12B` |
+| Map 17, the factory's corridor | Its handler (`0x080110C8`) spawns the corridor's task (`0x0801114C`) until both its flags are set, as the hall's warp does: the first time the Gustav drives in to (14, 2) (dialogue `0x57`); at (37, 1) it stops for dialogue `0x59`. The warp runs the handler within the hall's task, and the task the handler spawns into that task's own slot is lost: the hall's task goes on after the load, waits a second after the fade in starts and ends setting the field's hook `0x0801112C`, which spawns the corridor's task the next frame. After the first part the task clears the field's bit 2 (`0x02000008`), which the handler set, and roaming enemies can meet the party again | `0x12C`, `0x12D` |
 | Map 27, Dr. T's lab | Dr. T (`0x0802AB08`) talks with Regina about rebuilding the Trinity Liger (dialogue `0x2C1`), later `0x2C2`; the assistant on the left teaches データ収集, deck command 0 | `0x13F` |
 
 The map record's byte `+8` names the map's song (11 for the castle, 22 for the
@@ -221,9 +237,66 @@ formation.
   differed); before the prompt's blink was 21 frames, 327.
 - The drive to Arcana runs a frame late after dialogue `0x44` closes, and the town
   brightens a frame early.
+- The castle grounds' view, entered from map 14 (`mq0161`) with the party formed and
+  Arcana done: every frame from the door to the view's end is identical once shifted
+  by one, the black after the load being a frame longer in the port (see below), but
+  for two frames of a page turn of dialogue `0x51`.
+- The factory's door, from two cells below it: every frame from the first step to the
+  door's opening is identical; the sounds fall on the original's frames. The door's
+  opening and the Gustav driving through it show their new pictures a frame early
+  (see [field.md](field.md), Drawing): they are near the top of the screen. The last
+  close of dialogue `0x52` shows one frame differently (the original's half-cleared
+  window).
+- The factory's hall: every event of the ambush falls on the original's frame
+  (dialogue `0x53` at the same frame, song 9, dialogue `0x54`, the battle's sound),
+  and 1223 of its 1310 frames are identical; the others are a typewriter's character
+  a frame early after some page turns and the soldiers' animation near the bottom
+  edge. After story battle 0 (its enemies set to 1 hit point in the original to
+  shorten it, the frames aligned on the song that follows it) the explosion, dialogue
+  `0x55` and the camera come a frame late, the reload of map 13 taking 11 frames
+  where the original's took 10; dialogue `0x56` and the dash out match, and the
+  corridor's dialogue `0x57` falls on the original's frame.
 - The black after an exit's load depends on the scene. The port uses one length for
   every room: leaving Arcana's bar for the streets, the original stays black six frames
   longer, and going up to the room above, two frames shorter.
+
+## Story inventory
+
+The chapters follow the areas: the low byte of a map record's id (see
+[formats/map.md](formats/map.md)), which entering a map writes to the game state. The
+343 maps split into ten areas, named after them (`mq0100`–`md0198` area 1, `mq0200`…
+area 2 and so on). Their code: 247 distinct map handlers (record `+12`; many maps share
+one; most only set the field's hooks) and 169 objects whose script is code (the other
+objects just say a dialogue string). A static
+reading of each, of the tasks it spawns (`0x08003D78`, `0x08003DF8`) and of the routines
+it calls, with the constants passed to the flag (`0x08001040`, `0x08000F88`), dialogue
+(`0x08008B58`), story battle (`0x08008D28`) and staged scene (`0x08008E4C`) routines,
+gives per area:
+
+| Area | Maps | Handlers with events | Objects with code | Dialogues their code runs | Story battles | Shop keepers | Teachers |
+|---:|---:|---:|---:|---:|---|---:|---:|
+| 1 | 30 | 12 | 16 | 67 | 0, 1 | 3 | 3 |
+| 2 | 20 | 7 | 19 | 68 | 2–5 | 3 | 0 |
+| 3 | 44 | 12 | 27 | 93 | 6, 7 | 8 | 1 |
+| 4 | 39 | 9 | 12 | 45 | 8, 9 | 8 | 1 |
+| 5 | 43 | 5 | 22 | 60 | 25 | 15 | 1 |
+| 6 | 41 | 12 | 19 | 94 | 26–28 | 9 | 1 |
+| 7 | 19 | 7 | 8 | 55 | 29 | 6 | 1 |
+| 8 | 37 | 13 | 19 | 93 | 30, 31, 33–35 | 9 | 1 |
+| 9 | 24 | 6 | 5 | 73 | 36–40 | 3 | 1 |
+| 10 | 46 | 2 | 14 | 16 | 41 | 9 | 1 |
+
+Story battles 10–24 and 32 are not called with a constant: they come from elsewhere
+(the arena, tables), still to be traced. Area 1 after Arcana:
+
+| Map | Handler | What it does | Flags |
+|---|---|---|---|
+| 7, the castle grounds | `0x080104A0` | The view above | `0x129` |
+| 16, `mq0163` | `0x08010588` | The factory's door (above) | `0x12A` |
+| 12 and 13, `mq0160` | `0x080106C4` | Blood's ambush and story battle 0 (above) | `0x12B` |
+| 17, `mq0164` | `0x080110C8` | The corridor (above) | `0x12C`, `0x12D` |
+| 23, `mq0192` | `0x080113A8` | Dialogues `0x5A`–`0x65`, story battle 1, warps to maps 31 (area 2) and 48 | `0x12E` |
+| 27, Dr. T's lab | `0x08009108` | The Zoid lab (kind 2 of the shops) | |
 
 ## Not modeled yet
 
@@ -241,8 +314,6 @@ formation.
   them for empty ones during the drive and leaves the second one empty. Arcana's
   arrival sets its own and puts the field's back when it ends; after it, Arcana's
   handler (`0x0800BEE4`) only sets them.
-- The port runs the tasks a map handler spawns two frames after its fade in ends,
-  where the original runs them in that frame; the drive to Arcana makes up for it.
 - The CPU-time variance of script operations.
 - The object-state overlay.
 - A one-frame drift of the backdrop.

@@ -18,7 +18,7 @@ screenshots every other frame compared with the port's. Implemented in
 | Running | B held when a step starts (`0x0800B282`, the player's keys at entity `+0x56`) doubles the speed, halves the step's frames and shifts the walk animation's ticks by 2 instead of 1: 8 frames a step on foot, 16 for the Gustav's 32-pixel cells. Traced in the castle and in the labyrinth: the steps start on the original's frames |
 | Sprite | 32×32 from sprite `ch00` (id `0x98`, the player on the map), top-left at `(16 × column − 8, 16 × row)` for the standing metatile |
 | Footing | The metatile below the standing one holds the bottom-center 16×16 of the sprite; steps are blocked by the attribute of the footing's neighbour, so the sprite stopped at x = 24 against the two-metatile left wall and at y = 16 against the two-metatile top wall |
-| Camera | Follows so the sprite stays at screen (104, 64), clamped to the map (768×320 pixels for the first room) |
+| Camera | Follows so the sprite stays at screen (104, 64), clamped to the map (768×320 pixels for the first room). Placing the player (`0x08008B70`) does not move it: only the player's steps do. A cutscene's pan (`0x08008324`) moves it on from there; a move past the map's edge is refused (the routine asks the tile streamer at each 8-pixel boundary), so a pan longer than the map stops at the edge for the moves left and comes straight back from it |
 | Start | Standing on metatile (5, 2) of map 4 after the intro: sprite at map (72, 32) |
 
 ## Animation
@@ -28,6 +28,16 @@ the idle animation is the facing direction in the order up, down, left, right, t
 walking one is that plus four, and every step lasts half its listed ticks, four frames,
 so a 16-pixel step is one full walking cycle. VRAM dumps while walking right showed
 images 21, 22, 21, 23 of `ch00`, which is exactly its animation 7.
+
+The animation step (`0x08000BD8`) times a new animation's first step with the shift the
+entity has at that moment (`+0x38`), and the frame that starts it already counts one.
+The player's own step starts its walking animation before setting the walking shift,
+so its first step keeps the standing one's timing: on foot both halve the ticks, but
+the Gustav stands with whole ticks (actors other than characters do), so its first
+walking step shows 7 frames and the next ones 4. Likewise a finished step starts the
+standing animation before the standing shift comes back: the Gustav's first standing
+step shows 3 frames. A map's actors start with their standing shift, whatever the
+player had when it left the last map.
 
 ## Characters
 
@@ -59,6 +69,11 @@ frame by frame in the first room, in Arcana and above its bar.
   current one. A walking sprite's new step shows one frame before it moves. The port
   keeps the screen state at the start of each frame (`Field::latch`,
   `ScriptWindows::latch`) and draws it with the current pictures.
+- **Sprites near the top.** The picture copy happens while the frame is being drawn,
+  in the entities' update: a sprite high on the screen (the factory's door, rows 4 to
+  31) has been drawn already, so it shows a new step's picture a frame after the
+  step, where the port shows it at once. Sprites lower down (the Gustav near the
+  middle) show it at once in both.
 - **Streamed tiles.** The animation step (`0x08000BD8`) copies the tiles of each new
   frame into the start of the sprite's slot in video memory, while the sprite table
   still names the frame before: its shape, offset and anchor. A frame smaller than

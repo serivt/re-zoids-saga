@@ -41,7 +41,10 @@ This page covers the real battles. The scripted battle scenes of the opening are
 `0x08008D28(n)` plays sound `0x52`, darkens the field (`0x08001524`), keeps the entity
 table and the sprites' palettes, and sets story battle `n` up (`0x080329E4` with type
 1). After the battle it rebuilds the field behind the black screen and hands the
-result to the event (0 won, 1 lost); `0x08008BFC` also fades the field in.
+result to the event (0 won, 1 lost); `0x08008BFC` also fades the field in. The event
+side is `Op::StoryBattle` and `Op::IfLost` (see [events.md](events.md)); the battle
+hands back as it queues its text system's reset, so the game clears the windows its
+results left on the screen.
 
 The 42 records of ROM `0x67C0F4` (36 bytes each) give:
 
@@ -316,7 +319,7 @@ The screen's other changes:
   puts the side's sprites in their slots the frame after that (`0x080317E4`, the
   paralysed ones darkened by 24), setting the side's flag in `0x0200EB84` (`0x80` the
   party's, `0x100` the enemy's). The figures come back at the end (`0x0802FA6C`). A
-  party unit keeps its panel. The results find each formation slot's unit by its
+  party unit keeps its panel, which follows its pilot (`0x08031598`). The results find each formation slot's unit by its
   pilot (`0x080365C8`), wherever it moved.
 - **The figures** (task `0x0802F8F8`, slot 8): L shows or hides each party unit's
   hit points and energy over it, four orange digits, a slash and three blue ones (at
@@ -402,8 +405,21 @@ The screen's other changes:
   3, sound `0x4B`, every channel lowered, flag `0x1D`), a sacrifice (`0x10000000`:
   the unit's hit points go to 0 and an explosion, the effects' record 181, plays where
   a hit's spark does, the unit vanishing 24 frames in; `0x0802DCB4`, `0x0802DBE4`) or
-  a revival (`0x08000000`: the beaten units come back with all their hit points and
-  energy, the player with its pilot's bonuses twice; `0x0802E40C`). The revival's
+  a revival (`0x08000000`, `0x0802E40C`). The revival picks the party's formation
+  slots (`0x0803C8CC`): for all but the player (`0x2000`), each slot with a unit and a
+  pilot other than the player whose battle slot holds no unit still fighting; for
+  the player, its slot, fighting or not. Each is built again from the game state as
+  the battle's start builds it (`0x0802B5D0`, then its parts' passive effects,
+  `0x0803376C`): all its hit points and energy, no effects, its used-up parts back
+  (a story battle's emptied racks too), and for the player its pilot's bonuses twice.
+  On a side whose back row had moved up (flag `0x80` or `0x100`) the rows move back
+  first (task `0x0802E144`, which the display's task starts and waits for, state
+  `0xBB8`): each unit of the front row still fighting moves to the slot behind it, its
+  record at once and its sprite in 15 frames as the row advance's do; the task sees
+  the moves' end the frame after, the next puts the side's sprites in their slots,
+  clears the flag and reports, the display's task sees it the frame after and starts
+  the revival the next (state `0xC1C`): 19 frames in all. With no unit to move the
+  task never reports and the display waits for ever; the port goes on. The revival's
   display loads effect 7 (screen record 5) and plays sound `0x56`; its panels show
   the units whole and lit. On its 29th frame a unit's sprite comes back with its
   colors raised by 32 (`0x0802E618`, flag `0x1E`), then by the whole part of 32 less
@@ -987,6 +1003,14 @@ of the effect's animation. The command flow before it ran a frame late there, th
 text system's reset taking 3 frames where the original's took 2 (the bars had
 changed in the port's first round, whose rolls had parted from the original's).
 
+The rows' move back was traced in story battle 3 with the formation changed in the
+game state (one unit in front, out from the start; three behind) and 勇者の条件 in
+the deck, issued in the second round: the move back starts with the revival's
+display and the revival follows 19 frames later, as in the original, and the unit
+that moved back in both runs is identical on every frame of its move. The runs'
+first rounds had parted by then (the frames the turns take move the rolls), so the
+original moved one unit back and the port two.
+
 The deck commands were compared on every frame from the save state of the opening's
 menu, one command put in the battle's deck by hand each time and issued from the
 round's menu: 王子のはげまし (the repair), 王子の怒り (the raise), 神の領域 (a Zoid's
@@ -1082,10 +1106,5 @@ traced one's speed: each step of its explosion is identical to the original's.
   26, 28, 30; 3 and 4 are the aim's cursors) play as 2.
 - In the aim: the front weapon's hiding while the Zoid fades (the mount's `+0x4A`),
   and the entities the back rack's weapon moves when it fires (`0x08042780`).
-- Of the deck commands: the rows' move back that comes before a revival on a side
-  whose back row had moved up (`0x0802E144`, which clears flags `0x80` and `0x100` of
-  `0x0200EB84`), and a revived unit's record built again from the game state
-  (`0x0802B5D0`: its effects and used-up parts; the port keeps them); the link battles, where the opponent's commands come over the cable;
-  and the commands' errors, read from the code alone.
-- The story battles' own start and end on the field (`0x08008D28`): the event side
-  comes with the events that call them.
+- Of the deck commands: the link battles, where the opponent's commands come over
+  the cable, and the commands' errors, read from the code alone.

@@ -2062,11 +2062,17 @@ impl Combat {
         }
     }
 
-    /// Dims every panel but party slot `slot`'s (`0x08031598`).
+    /// Dims every panel but party slot `slot`'s, found by its pilot
+    /// (`0x08031598`).
     pub(super) fn light_panel(&mut self, slot: usize) {
-        self.dim_panels = super::PanelLight::Dimmed {
-            lit: self.panels.iter().position(|panel| panel.slot == slot),
+        let lit = match self.sides[PARTY][slot].as_ref() {
+            Some(unit) => self
+                .panels
+                .iter()
+                .position(|panel| panel.character == unit.character),
+            None => self.panels.iter().position(|panel| panel.slot == slot),
         };
+        self.dim_panels = super::PanelLight::Dimmed { lit };
     }
 
     /// Shows a party unit's hit points and energy on its panel
@@ -2082,7 +2088,12 @@ impl Combat {
             )
         };
         let (hp, ep) = (value(unit.hp, unit.max_hp), value(unit.ep, unit.max_ep));
-        for panel in self.panels.iter_mut().filter(|panel| panel.slot == slot) {
+        let character = unit.character;
+        for panel in self
+            .panels
+            .iter_mut()
+            .filter(|panel| panel.character == character)
+        {
             if (panel.hp, panel.ep) != (hp, ep) {
                 self.palette_writes += 1;
             }

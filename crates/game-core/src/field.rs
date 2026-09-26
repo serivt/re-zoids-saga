@@ -298,6 +298,12 @@ pub struct Actor {
     pub pause: u16,
     /// The sheet a wrecked actor explodes with.
     explosion: Option<Box<SpriteSheet>>,
+    /// The shift the animation's first step was timed with, when not the
+    /// current one: the shift in effect when it started (`0x08000BD8`), a
+    /// walk's step setting its own before. The player's own step starts its
+    /// walking animation before it sets the walking shift, and a finished
+    /// step starts the standing one before the standing shift comes back.
+    start_shift: Option<i8>,
 }
 
 impl Actor {
@@ -334,6 +340,7 @@ impl Actor {
             group: 0,
             pause: 0,
             explosion: None,
+            start_shift: None,
         }
     }
 
@@ -397,10 +404,12 @@ impl Actor {
         self.play(direction.index());
     }
 
-    /// Plays animation `id` from the start.
+    /// Plays animation `id` from the start, its first step timed with the
+    /// shift in effect now (`0x08000BD8`).
     pub fn play(&mut self, id: usize) {
         self.animation_id = id;
         self.animation = 0;
+        self.start_shift = Some(self.animation_shift);
     }
 
     /// Stands it on `(column, row)`, ending any step.
@@ -438,9 +447,18 @@ impl Actor {
         let Some(sheet) = self.sheet.as_ref() else {
             return true;
         };
+        let first = sheet
+            .animations
+            .get(self.animation_id)
+            .and_then(|steps| steps.first())
+            .map_or(0, |step| step.duration);
+        let now = tick_length(first, self.animation_shift);
+        let started = self
+            .start_shift
+            .map_or(now, |shift| tick_length(first, shift));
         self.once
             && animation_length(sheet, self.animation_id, self.animation_shift)
-                .is_some_and(|length| self.animation >= length)
+                .is_some_and(|length| self.animation + now >= length + started)
     }
 
     /// Whether a walk has arrived or it otherwise stands idle.
@@ -457,6 +475,7 @@ impl Actor {
         self.facing = direction;
         self.play(WALK_ANIMATION_BASE + direction.index());
         self.animation_shift = PLAYER_ANIMATION_SHIFT;
+        self.start_shift = None;
         let frames = self.size * PIXEL / speed.max(1);
         self.step = Some(Step {
             direction,
@@ -485,7 +504,9 @@ impl Actor {
         self.step = None;
         self.previous = (self.column, self.row);
         (self.x, self.y) = origin(self.column, self.row, self.size);
+        let walking = self.animation_shift;
         self.face(self.facing);
+        self.start_shift = Some(walking);
         true
     }
 
@@ -501,12 +522,17 @@ impl Actor {
         if self.animation_done() {
             return steps.last().map(|step| step.frame);
         }
-        frame_at(
-            sheet,
-            self.animation_id,
-            self.animation,
-            self.animation_shift,
-        )
+        let first = steps.first()?.duration;
+        let now = tick_length(first, self.animation_shift);
+        let started = self
+            .start_shift
+            .map_or(now, |shift| tick_length(first, shift));
+        let elapsed = if self.animation < started {
+            0
+        } else {
+            self.animation - started + now
+        };
+        frame_at(sheet, self.animation_id, elapsed, self.animation_shift)
     }
 }
 
@@ -600,6 +626,16 @@ pub fn frame_at(sheet: &SpriteSheet, id: usize, elapsed: u32, shift: i8) -> Opti
             }
         })
         .map(|step| step.frame)
+}
+
+/// The animation shift of an actor standing still: characters' steps last
+/// half their ticks, the rest's their whole.
+fn standing_shift(behavior: u16) -> i8 {
+    if behavior == CHARACTER_BEHAVIOR {
+        PLAYER_ANIMATION_SHIFT
+    } else {
+        0
+    }
 }
 
 /// Frames `sheet`'s animation `id` lasts with ticks shifted by `shift`.
@@ -859,11 +895,16 @@ impl Field {
                 event = Some(found);
             }
         }
+        self.tick_animations();
+        self.sort_actors();
+        event
+    }
+
+    /// Advances every actor's animation by a frame.
+    pub fn tick_animations(&mut self) {
         for actor in &mut self.actors {
             actor.animation = actor.animation.saturating_add(1);
         }
-        self.sort_actors();
-        event
     }
 
     /// Orders the actors front to back as the game orders its sprites
@@ -947,11 +988,7 @@ impl Field {
         };
         let actor = &mut self.actors[index];
         if actor.step.is_none() {
-            actor.animation_shift = if actor.behavior == CHARACTER_BEHAVIOR {
-                PLAYER_ANIMATION_SHIFT
-            } else {
-                0
-            };
+            actor.animation_shift = standing_shift(actor.behavior);
         }
         event
     }
@@ -995,7 +1032,9 @@ impl Field {
                 PLAYER_SPEED
             };
             let player = &mut self.actors[0];
+            let standing = player.animation_shift;
             player.start_step(direction, speed);
+            player.start_shift = Some(standing);
             if running {
                 player.animation_shift = RUN_ANIMATION_SHIFT;
             }
@@ -1280,6 +1319,74 @@ impl Field {
     /// anchor unless the map edge is closer, moved by the cutscene pan.
     #[must_use]
     pub fn camera(&self) -> (usize, usize) {
+        let ((base_x, max_x), (base_y, max_y)) = self.camera_base();
+        let panned = |base: usize, pan: i32, max: usize| {
+            let offset = isize::try_from(pan >> FRACTION_BITS).unwrap_or(0);
+            base.saturating_add_signed(offset).min(max)
+        };
+        (
+            panned(base_x, self.pan.0, max_x),
+            panned(base_y, self.pan.1, max_y),
+        )
+    }
+
+    /// Whether the map is one of the Zoid's, whose cells are twice a room's.
+    #[must_use]
+    pub fn zoid_map(&self) -> bool {
+        cell_pixels(&self.scene) > ROOM_CELL
+    }
+
+    /// How many actors the last frame drew: visible and on the screen.
+    #[must_use]
+    pub fn drawn_actors(&self) -> usize {
+        self.actors
+            .iter()
+            .zip(&self.culled)
+            .filter(|(actor, culled)| actor.visible && !**culled)
+            .count()
+    }
+
+    /// Stands actor `actor` on `cell` (`0x08008B70`). Only the player's own
+    /// steps move the camera, so placing the player leaves it where it is.
+    pub fn place_actor(&mut self, actor: usize, cell: (usize, usize)) {
+        let before = self.camera();
+        let Some(placed) = self.actors.get_mut(actor) else {
+            return;
+        };
+        placed.place(cell);
+        if actor == 0 {
+            let ((base_x, _), (base_y, _)) = self.camera_base();
+            let offset = |camera: usize, base: usize| {
+                (i32::try_from(camera).unwrap_or(0) - i32::try_from(base).unwrap_or(0))
+                    << FRACTION_BITS
+            };
+            self.pan = (offset(before.0, base_x), offset(before.1, base_y));
+        }
+    }
+
+    /// Scrolls the camera by `(dx, dy)` 16.16 pixels (`0x08008324`): a move
+    /// past the map's edge is refused, so the pan stops there and comes back
+    /// from there.
+    pub fn pan_by(&mut self, dx: i32, dy: i32) {
+        let ((base_x, max_x), (base_y, max_y)) = self.camera_base();
+        let bounded = |pan: i32, delta: i32, base: usize, max: usize| {
+            let low = -(i32::try_from(base).unwrap_or(0) << FRACTION_BITS);
+            let high = i32::try_from(max.saturating_sub(base)).unwrap_or(0) << FRACTION_BITS;
+            let moved = pan.saturating_add(delta);
+            if (low..=high).contains(&moved) {
+                moved
+            } else {
+                pan
+            }
+        };
+        self.pan = (
+            bounded(self.pan.0, dx, base_x, max_x),
+            bounded(self.pan.1, dy, base_y, max_y),
+        );
+    }
+
+    /// The camera's scroll before the pan and its largest, for each axis.
+    fn camera_base(&self) -> ((usize, usize), (usize, usize)) {
         let map_width = self.scene.map.width * TILE_SIZE;
         let map_height = self.scene.map.height * TILE_SIZE;
         let max_x = map_width.saturating_sub(SCREEN_WIDTH);
@@ -1288,13 +1395,9 @@ impl Field {
         let scroll = |position: isize, anchor: isize, max: usize| {
             usize::try_from(position - anchor).unwrap_or(0).min(max)
         };
-        let panned = |base: usize, pan: i32, max: usize| {
-            let offset = isize::try_from(pan >> FRACTION_BITS).unwrap_or(0);
-            base.saturating_add_signed(offset).min(max)
-        };
         (
-            panned(scroll(x, CAMERA_ANCHOR.0, max_x), self.pan.0, max_x),
-            panned(scroll(y, CAMERA_ANCHOR.1, max_y), self.pan.1, max_y),
+            (scroll(x, CAMERA_ANCHOR.0, max_x), max_x),
+            (scroll(y, CAMERA_ANCHOR.1, max_y), max_y),
         )
     }
 
@@ -1443,6 +1546,9 @@ fn load_actors(data: &GameData<'_>, objects: &[MapObject]) -> Result<Vec<Actor>,
         player.sheet = Some(data.sprite_sheet(PLAYER_SPRITE)?);
     }
     player.script = None;
+    for actor in &mut actors {
+        actor.animation_shift = standing_shift(actor.behavior);
+    }
     Ok(actors)
 }
 
@@ -1809,6 +1915,22 @@ mod tests {
         assert!(!field.player().walking());
         field.update(Input::default());
         assert_eq!(field.player().position(), (56, 16));
+    }
+
+    #[test]
+    fn a_pan_stops_at_the_map_edge_and_comes_back_from_it() {
+        let mut field = field(20, 15);
+        let step = 2 << FRACTION_BITS;
+        for _ in 0..10 {
+            field.pan_by(0, -step);
+        }
+        assert_eq!(field.camera().1, 0);
+        for _ in 0..50 {
+            field.pan_by(0, step);
+        }
+        assert_eq!(field.camera().1, 80);
+        field.pan_by(0, -step);
+        assert_eq!(field.camera().1, 78);
     }
 
     #[test]

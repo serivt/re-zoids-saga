@@ -78,6 +78,9 @@ const MENU_RETURN_ANIMATION: u32 = 1;
 /// Frames the destination stays black once loaded, and frames the game
 /// stays held once it is bright again.
 const WARP_BLACK_FRAMES: u8 = 10;
+/// The sprites from which a frame has no time left to redraw the windows a
+/// close leaves open (see `start_dialogue`).
+const BUSY_SPRITES: usize = 4;
 /// The world map, whose load takes the original longer than a room's.
 const WORLD_MAP: usize = 1;
 /// The frames the original's load of the world map takes beyond a room's,
@@ -249,6 +252,8 @@ pub struct Game<'rom> {
     aftermath: Option<(usize, Outcome)>,
     /// Whether the party lost and is being taken to its return point.
     defeated: bool,
+    /// Whether the last battle an event fought was lost.
+    battle_lost: bool,
     field: Option<Field>,
     events: Events,
     screen: Screen,
@@ -372,6 +377,7 @@ impl<'rom> Game<'rom> {
             combat: None,
             encounter: None,
             aftermath: None,
+            battle_lost: false,
             defeated: false,
             field: None,
             events: Events::new(),
@@ -699,7 +705,7 @@ impl<'rom> Game<'rom> {
                             &mut self.dialogue,
                             &self.scripts,
                             &mut self.last_runner,
-                            notice,
+                            (notice, false),
                         )?;
                         continuing.phase = ContinuePhase::Notice;
                     }
@@ -887,6 +893,7 @@ impl<'rom> Game<'rom> {
             combat: &mut self.combat,
             encounter: self.encounter,
             aftermath: &mut self.aftermath,
+            battle_lost: self.battle_lost,
             warped: &mut self.warped,
             chest: self.chest,
             party: &mut self.party,
@@ -964,11 +971,10 @@ impl<'rom> Game<'rom> {
             if done {
                 self.active_script = None;
             }
-            let direct = !self.events.dialogue_in_task();
             self.update_events(|events, host| {
                 events.update_hold(done, host);
             })?;
-            if !(done && direct && self.events.in_dialogue()) {
+            if !(done && self.events.in_dialogue()) {
                 return Ok(());
             }
         }
@@ -1027,7 +1033,7 @@ impl<'rom> Game<'rom> {
                     &mut self.dialogue,
                     &self.scripts,
                     &mut self.last_runner,
-                    id,
+                    (id, false),
                 )?),
                 Talk::Event(program) => self.run_handler(Some(program)),
             };
@@ -1048,7 +1054,13 @@ impl<'rom> Game<'rom> {
         if self.follow(event)? {
             return Ok(());
         }
-        self.update_events(|events, host| events.update(host))
+        let talking = self.events.in_dialogue();
+        self.update_events(|events, host| events.update(host))?;
+        // A task's dialogue call runs the script's first step at once.
+        if !talking && self.events.in_dialogue() && self.events.dialogue_in_task() {
+            return self.update_dialogue_hold(input);
+        }
+        Ok(())
     }
 
     /// Follows what the field reported; whether the frame ends there.
@@ -1212,6 +1224,10 @@ impl<'rom> Game<'rom> {
             {
                 self.state.clone_from_slice(combat.state());
             }
+            // The battle hands back as it queues the text system's reset,
+            // which clears whatever its results left on the screen.
+            self.windows.close_window(None);
+            self.battle_lost = outcome == Outcome::Lost;
             self.end_encounter(outcome)?;
         }
         self.update_events(|events, host| {
@@ -1225,6 +1241,10 @@ impl<'rom> Game<'rom> {
     /// the map's song plays again.
     fn end_encounter(&mut self, outcome: Outcome) -> Result<(), GameError> {
         Self::emit(&self.extensions, &Event::CombatEnded(outcome));
+        if self.encounter.is_none() {
+            // A story battle: its event goes on in the dark.
+            return Ok(());
+        }
         self.aftermath = self.encounter.take().map(|enemy| (enemy, outcome));
         if let (Some((enemy, _)), Some(field)) = (self.aftermath, self.field.as_mut()) {
             for index in [0, enemy] {
@@ -1440,6 +1460,7 @@ struct Host<'a, 'rom> {
     combat: &'a mut Option<Box<Combat>>,
     encounter: Option<usize>,
     aftermath: &'a mut Option<(usize, Outcome)>,
+    battle_lost: bool,
     warped: &'a mut Option<usize>,
     chest: Option<(usize, u16)>,
     party: &'a mut Party,
@@ -1476,12 +1497,23 @@ impl EventHost for Host<'_, '_> {
         self.windows.set_flag(flag, set);
     }
 
-    fn start_dialogue(&mut self, index: u16) {
+    fn start_dialogue(&mut self, index: u16, called: bool) {
+        // A task's call redraws the windows a close leaves open within the
+        // close's frame when the frame has time left: on a Zoid map with few
+        // sprites to draw (measured with one to three: the world map, the
+        // factory's door and hall). Rooms and towns (the castle, Arcana)
+        // and a Zoid map with four sprites or more (the hall once Blood's
+        // squad is in) take the frame.
+        let quick = called
+            && self
+                .field
+                .as_ref()
+                .is_some_and(|field| field.zoid_map() && field.drawn_actors() < BUSY_SPRITES);
         if let Err(error) = start_dialogue(
             self.dialogue,
             self.scripts,
             self.last_runner,
-            usize::from(index),
+            (usize::from(index), quick),
         ) {
             self.fail(error);
         }
@@ -1607,6 +1639,13 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn load_map(&mut self, map: usize, player: (usize, usize), objects: u32, count: usize) {
+        let player = if player == crate::event::HERE {
+            self.field
+                .as_ref()
+                .map_or((0, 0), |field| (field.player().column, field.player().row))
+        } else {
+            player
+        };
         self.objects.enter(&self.data, self.state, map, self.frame);
         let loaded = self
             .data
@@ -1717,6 +1756,39 @@ impl EventHost for Host<'_, '_> {
         }
     }
 
+    fn start_story_battle(&mut self, battle: u8) {
+        let Some(battle) = extraction::saga_encounter::story_battle(self.data.bytes(), battle)
+        else {
+            return self.fail(GameError::Text(format!("no story battle {battle}")));
+        };
+        let mut combat = Combat::story(&self.data, self.state.as_mut_slice(), battle);
+        if let Err(error) = combat.update(self.data.bytes(), Input::default(), self.windows) {
+            self.fail(error);
+        }
+        *self.combat = Some(Box::new(combat));
+    }
+
+    fn battle_lost(&self) -> bool {
+        self.battle_lost
+    }
+
+    fn return_point(&self) -> Option<(usize, (usize, usize))> {
+        let index = AreaObjects::area_index(self.state);
+        extraction::saga_encounter::return_point(self.data.bytes(), index)
+            .map(|point| (point.map, point.cell))
+    }
+
+    fn set_sprite(&mut self, actor: usize, sprite: usize) {
+        let sheet = match self.data.sprite_sheet(sprite) {
+            Ok(sheet) => sheet,
+            Err(error) => return self.fail(error),
+        };
+        if let Some(actor) = self.field.as_mut().and_then(|field| field.actor_mut(actor)) {
+            actor.sheet = Some(sheet);
+            actor.play(actor.animation_id & 3);
+        }
+    }
+
     fn warp(&mut self, map: usize, cell: (usize, usize), facing: Option<Direction>) -> usize {
         self.objects.enter(&self.data, self.state, map, self.frame);
         let loaded = Field::load(&self.data, map, cell).and_then(|mut field| {
@@ -1754,13 +1826,14 @@ fn last_context(
 }
 
 /// Starts string `index` of the dialogue table where the last string left
-/// the interpreter.
+/// the interpreter, as a task's call when `called`.
 fn start_dialogue(
     dialogue: &mut ScriptRunner,
     scripts: &[ScriptRunner],
     last: &mut Option<usize>,
-    index: usize,
+    (index, called): (usize, bool),
 ) -> Result<(), ScriptError> {
+    dialogue.set_called(called);
     let context = last_context(dialogue, scripts, *last);
     dialogue.resume(context);
     *last = None;

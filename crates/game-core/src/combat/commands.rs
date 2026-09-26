@@ -166,6 +166,10 @@ pub(super) enum CommandStep {
     SecondPass(usize),
     /// A sacrifice's display runs from the frame after (`0x0802DCB4`).
     Sacrifice(usize),
+    /// 0xBB8: a revival on a side whose back row moved up waits for its
+    /// rows to move back (`0x0802E144`); 0xC1C, the revival's display.
+    Retreat(usize, super::rows::Retreat),
+    Revive(usize),
     /// Frames since the display's end.
     Shown(usize, u32),
     /// 0x2328: issued; 0x238C: given up; then the windows close and the
@@ -218,6 +222,18 @@ fn command_records(rom: &[u8]) -> Vec<[u32; 3]> {
             })
         })
         .collect()
+}
+
+/// The side display `descriptor`'s pass `pass` takes (0 the party's first
+/// when it takes both sides).
+fn display_side(descriptor: u32, pass: usize) -> usize {
+    if descriptor & BOTH_SIDES != 0 {
+        pass.min(1)
+    } else if descriptor & PARTY_SIDE != 0 {
+        PARTY
+    } else {
+        ENEMY
+    }
 }
 
 /// The command task's own state: the deck, the cursor, the command and
@@ -337,6 +353,13 @@ impl Combat {
                 if descriptor & SHOW_SACRIFICE != 0 {
                     return Task::Command(CommandStep::Sacrifice(display));
                 }
+                if descriptor & SHOW_REVIVAL != 0 {
+                    let side = display_side(descriptor, 0);
+                    if self.fight.advanced[side] && self.retreat_rows(side) {
+                        let moving = super::rows::Retreat::Moving(side, 0);
+                        return Task::Command(CommandStep::Retreat(display, moving));
+                    }
+                }
                 self.start_command_display(descriptor, 0);
                 // A display with no unit to show ends at once.
                 if self.fight.display.is_none() && descriptor & BOTH_SIDES == 0 {
@@ -344,10 +367,14 @@ impl Combat {
                 }
                 Task::Command(CommandStep::AwaitShow(display, 0))
             }
-            CommandStep::Sacrifice(display) => {
+            CommandStep::Sacrifice(display) | CommandStep::Revive(display) => {
                 self.start_command_display(self.descriptor(display), 0);
                 Task::Command(CommandStep::AwaitShow(display, 0))
             }
+            CommandStep::Retreat(display, retreat) => match self.step_retreat(retreat) {
+                Some(retreat) => Task::Command(CommandStep::Retreat(display, retreat)),
+                None => Task::Command(CommandStep::Revive(display)),
+            },
             CommandStep::AwaitShow(display, pass) => {
                 if self.fight.display.is_some() {
                     self.step_report();
@@ -830,13 +857,7 @@ impl Combat {
     /// Display `descriptor`'s pass on `side` (0 the party's first when it
     /// takes both sides): its units (`0x0803C1E2`) and its display.
     fn start_command_display(&mut self, descriptor: u32, pass: usize) {
-        let side = if descriptor & BOTH_SIDES != 0 {
-            pass.min(1)
-        } else if descriptor & PARTY_SIDE != 0 {
-            PARTY
-        } else {
-            ENEMY
-        };
+        let side = display_side(descriptor, pass);
         let units = self.command_units(descriptor, side);
         self.fight.blows = units
             .into_iter()
@@ -921,26 +942,27 @@ impl Combat {
         }
     }
 
-    /// The revival (`0x0803C8CC`, `0x0802E40C`): the party's beaten units
-    /// but the player's, or the player, come back with all their hit points
-    /// and energy; the player with its pilot's bonuses twice.
+    /// The revival (`0x0803C8CC`, `0x0802E40C`): the party's formation
+    /// slots whose unit no longer fights but for the player's, or the
+    /// player's slot, fighting or not, have their units built again from
+    /// the game state (`0x0802B5D0`): whole, without their effects, their
+    /// used-up parts back; the player with its pilot's bonuses twice.
     fn revive(&mut self, descriptor: u32) -> Vec<usize> {
         let slots: Vec<usize> = (0..SLOTS)
             .filter(|&slot| {
-                self.sides[PARTY][slot].as_ref().is_some_and(|unit| {
-                    !unit.fighting() && (unit.character == 0) == (descriptor & NOT_PLAYER == 0)
+                self.revived[slot].as_ref().is_some_and(|unit| {
+                    if descriptor & NOT_PLAYER != 0 {
+                        unit.character != 0 && !self.command_fighting(PARTY, slot)
+                    } else {
+                        unit.character == 0
+                    }
                 })
             })
             .collect();
         for &slot in &slots {
-            if let Some(unit) = self.sides[PARTY][slot].as_mut() {
-                unit.traits &= !(attack::DESTROYED | super::units::OUT);
-                unit.hp = unit.max_hp;
-                unit.ep = unit.max_ep;
-            }
-            self.fight.gone[PARTY][slot] = false;
+            let mut unit = self.revived[slot].clone();
             if descriptor & PLAYER != 0
-                && let Some(unit) = self.sides[PARTY][slot].as_mut()
+                && let Some(unit) = unit.as_mut()
             {
                 for value in &mut unit.pilot[1..] {
                     let [low, high, ..] = value.to_le_bytes();
@@ -949,6 +971,9 @@ impl Combat {
                         (*value & !0xFFFF) | i32::from(u16::from_le_bytes(doubled.to_le_bytes()));
                 }
             }
+            self.sides[PARTY][slot] = unit;
+            self.units[PARTY][slot].clone_from(&self.revived_figures[slot]);
+            self.fight.gone[PARTY][slot] = false;
         }
         slots
     }
@@ -1048,6 +1073,49 @@ mod tests {
         let party = combat.sides[PARTY][0].as_ref().map(|unit| unit.status);
         let enemy = combat.sides[ENEMY][0].as_ref().map(|unit| unit.status);
         assert_eq!((party, enemy), (Some(STOPPED), Some(0)));
+    }
+
+    #[test]
+    fn a_revival_first_moves_back_the_rows_that_moved_up() {
+        let mut combat = combat(&[]);
+        let character = |combat: &Combat, slot: usize| {
+            combat.sides[PARTY][slot]
+                .as_ref()
+                .map(|unit| unit.character)
+        };
+        combat.sides[PARTY][0] = Some(unit(1, 1));
+        combat.fight.advanced[PARTY] = true;
+        combat.revived[0] = Some(unit(2, 1));
+        combat.revived[1] = Some(unit(0, 1));
+        combat.revived[3] = Some(unit(1, 1));
+        assert!(combat.retreat_rows(PARTY));
+        assert_eq!(
+            (character(&combat, 0), character(&combat, 3)),
+            (None, Some(1))
+        );
+        let mut retreat = Some(super::super::rows::Retreat::Moving(PARTY, 0));
+        let mut frames = 0;
+        while let Some(step) = retreat {
+            retreat = combat.step_retreat(step);
+            frames += 1;
+        }
+        assert_eq!(frames, 18);
+        assert!(!combat.fight.advanced[PARTY]);
+        let revived = combat.revive(SHOW_REVIVAL | NOT_PLAYER | PARTY_SIDE);
+        assert_eq!(revived, vec![0]);
+        assert_eq!(character(&combat, 0), Some(2));
+    }
+
+    #[test]
+    fn the_players_revival_builds_it_again_even_while_it_fights() {
+        let mut combat = combat(&[0]);
+        let mut whole = unit(0, 1);
+        whole.hp = whole.max_hp;
+        combat.revived[0] = Some(whole);
+        let revived = combat.revive(SHOW_REVIVAL | PLAYER | PARTY_SIDE);
+        assert_eq!(revived, vec![0]);
+        let hp = combat.sides[PARTY][0].as_ref().map(|unit| unit.hp);
+        assert_eq!(hp, Some(100));
     }
 
     #[test]

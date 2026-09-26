@@ -8,7 +8,7 @@
 //! (see `docs/events.md`). Dialogue indices are strings of the `dialogue`
 //! table; actors are object indices (the game's entity index minus one).
 
-use crate::event::{MAP_TASK, Op};
+use crate::event::{HERE, MAP_TASK, Op};
 use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
@@ -839,20 +839,16 @@ const TUNNEL_EXIT: &[Op] = &[Op::IfFlags {
 
 /// Set the first time the Gustav comes out onto the world map.
 pub const WORLD_REACHED: u16 = 0x11E;
-/// Frames between the end of a map's fade in and the port's first run of
-/// the tasks its handler spawned.
-const ARRIVAL_TASK_LAG: u32 = 2;
 /// The door of アーカナの町 on the world map.
 const ARCANA_GATE: (usize, usize) = (14, 7);
 
 /// Out of the labyrinth (task at `0x080103B4`): Regina proposes the
 /// nearby town of Arcana and the Gustav drives off toward it. The last walk
 /// ends against the town's door, which the Gustav takes; the task ends a
-/// second after starting it, while the Gustav still drives. The original
-/// counts the task's first second from the frame the fade in ends, two
-/// frames before the port lets the tasks run.
+/// second after starting it, while the Gustav still drives. The task's
+/// first second counts from the frame the fade in ends.
 const TO_ARCANA: &[Op] = &[
-    Op::Wait(60 - ARRIVAL_TASK_LAG),
+    Op::Wait(60),
     Op::Dialogue(0x44),
     stride(PLAYER, (11, 6)),
     Op::AwaitArrival(PLAYER),
@@ -1218,6 +1214,340 @@ const ARCANA_STREETS: &[Op] = &[Op::IfFlags {
     otherwise: &[],
 }];
 
+/// Set the first time the party comes back to the castle's grounds.
+pub const CASTLE_GROUNDS_REACHED: u16 = 0x129;
+const CASTLE_GROUNDS: usize = 7;
+const CASTLE_GROUNDS_MUSIC: u16 = 4;
+
+/// Back at the castle (task at `0x08010514`): the camera goes up the
+/// grounds for 100 frames and comes back down, and a second later Jack
+/// finds the guard thin (dialogue `0x51`).
+const CASTLE_GROUNDS_VIEW: &[Op] = &[
+    Op::Repeat(100, PAN_UP),
+    Op::Repeat(100, PAN_DOWN),
+    Op::Wait(60),
+    Op::Dialogue(0x51),
+    Op::Wait(60),
+    Op::Control(true),
+    Op::End,
+];
+
+/// The castle grounds' handler (`0x080104A0`): the first time after
+/// Arcana, the castle's song, the Gustav facing up and the view.
+const CASTLE_GROUNDS_ARRIVAL: &[Op] = &[Op::IfFlags {
+    all: &[ARCANA_ARRIVED],
+    none: &[CASTLE_GROUNDS_REACHED],
+    then: &[
+        Op::Flag(CASTLE_GROUNDS_REACHED, true),
+        Op::Music(CASTLE_GROUNDS_MUSIC),
+        Op::Face(PLAYER, Direction::Up),
+        Op::Spawn(MAP_TASK, CASTLE_GROUNDS_VIEW),
+        Op::Control(false),
+    ],
+    otherwise: &[],
+}];
+
+/// Set once Regina has opened the factory's door with the pass code.
+pub const FACTORY_DOOR_OPENED: u16 = 0x12A;
+const FACTORY_DOOR_ROOM: usize = 16;
+/// The door (object 1), which stands off the map once opened.
+const FACTORY_DOOR: usize = 1;
+const FACTORY_DOOR_CELL: (usize, usize) = (4, 0);
+const DOOR_OPENING: usize = 2;
+const DOOR_SOUND: u16 = 0x6D;
+const DRIVE_OFF_SOUND: u16 = 0x82;
+
+/// Before the factory's door (task at `0x080105F0`): on the cell in front
+/// of it the Gustav stops, Regina gives the pass code (dialogue `0x52`),
+/// the door opens with its sound and a second later the Gustav drives
+/// through it at half a pixel a frame, its animation at whole ticks; the
+/// player has the controls back from the next frame, the step going on.
+const FACTORY_DOOR_TASK: &[Op] = &[
+    Op::AwaitPlayer {
+        column: Some(4),
+        rows: Some((1, 1)),
+    },
+    Op::Flag(FACTORY_DOOR_OPENED, true),
+    Op::Control(false),
+    Op::Wait(60),
+    Op::Dialogue(0x52),
+    Op::Wait(60),
+    Op::Shift(FACTORY_DOOR, 0),
+    Op::PlayOnce(FACTORY_DOOR, DOOR_OPENING),
+    Op::Sound(DOOR_SOUND),
+    Op::Wait(60),
+    Op::Sound(DRIVE_OFF_SOUND),
+    through(PLAYER, FACTORY_DOOR_CELL, HALF, 0),
+    Op::Wait(1),
+    Op::Control(true),
+    Op::End,
+];
+
+/// The factory door's room (`0x08010588`): until it is opened the door
+/// stands in its frame, and once Arcana is done the task waits for the
+/// party.
+const FACTORY_DOOR_ARRIVAL: &[Op] = &[Op::IfFlags {
+    all: &[],
+    none: &[FACTORY_DOOR_OPENED],
+    then: &[
+        Op::Place(FACTORY_DOOR, FACTORY_DOOR_CELL),
+        Op::IfFlags {
+            all: &[ARCANA_ARRIVED],
+            none: &[],
+            then: &[Op::Spawn(MAP_TASK, FACTORY_DOOR_TASK)],
+            otherwise: &[],
+        },
+    ],
+    otherwise: &[],
+}];
+
+/// Set once the party has beaten Blood's squad in the factory's hall.
+pub const HALL_BATTLE_WON: u16 = 0x12B;
+/// Set by the party's first crossing of the factory's corridor.
+pub const CORRIDOR_CROSSED: u16 = 0x12C;
+/// Set at the corridor's far end.
+pub const CORRIDOR_END_REACHED: u16 = 0x12D;
+const FACTORY_HALL: usize = 12;
+const FACTORY_HALL_AFTER: usize = 13;
+const FACTORY_CORRIDOR: usize = 17;
+/// The hall with Blood and three soldiers below it (ROM `0x0832AD80`), and
+/// after the battle the Gustav, Blood, two soldiers wrecked and a third
+/// (`0x0832ADD0`).
+const HALL_OBJECTS: u32 = 0x0832_AD80;
+const HALL_AFTER_OBJECTS: u32 = 0x0832_ADD0;
+const BLOOD: usize = 1;
+const LEFT_SOLDIER: usize = 2;
+const RIGHT_SOLDIER: usize = 3;
+const LAST_SOLDIER: usize = 4;
+const HALL_MUSIC: u16 = 9;
+const AFTER_BATTLE_MUSIC: u16 = 4;
+const BLAST_SOUND: u16 = 0x5A;
+const HALL_BATTLE: u8 = 0;
+
+/// A walk through everything at two pixels a frame, a quarter-tick
+/// animation.
+const fn dash(actor: usize, to: (usize, usize)) -> Op {
+    through(actor, to, DOUBLE, 2)
+}
+
+/// A story battle (`0x08008D28`): sound `0x52`, the field darkens to
+/// black, the battle runs and the field is set up again in the dark.
+const fn story_battle(battle: u8) -> [Op; 4] {
+    [
+        Op::Sound(ENCOUNTER_SOUND),
+        Op::FadeOutHoldingAfter(ENCOUNTER_FADE_DELAY),
+        Op::StoryBattle(battle),
+        Op::Freeze(ENCOUNTER_RELOAD_FRAMES),
+    ]
+}
+
+/// Beaten, the party is taken to its return point (the defeat's branch of
+/// `0x08010754`).
+const HALL_LOST: &[Op] = &[
+    Op::WarpHome,
+    Op::Spawn(HELPER_TASK, FADE_IN),
+    Op::Wait(60),
+    Op::End,
+];
+
+/// Blood's squad beaten (the victory's branch of `0x08010754`): the hall
+/// is set up again, the two wrecked soldiers blow up, the camera goes up,
+/// the Gustav drives out the top (dialogues `0x55`, `0x56`), Blood and the
+/// last soldier flee the same way, and the party goes on into the
+/// corridor, whose task follows. The code walks Blood again where it meant
+/// the last soldier; Blood is hidden by then.
+const HALL_WON: &[Op] = &[
+    Op::Flag(HALL_BATTLE_WON, true),
+    Op::LoadMap {
+        map: FACTORY_HALL_AFTER,
+        player: (4, 3),
+        objects: HALL_AFTER_OBJECTS,
+        count: 5,
+    },
+    Op::Wait(1),
+    Op::Place(PLAYER, (4, 2)),
+    Op::Spawn(HELPER_TASK, FADE_IN),
+    Op::Wait(60),
+    Op::Wait(60),
+    Op::Shift(LEFT_SOLDIER, 1),
+    Op::Shift(RIGHT_SOLDIER, 1),
+    Op::PlayOnce(LEFT_SOLDIER, 3),
+    Op::PlayOnce(RIGHT_SOLDIER, 2),
+    Op::AwaitAnimation(LEFT_SOLDIER),
+    Op::PlayOnce(LEFT_SOLDIER, 0),
+    Op::Sprite(LEFT_SOLDIER, crate::field::EXPLOSION_SPRITE),
+    Op::PlayOnce(RIGHT_SOLDIER, 0),
+    Op::Sprite(RIGHT_SOLDIER, crate::field::EXPLOSION_SPRITE),
+    Op::Sound(BLAST_SOUND),
+    Op::AwaitAnimation(LEFT_SOLDIER),
+    Op::Hide(LEFT_SOLDIER),
+    Op::Hide(RIGHT_SOLDIER),
+    Op::Repeat(16, PAN_UP),
+    Op::Wait(60),
+    Op::Dialogue(0x55),
+    Op::Wait(60),
+    dash(PLAYER, (4, 1)),
+    Op::AwaitArrival(PLAYER),
+    dash(PLAYER, (5, 1)),
+    Op::AwaitArrival(PLAYER),
+    dash(PLAYER, (5, 0)),
+    Op::AwaitArrival(PLAYER),
+    Op::Hide(PLAYER),
+    Op::Wait(60),
+    Op::Dialogue(0x56),
+    Op::Wait(60),
+    dash(BLOOD, (4, 5)),
+    Op::AwaitArrival(BLOOD),
+    dash(BLOOD, (2, 5)),
+    Op::AwaitArrival(BLOOD),
+    dash(BLOOD, (2, 1)),
+    Op::AwaitArrival(BLOOD),
+    dash(BLOOD, (5, 1)),
+    Op::Place(LAST_SOLDIER, (2, 5)),
+    dash(LAST_SOLDIER, (2, 1)),
+    Op::AwaitArrival(BLOOD),
+    dash(BLOOD, (5, 0)),
+    Op::AwaitArrival(BLOOD),
+    Op::Hide(BLOOD),
+    Op::AwaitArrival(LAST_SOLDIER),
+    dash(BLOOD, (5, 1)),
+    Op::AwaitArrival(LAST_SOLDIER),
+    dash(BLOOD, (5, 0)),
+    Op::AwaitArrival(LAST_SOLDIER),
+    Op::Hide(LAST_SOLDIER),
+    Op::Spawn(HELPER_TASK, FADE_OUT),
+    Op::Wait(60),
+    Op::Warp {
+        map: FACTORY_CORRIDOR,
+        cell: (4, 6),
+        facing: Some(Direction::Up),
+    },
+    Op::Spawn(HELPER_TASK, FADE_IN),
+    Op::Wait(60),
+    // The task ends setting the field's hook `0x0801112C`, which the next
+    // frame spawns the corridor's task (the one the corridor's handler
+    // spawned during the warp was lost).
+    Op::Wait(1),
+    Op::Call(CORRIDOR_TASK),
+];
+
+/// Blood's ambush in the factory's hall (task at `0x08010754`): on the
+/// cell (4, 1) the Gustav comes down a cell and stops (dialogue `0x53`),
+/// the camera goes down, the hall's song starts and three soldiers and
+/// Blood come in and take their places, the camera comes back up, Blood
+/// speaks (dialogue `0x54`) and story battle 0 follows.
+const HALL_AMBUSH: &[Op] = &[
+    Op::AwaitPlayer {
+        column: Some(4),
+        rows: Some((1, 1)),
+    },
+    stride(PLAYER, (4, 2)),
+    Op::AwaitArrival(PLAYER),
+    Op::Wait(60),
+    Op::Dialogue(0x53),
+    Op::Wait(60),
+    Op::Repeat(64, PAN_DOWN),
+    Op::Music(HALL_MUSIC),
+    Op::Place(LEFT_SOLDIER, (4, 6)),
+    stride(LEFT_SOLDIER, (4, 5)),
+    Op::AwaitArrival(LEFT_SOLDIER),
+    stride(LEFT_SOLDIER, (2, 5)),
+    Op::Place(RIGHT_SOLDIER, (4, 6)),
+    stride(RIGHT_SOLDIER, (4, 5)),
+    Op::AwaitArrival(RIGHT_SOLDIER),
+    stride(RIGHT_SOLDIER, (6, 5)),
+    Op::AwaitArrival(LEFT_SOLDIER),
+    stride(LEFT_SOLDIER, (2, 3)),
+    Op::AwaitArrival(RIGHT_SOLDIER),
+    stride(RIGHT_SOLDIER, (6, 3)),
+    Op::AwaitArrival(LEFT_SOLDIER),
+    stride(LEFT_SOLDIER, (3, 3)),
+    Op::AwaitArrival(RIGHT_SOLDIER),
+    stride(RIGHT_SOLDIER, (5, 3)),
+    Op::Place(BLOOD, (4, 6)),
+    stride(BLOOD, (4, 4)),
+    Op::AwaitArrival(BLOOD),
+    Op::Repeat(16, PAN_UP),
+    Op::Wait(60),
+    Op::Dialogue(0x54),
+    Op::Wait(60),
+    Op::Call(&story_battle(HALL_BATTLE)),
+    Op::Music(AFTER_BATTLE_MUSIC),
+    Op::Wait(1),
+    Op::IfLost {
+        then: HALL_LOST,
+        otherwise: HALL_WON,
+    },
+];
+
+/// The factory's hall (`0x080106C4`, maps 12 and 13): until Blood's squad
+/// is beaten the hall reloads with them waiting below and the ambush
+/// starts.
+const FACTORY_HALL_ARRIVAL: &[Op] = &[Op::IfFlags {
+    all: &[],
+    none: &[HALL_BATTLE_WON],
+    then: &[
+        Op::LoadMap {
+            map: FACTORY_HALL,
+            player: HERE,
+            objects: HALL_OBJECTS,
+            count: 4,
+        },
+        Op::Spawn(MAP_TASK, HALL_AMBUSH),
+        Op::Control(true),
+    ],
+    otherwise: &[],
+}];
+
+/// The factory's corridor (task at `0x0801114C`): the first time the
+/// Gustav drives in to (14, 2) and Regina speaks (dialogue `0x57`); at the
+/// corridor's far end, cell (37, 1), it stops for dialogue `0x59`.
+const CORRIDOR_TASK: &[Op] = &[
+    Op::IfFlags {
+        all: &[],
+        none: &[CORRIDOR_CROSSED],
+        then: &[
+            Op::Flag(CORRIDOR_CROSSED, true),
+            stride(PLAYER, (4, 2)),
+            Op::AwaitArrival(PLAYER),
+            stride(PLAYER, (14, 2)),
+            Op::AwaitArrival(PLAYER),
+            Op::Wait(60),
+            Op::Dialogue(0x57),
+            Op::Wait(60),
+        ],
+        otherwise: &[],
+    },
+    Op::Control(true),
+    Op::IfFlags {
+        all: &[],
+        none: &[CORRIDOR_END_REACHED],
+        then: &[
+            Op::AwaitPlayer {
+                column: Some(37),
+                rows: Some((1, 1)),
+            },
+            Op::Control(false),
+            Op::AwaitArrival(PLAYER),
+            Op::Flag(CORRIDOR_END_REACHED, true),
+            Op::Dialogue(0x59),
+            Op::Wait(60),
+            Op::Control(true),
+        ],
+        otherwise: &[],
+    },
+    Op::End,
+];
+
+/// The factory's corridor (`0x080110C8`): until its two events are done,
+/// the Gustav stands still and the corridor's task starts.
+const FACTORY_CORRIDOR_ARRIVAL: &[Op] = &[Op::IfFlags {
+    all: &[CORRIDOR_CROSSED, CORRIDOR_END_REACHED],
+    none: &[],
+    then: &[],
+    otherwise: &[Op::Spawn(MAP_TASK, CORRIDOR_TASK), Op::Control(false)],
+}];
+
 /// Dr. T in his lab (`0x0802AB08`). In area 1 he first talks with Regina
 /// about the Trinity Liger, then repeats his advice; areas 9 and 10 have a
 /// line each.
@@ -1301,6 +1631,10 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
         4 => Some(FIRST_ROOM),
         10 => Some(LONG_TUNNEL),
         11 => Some(TUNNEL_EXIT),
+        CASTLE_GROUNDS => Some(CASTLE_GROUNDS_ARRIVAL),
+        FACTORY_DOOR_ROOM => Some(FACTORY_DOOR_ARRIVAL),
+        FACTORY_HALL | FACTORY_HALL_AFTER => Some(FACTORY_HALL_ARRIVAL),
+        FACTORY_CORRIDOR => Some(FACTORY_CORRIDOR_ARRIVAL),
         ARCANA => Some(ARCANA_STREETS),
         _ => None,
     }
