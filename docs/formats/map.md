@@ -50,7 +50,7 @@ and a pointer to the list. Each object is 20 bytes:
 
 | Offset | Field |
 |---|---|
-| 0 | Sprite id (see [sprite.md](sprite.md)); 0 is the carrier `mz10` (the player on Zoid maps, the Gustav in the hangar), bit 15 set to show the party's Zoid |
+| 0 | Sprite id (see [sprite.md](sprite.md)); 0 is the carrier `mz10` (the player on Zoid maps, the Gustav in the hangar), bit 15 set to show a party member's Zoid: character `(sprite + 0x68) & 0xFF`, whose unit's Zoid index (unit record `+6`) is the sprite, or when it has no unit `0x39` for `0x8098` and `0x46` for `0x8099`–`0x809B` (`0x080086E0`, `0x08037484`) |
 | 2 | OBJ palette slot the game reserves |
 | 4 | Metatile column the object stands on |
 | 6 | Metatile row |
@@ -67,8 +67,9 @@ emulator. Characters of kind 2 wander the room a step at a time (see
 [../field.md](../field.md)). The first room (map 4) lists the player (`0x98`), `ch56` at
 (35, 2), `ch57` at (39, 16) and the chair `ma07` at (6, 2), which blocks the metatile
 under it: a step right from the start position does nothing. Maps whose record id has
-bit 15 set overlay the list with saved state (moved or hidden characters); that overlay
-is not modeled.
+bit 15 set overlay the list with the states the game-state block keeps for their area
+(the cells objects moved to, the roaming Zoids' formations), rebuilt on entering the
+area; see `crates/game-core/src/objects.rs`.
 
 ## Exit attributes
 

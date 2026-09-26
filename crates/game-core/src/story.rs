@@ -1342,8 +1342,8 @@ const fn story_battle(battle: u8) -> [Op; 4] {
 }
 
 /// Beaten, the party is taken to its return point (the defeat's branch of
-/// `0x08010754`).
-const HALL_LOST: &[Op] = &[
+/// `0x08010754` and `0x08011408`).
+const STORY_BATTLE_LOST: &[Op] = &[
     Op::WarpHome,
     Op::Spawn(HELPER_TASK, FADE_IN),
     Op::Wait(60),
@@ -1475,7 +1475,7 @@ const HALL_AMBUSH: &[Op] = &[
     Op::Music(AFTER_BATTLE_MUSIC),
     Op::Wait(1),
     Op::IfLost {
-        then: HALL_LOST,
+        then: STORY_BATTLE_LOST,
         otherwise: HALL_WON,
     },
 ];
@@ -1546,6 +1546,356 @@ const FACTORY_CORRIDOR_ARRIVAL: &[Op] = &[Op::IfFlags {
     none: &[],
     then: &[],
     otherwise: &[Op::Spawn(MAP_TASK, CORRIDOR_TASK), Op::Control(false)],
+}];
+
+/// Set once the party has beaten Blood at the space-time transfer device.
+pub const DEVICE_BATTLE_WON: u16 = 0x12E;
+const DEVICE_ROOM: usize = 23;
+/// The device room with the party's four Zoids, Blood, his officer and the
+/// device (ROM `0x0832AE34`).
+const DEVICE_ROOM_OBJECTS: u32 = 0x0832_AE34;
+const DEVICE_ROOM_MUSIC: u16 = 9;
+const AFTER_DEVICE_BATTLE_MUSIC: u16 = 0x1E;
+const DEVICE_BATTLE: u8 = 1;
+const FIRST_ZOID: usize = 1;
+const SECOND_ZOID: usize = 2;
+const THIRD_ZOID: usize = 3;
+const FOURTH_ZOID: usize = 4;
+const DEVICE_BLOOD: usize = 5;
+const OFFICER: usize = 6;
+const DEVICE: usize = 7;
+const DEVICE_CELL: (usize, usize) = (4, 1);
+const OFF_THE_MAP: (usize, usize) = (0xFF, 0xFF);
+const DEVICE_RUNNING: usize = 1;
+const DEVICE_IDLE: usize = 0;
+const DEVICE_SOUND: u16 = 0x6F;
+const DEVICE_GONE_SOUND: u16 = 0x44;
+/// The step of the device's run on whose last frame the one on it is gone,
+/// and the one of its second sound.
+const DEVICE_TAKES_STEP: usize = 8;
+const DEVICE_SOUND_STEP: usize = 41;
+const PAN_RIGHT_SLOW: &[Op] = &[Op::Pan(PIXEL, 0), Op::Wait(1)];
+const PAN_UP_SLOW: &[Op] = &[Op::Pan(0, -PIXEL), Op::Wait(1)];
+
+/// The device sends away whoever stands on it (the loops of `0x08011408`):
+/// it runs once with sound `0x6F`, the one on it goes on the last frame of
+/// its eighth step, sound `0x44` plays on its 41st, and it stands again.
+const fn device_takes(actor: usize) -> [Op; 8] {
+    [
+        Op::PlayOnce(DEVICE, DEVICE_RUNNING),
+        Op::Sound(DEVICE_SOUND),
+        Op::AwaitStepEnd(DEVICE, DEVICE_TAKES_STEP),
+        Op::Place(actor, OFF_THE_MAP),
+        Op::AwaitStepEnd(DEVICE, DEVICE_SOUND_STEP),
+        Op::Sound(DEVICE_GONE_SOUND),
+        Op::AwaitAnimation(DEVICE),
+        Op::Animate(DEVICE, DEVICE_IDLE),
+    ]
+}
+
+/// A slow walk through everything onto the device, which sends the walker
+/// away.
+const fn onto_device(actor: usize) -> [Op; 9] {
+    let takes = device_takes(actor);
+    [
+        through(actor, DEVICE_CELL, PIXEL, 1),
+        takes[0],
+        takes[1],
+        takes[2],
+        takes[3],
+        takes[4],
+        takes[5],
+        takes[6],
+        takes[7],
+    ]
+}
+
+const OFFICER_LEAVES: [Op; 9] = onto_device(OFFICER);
+const FIRST_LEAVES: [Op; 9] = onto_device(FIRST_ZOID);
+const SECOND_LEAVES: [Op; 9] = onto_device(SECOND_ZOID);
+const PLAYER_LEAVES: [Op; 9] = onto_device(PLAYER);
+
+/// Blood beaten at the device (the victory's branch of `0x08011408`): he
+/// backs away and is gone (dialogues `0x5C`, `0x5D`), the first two Zoids
+/// take the device, then (dialogue `0x5E`) the other two drive off the
+/// left edge and the Gustav takes the device last; the party lands in
+/// map 48, whose scene the task runs itself (the one the map's handler
+/// spawns during the warp is lost).
+const DEVICE_BATTLE_WON_SCENE: &[Op] = &[
+    Op::Flag(DEVICE_BATTLE_WON, true),
+    Op::Spawn(HELPER_TASK, FADE_IN),
+    Op::Wait(60),
+    Op::Wait(60),
+    Op::Dialogue(0x5C),
+    Op::Wait(60),
+    through(DEVICE_BLOOD, (4, 5), PIXEL, 1),
+    Op::AwaitArrival(DEVICE_BLOOD),
+    Op::Hide(DEVICE_BLOOD),
+    Op::Wait(60),
+    Op::Dialogue(0x5D),
+    Op::Wait(60),
+    stride(FIRST_ZOID, (4, 3)),
+    Op::AwaitArrival(FIRST_ZOID),
+    through(FIRST_ZOID, (4, 2), PIXEL, 1),
+    Op::AwaitArrival(FIRST_ZOID),
+    Op::Call(&FIRST_LEAVES),
+    stride(SECOND_ZOID, (4, 4)),
+    Op::AwaitArrival(SECOND_ZOID),
+    through(SECOND_ZOID, (4, 2), PIXEL, 1),
+    Op::AwaitArrival(SECOND_ZOID),
+    Op::Call(&SECOND_LEAVES),
+    Op::Wait(60),
+    Op::Dialogue(0x5E),
+    Op::Wait(60),
+    Op::Place(PLAYER, (0, 4)),
+    stride(PLAYER, (2, 4)),
+    Op::AwaitArrival(PLAYER),
+    through(THIRD_ZOID, (2, 4), PIXEL, 1),
+    Op::AwaitArrival(THIRD_ZOID),
+    Op::Hide(THIRD_ZOID),
+    through(FOURTH_ZOID, (2, 4), PIXEL, 1),
+    Op::AwaitArrival(FOURTH_ZOID),
+    Op::Hide(FOURTH_ZOID),
+    stride(PLAYER, (4, 4)),
+    Op::AwaitArrival(PLAYER),
+    through(PLAYER, (4, 2), PIXEL, 1),
+    Op::AwaitArrival(PLAYER),
+    Op::Call(&PLAYER_LEAVES),
+    Op::Spawn(HELPER_TASK, FADE_OUT),
+    Op::Wait(60),
+    Op::Warp {
+        map: ARCADIA_THRONE_ROOM,
+        cell: (8, 1),
+        facing: Some(Direction::Up),
+    },
+    Op::Spawn(HELPER_TASK, FADE_IN),
+    Op::Wait(60),
+    Op::Call(THRONE_ROOM_SCENE),
+];
+
+/// Set once the throne room's flashback has been shown.
+pub const THRONE_ROOM_SEEN: u16 = 0x143;
+/// Arcadia castle's throne room, hours before (map 48): the Emperor on the
+/// throne and Fran at the door (ROM `0x086671F8`).
+const ARCADIA_THRONE_ROOM: usize = 48;
+const THRONE_ROOM_OBJECTS: u32 = 0x0866_71F8;
+const FRAN_IN_THE_THRONE_ROOM: usize = 2;
+/// The land past the Red River (map 30), with the party's four Zoids, Fran
+/// and the portal the device opens (ROM `0x08667234`).
+const RED_RIVER: usize = 30;
+const RED_RIVER_OBJECTS: u32 = 0x0866_7234;
+const RED_RIVER_MUSIC: u16 = 0x1E;
+/// The map's own song (its record's `+0x1A`), which comes back once the
+/// party has spoken.
+const RED_RIVER_MAP_MUSIC: u16 = 0x11;
+const FRAN_MUSIC: u16 = 9;
+const FRAN: usize = 5;
+const FRAN_SOUND: u16 = 0x68;
+const PORTAL: usize = 6;
+const PORTAL_CELL: (usize, usize) = (19, 21);
+const PORTAL_OPENING: usize = 2;
+const PORTAL_IDLE: usize = 0;
+const PORTAL_SOUND: u16 = 0x6F;
+const PORTAL_ARRIVAL_SOUND: u16 = 0x49;
+/// The step of the portal's opening on whose last frame the one it brings
+/// is there.
+const PORTAL_BRINGS_STEP: usize = 32;
+/// Sand Colony's field, where the party goes on (map 31).
+const SAND_COLONY_FIELD: usize = 31;
+/// A cell off the map, left of its top row.
+const BESIDE_THE_MAP: (usize, usize) = (0xFF, 0);
+
+/// Map pixels a Zoid map's cell spans.
+const ZOID_CELL: u32 = 32;
+
+/// A glide a cell at a time at `speed` pixels a frame (`0x08011F18`).
+const fn glide(actor: usize, to: (i32, i32), speed: i32, camera: bool) -> Op {
+    Op::Glide {
+        actor,
+        to,
+        speed,
+        frames: ZOID_CELL / speed.unsigned_abs(),
+        camera,
+    }
+}
+
+/// The portal brings actor `actor` (a loop of `0x080129CC`): it opens with
+/// its sound, on the last frame of its 32nd step the one it brings is
+/// shown on it and sent there through everything with sound `0x49`, and
+/// once it has played it stands again.
+const fn portal_brings(actor: usize) -> [Op; 9] {
+    [
+        Op::PlayOnce(PORTAL, PORTAL_OPENING),
+        Op::Sound(PORTAL_SOUND),
+        Op::AwaitStepEnd(PORTAL, PORTAL_BRINGS_STEP),
+        Op::Show(actor),
+        Op::Place(actor, PORTAL_CELL),
+        through(actor, PORTAL_CELL, PIXEL, 1),
+        Op::Sound(PORTAL_ARRIVAL_SOUND),
+        Op::AwaitAnimation(PORTAL),
+        Op::Animate(PORTAL, PORTAL_IDLE),
+    ]
+}
+
+const PORTAL_BRINGS_FIRST: [Op; 9] = portal_brings(FIRST_ZOID);
+const PORTAL_BRINGS_SECOND: [Op; 9] = portal_brings(SECOND_ZOID);
+const PORTAL_BRINGS_PLAYER: [Op; 9] = portal_brings(PLAYER);
+
+/// The throne room's flashback and the party's landing (`0x080129CC`,
+/// which the device room's task calls): Fran reports to the Emperor
+/// (dialogue `0x5F`) and leaves, the Emperor speaks (`0x60`); past the Red
+/// River the portal brings two Zoids and the Gustav (`0x61`), the Zoids
+/// drive off into the Gustav, the map's song comes back and the party
+/// talks (`0x63`) until Fran drives in (`0x64`) and away (`0x65`); the
+/// Gustav drives on and the field darkens, and from the next frame a hook
+/// (`0x08012ED4`) warps to Sand Colony's field and brightens it holding the
+/// game.
+const THRONE_ROOM_SCENE: &[Op] = &[
+    Op::Wait(32),
+    stride(FRAN_IN_THE_THRONE_ROOM, (8, 4)),
+    Op::AwaitArrival(FRAN_IN_THE_THRONE_ROOM),
+    Op::Dialogue(0x5F),
+    stride(FRAN_IN_THE_THRONE_ROOM, (8, 12)),
+    Op::AwaitArrival(FRAN_IN_THE_THRONE_ROOM),
+    Op::Dialogue(0x60),
+    Op::Brightness(0),
+    Op::FadeOut(1),
+    Op::LoadMap {
+        map: RED_RIVER,
+        player: (19, 19),
+        objects: RED_RIVER_OBJECTS,
+        count: 7,
+    },
+    Op::Place(PLAYER, OFF_THE_MAP),
+    Op::RestartMusic(RED_RIVER_MUSIC),
+    Op::Brightness(31),
+    Op::FadeIn(1),
+    Op::Call(&PORTAL_BRINGS_FIRST),
+    glide(FIRST_ZOID, (0x240, 0x260), 1, true),
+    Op::Call(&PORTAL_BRINGS_SECOND),
+    glide(SECOND_ZOID, (0x280, 0x260), 1, true),
+    Op::Call(&PORTAL_BRINGS_PLAYER),
+    glide(PLAYER, (0x260, 0x260), 1, false),
+    Op::AwaitArrival(PLAYER),
+    Op::Dialogue(0x61),
+    glide(FIRST_ZOID, (0x260, 0x260), 1, true),
+    Op::Place(FIRST_ZOID, BESIDE_THE_MAP),
+    glide(SECOND_ZOID, (0x260, 0x260), 1, true),
+    Op::Place(SECOND_ZOID, BESIDE_THE_MAP),
+    Op::Wait(30),
+    Op::RestartMusic(RED_RIVER_MAP_MUSIC),
+    glide(PLAYER, (0x260, 0x200), 1, true),
+    Op::Dialogue(0x63),
+    Op::RestartMusic(FRAN_MUSIC),
+    Op::Place(FRAN, (0x12, 0xC)),
+    Op::Sound(FRAN_SOUND),
+    glide(FRAN, (0x240, 0x200), 4, true),
+    Op::Face(FRAN, Direction::Right),
+    Op::Wait(60),
+    Op::AwaitSoundEnd(FRAN_SOUND),
+    Op::Dialogue(0x64),
+    Op::Face(FRAN, Direction::Up),
+    Op::Wait(60),
+    Op::Sound(FRAN_SOUND),
+    glide(FRAN, (0x240, 0x180), 4, true),
+    Op::Place(FRAN, BESIDE_THE_MAP),
+    Op::AwaitSoundEnd(FRAN_SOUND),
+    Op::Dialogue(0x65),
+    glide(PLAYER, (0x220, 0x1C0), 1, true),
+    Op::Brightness(0),
+    Op::FadeOut(1),
+    Op::Wait(1),
+    Op::Warp {
+        map: SAND_COLONY_FIELD,
+        cell: (22, 29),
+        facing: None,
+    },
+    Op::FadeInHoldingSlow,
+    Op::End,
+];
+
+/// The throne room (`0x08012948`): the first time, the party meets its
+/// guide, the room loads with the Gustav off the map and the flashback's
+/// two, and the player loses the controls. (The handler's own spawn of
+/// the scene is lost in the warp's load; the device room's task runs it.)
+const THRONE_ROOM_ARRIVAL: &[Op] = &[Op::IfFlags {
+    all: &[],
+    none: &[THRONE_ROOM_SEEN],
+    then: &[
+        Op::Meet(1),
+        Op::LoadMap {
+            map: ARCADIA_THRONE_ROOM,
+            player: (8, 2),
+            objects: THRONE_ROOM_OBJECTS,
+            count: 3,
+        },
+        Op::Control(false),
+        Op::Place(PLAYER, (0xFFFF, 0xFFFF)),
+        Op::Flag(THRONE_ROOM_SEEN, true),
+    ],
+    otherwise: &[],
+}];
+
+/// The space-time transfer device (task at `0x08011408`): the party's four
+/// Zoids drive in, the camera moves over to the device, Blood's officer
+/// takes it away (dialogue `0x5A`), Blood comes out to face the party
+/// (`0x5B`) and story battle 1 follows.
+const DEVICE_ROOM_TASK: &[Op] = &[
+    Op::Place(FIRST_ZOID, (0, 3)),
+    stride(FIRST_ZOID, (2, 3)),
+    Op::AwaitArrival(FIRST_ZOID),
+    Op::Place(SECOND_ZOID, (0, 3)),
+    stride(SECOND_ZOID, (1, 3)),
+    Op::AwaitArrival(SECOND_ZOID),
+    stride(SECOND_ZOID, (1, 4)),
+    Op::Place(FOURTH_ZOID, (0, 3)),
+    stride(FOURTH_ZOID, (1, 3)),
+    Op::AwaitArrival(FOURTH_ZOID),
+    stride(FOURTH_ZOID, (1, 2)),
+    Op::Place(THIRD_ZOID, (0, 3)),
+    stride(THIRD_ZOID, (1, 3)),
+    Op::AwaitArrival(THIRD_ZOID),
+    Op::Face(SECOND_ZOID, Direction::Right),
+    Op::Face(FOURTH_ZOID, Direction::Right),
+    Op::Repeat(24, PAN_RIGHT_SLOW),
+    Op::Repeat(32, PAN_UP_SLOW),
+    Op::Call(&OFFICER_LEAVES),
+    Op::Wait(60),
+    Op::Dialogue(0x5A),
+    Op::Wait(60),
+    Op::Place(DEVICE_BLOOD, (4, 5)),
+    stride(DEVICE_BLOOD, (4, 3)),
+    Op::AwaitArrival(DEVICE_BLOOD),
+    Op::Face(DEVICE_BLOOD, Direction::Left),
+    Op::Wait(60),
+    Op::Dialogue(0x5B),
+    Op::Wait(60),
+    Op::Call(&story_battle(DEVICE_BATTLE)),
+    Op::Music(AFTER_DEVICE_BATTLE_MUSIC),
+    Op::Wait(1),
+    Op::IfLost {
+        then: STORY_BATTLE_LOST,
+        otherwise: DEVICE_BATTLE_WON_SCENE,
+    },
+];
+
+/// The device room (`0x080113A8`): until Blood is beaten there, the room
+/// reloads with the party's Zoids waiting outside and the officer at the
+/// device, the hall's song plays and the scene starts.
+const DEVICE_ROOM_ARRIVAL: &[Op] = &[Op::IfFlags {
+    all: &[],
+    none: &[DEVICE_BATTLE_WON],
+    then: &[
+        Op::LoadMap {
+            map: DEVICE_ROOM,
+            player: (0, 3),
+            objects: DEVICE_ROOM_OBJECTS,
+            count: 8,
+        },
+        Op::Music(DEVICE_ROOM_MUSIC),
+        Op::Spawn(MAP_TASK, DEVICE_ROOM_TASK),
+    ],
+    otherwise: &[],
 }];
 
 /// Dr. T in his lab (`0x0802AB08`). In area 1 he first talks with Regina
@@ -1635,6 +1985,8 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
         FACTORY_DOOR_ROOM => Some(FACTORY_DOOR_ARRIVAL),
         FACTORY_HALL | FACTORY_HALL_AFTER => Some(FACTORY_HALL_ARRIVAL),
         FACTORY_CORRIDOR => Some(FACTORY_CORRIDOR_ARRIVAL),
+        DEVICE_ROOM => Some(DEVICE_ROOM_ARRIVAL),
+        ARCADIA_THRONE_ROOM => Some(THRONE_ROOM_ARRIVAL),
         ARCANA => Some(ARCANA_STREETS),
         _ => None,
     }
@@ -1683,6 +2035,11 @@ const ARCANA_ITEM_SHOP: &[Op] = &shop(Shop::Items(1));
 /// Arcana's armaments shop (`0x080090FC`).
 const ARCANA_ARMS_SHOP: &[Op] = &shop(Shop::Arms(1));
 
+/// Dr. T's Zoid lab in Arcana (`0x08009108`): the area's objects are
+/// rebuilt before it opens (`0x08006E4C`) and every unit is repaired once
+/// it closes (`0x08037148`).
+const ARCANA_LAB: &[Op] = &shop(Shop::Lab(1));
+
 /// What an object whose script is the code at `address` runs when spoken
 /// to, for the code this port has transcribed.
 #[must_use]
@@ -1703,6 +2060,7 @@ pub fn talk_handler(address: u32) -> Option<&'static [Op]> {
         0x0800_95B8 => Some(ROMAN_TEACHES),
         0x0800_90F0 => Some(ARCANA_ITEM_SHOP),
         0x0800_90FC => Some(ARCANA_ARMS_SHOP),
+        0x0800_9108 => Some(ARCANA_LAB),
         _ => None,
     }
 }

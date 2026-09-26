@@ -16,7 +16,7 @@
 //! Rev 1) and per-frame traces of the entity table in a reference emulator
 //! (see `docs/events.md`).
 
-use crate::field::{Actor, Command, Direction, Field, Walk};
+use crate::field::{Actor, Command, Direction, Field, PIXEL, Walk};
 use crate::menu::Shop;
 
 /// Task slots, as in the game's kernel.
@@ -27,9 +27,14 @@ const IMMEDIATE: usize = TASKS;
 /// The darkest brightness level; levels above 16 all show black.
 pub const BLACK: u8 = 31;
 const FADE_IN_DELAY: u8 = 1;
+/// Frames a slow fade in holds black before its first brighter level,
+/// the frame of the op included: two, the frame it stores black, and one.
+const SLOW_FADE_IN_DELAY: u8 = 2;
 /// Frames the scene loader holds the game besides one per object: the
 /// decompressions it waits a frame after, and the frame it returns on.
 const LOAD_FRAMES: u32 = 6;
+/// A walking animation's number past its standing one.
+const WALKING: usize = 4;
 
 /// A [`Op::LoadMap`] player cell that keeps the player where it stands
 /// (the handlers that pass the player entity's own cell).
@@ -62,6 +67,29 @@ pub enum Op {
     },
     /// Waits until actor `actor` has arrived (its command is idle again).
     AwaitArrival(usize),
+    /// Moves actor `actor`'s sprite to map pixel `to` a cell at a time
+    /// (`0x08011F18`): a cell along x if it is not there yet, then one
+    /// along y, and so on, `speed` pixels a frame for `frames` frames a
+    /// cell with the walking animation of the way it goes, its cell left as
+    /// it was; the camera follows the player when `camera`. It then stands
+    /// facing its last way.
+    Glide {
+        /// Actor index.
+        actor: usize,
+        /// Target, in map pixels of the sprite's position.
+        to: (i32, i32),
+        /// Pixels a frame.
+        speed: i32,
+        /// Frames a cell takes.
+        frames: u32,
+        /// Whether the camera follows the player.
+        camera: bool,
+    },
+    /// Waits until sound or song `n` has ended (`0x08001A28`).
+    AwaitSoundEnd(u16),
+    /// Waits for the last frame of step `step` of actor `actor`'s
+    /// animation (its entity's `+0x34` word at `0x10000 | 2 × step`).
+    AwaitStepEnd(usize, usize),
     /// Turns actor `actor` (`0x08000BD8`).
     Face(usize, Direction),
     /// Gives the player the buttons back (command 0) or takes them (1).
@@ -92,6 +120,9 @@ pub enum Op {
     End,
     /// Plays a song unless it is already playing (`0x080019B4`).
     Music(u16),
+    /// Stops song `n` and plays it from its start (`0x08001A08`, then
+    /// `0x080019B4` with the last song forgotten).
+    RestartMusic(u16),
     /// Plays a sound effect (`0x080019EC`).
     Sound(u16),
     /// Sets the brightness level and restarts the fade counter
@@ -109,6 +140,10 @@ pub enum Op {
     /// Brightens the screen to normal one level a frame, holding the game
     /// (what follows loading a map).
     FadeInHolding,
+    /// Brightens the screen from black to normal a level every other
+    /// frame, holding the game, after two frames at black (`0x080014A8`
+    /// with 1).
+    FadeInHoldingSlow,
     /// Runs `program` and comes back.
     Call(&'static [Op]),
     /// Runs `program` this many times.
@@ -279,6 +314,8 @@ pub trait EventHost {
     fn after_combat(&mut self);
     /// Plays song `song` unless it is playing.
     fn play_music(&mut self, song: u16);
+    /// Plays song `song` from its start.
+    fn restart_music(&mut self, song: u16);
     /// Plays sound effect `sound`.
     fn play_sound(&mut self, sound: u16);
     /// Loads a map for a cutscene.
@@ -319,6 +356,8 @@ pub trait EventHost {
     fn return_point(&self) -> Option<(usize, (usize, usize))>;
     /// Gives actor `actor` sprite `sprite` (`0x080089A0`).
     fn set_sprite(&mut self, actor: usize, sprite: usize);
+    /// Whether sound or song `n` has ended.
+    fn sound_ended(&self, n: u16) -> bool;
 }
 
 /// A program running in a task, where it is and how many more times it
@@ -345,6 +384,7 @@ struct Task {
     frames: Vec<Frame>,
     wait: u32,
     fade_counter: u16,
+    glide: Option<Glide>,
 }
 
 impl Task {
@@ -353,8 +393,22 @@ impl Task {
             frames: vec![Frame::new(program, 1)],
             wait: 0,
             fade_counter: 0,
+            glide: None,
         }
     }
+}
+
+/// Where an [`Op::Glide`] stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Glide {
+    /// Whether the next check is along y.
+    along_y: bool,
+    /// Frames left of the cell under way, and its step a frame.
+    left: u32,
+    step: (i32, i32),
+    /// The standing animation it plays once there: its own at the start,
+    /// then the one of the way it last went.
+    standing: usize,
 }
 
 /// What holds the game.
@@ -395,6 +449,8 @@ enum Hold {
         /// normal, while the world is still held: after a warp, but not
         /// after a map its handler loaded again.
         tasks_first: bool,
+        /// Whether each level lasts two frames (`0x080014A8` with 1).
+        slow: bool,
     },
 }
 
@@ -542,6 +598,7 @@ impl Events {
             delay,
             settle,
             tasks_first: settle > 0,
+            slow: false,
         });
     }
 
@@ -605,11 +662,13 @@ impl Events {
                 delay,
                 settle,
                 tasks_first,
+                slow,
             }) if delay > 0 => {
                 self.hold = Some(Hold::FadeIn {
                     delay: delay - 1,
                     settle,
                     tasks_first,
+                    slow,
                 });
                 HoldStep::Held
             }
@@ -619,6 +678,7 @@ impl Events {
                         delay: 0,
                         settle: settle - 1,
                         tasks_first: false,
+                        slow: false,
                     });
                     return HoldStep::Held;
                 }
@@ -628,8 +688,9 @@ impl Events {
             Some(Hold::FadeIn {
                 settle,
                 tasks_first,
+                slow,
                 ..
-            }) => self.brighten(settle, tasks_first, host),
+            }) => self.brighten(settle, tasks_first, slow, host),
         }
     }
 
@@ -643,9 +704,23 @@ impl Events {
 
     /// A level of a fade in; on reaching normal brightness, the frames
     /// held after it begin.
-    fn brighten(&mut self, settle: u8, tasks_first: bool, host: &mut impl EventHost) -> HoldStep {
+    fn brighten(
+        &mut self,
+        settle: u8,
+        tasks_first: bool,
+        slow: bool,
+        host: &mut impl EventHost,
+    ) -> HoldStep {
         self.brightness -= 1;
         if self.brightness > 0 {
+            if slow {
+                self.hold = Some(Hold::FadeIn {
+                    delay: 1,
+                    settle,
+                    tasks_first,
+                    slow,
+                });
+            }
             return HoldStep::Held;
         }
         if settle == 0 {
@@ -666,6 +741,7 @@ impl Events {
                 delay: 0,
                 settle: settle - 1,
                 tasks_first: false,
+                slow: false,
             });
         }
         HoldStep::Held
@@ -750,9 +826,12 @@ impl Events {
             | Op::Script(..)
             | Op::AwaitArrival(_)
             | Op::AwaitAnimation(_)
+            | Op::AwaitStepEnd(..)
+            | Op::AwaitSoundEnd(_)
             | Op::AwaitAnyFlag(_)
             | Op::AwaitPlayer { .. }
             | Op::FadeInHolding
+            | Op::FadeInHoldingSlow
             | Op::FadeOutHolding
             | Op::FadeOutHoldingAfter(_)
             | Op::LoadMap { .. }
@@ -771,6 +850,13 @@ impl Events {
                 host.set_sprite(actor, sprite);
                 Flow::Next
             }
+            Op::Glide {
+                actor,
+                to,
+                speed,
+                frames,
+                camera,
+            } => self.glide(slot, actor, (to, speed, frames, camera), host),
             Op::Brightness(level) => {
                 self.brightness = level.min(BLACK);
                 if let Some(task) = self.tasks[slot].as_mut() {
@@ -837,25 +923,12 @@ impl Events {
                 self.hold = Some(Hold::Loading { frames, slot });
                 return Flow::Yield;
             }
-            Op::FadeInHolding => {
+            Op::FadeInHolding
+            | Op::FadeInHoldingSlow
+            | Op::FadeOutHolding
+            | Op::FadeOutHoldingAfter(_) => {
                 self.advance(slot);
-                self.fade_in_holding();
-                return Flow::Yield;
-            }
-            Op::FadeOutHolding => {
-                self.advance(slot);
-                self.hold = Some(Hold::FadeOut {
-                    delay: 0,
-                    resume: Some(slot),
-                });
-                return Flow::Yield;
-            }
-            Op::FadeOutHoldingAfter(delay) => {
-                self.advance(slot);
-                self.hold = Some(Hold::FadeOut {
-                    delay,
-                    resume: Some(slot),
-                });
+                self.hold_fade(slot, op);
                 return Flow::Yield;
             }
             Op::LoadMap {
@@ -886,6 +959,11 @@ impl Events {
                 .field()
                 .and_then(|field| field.actor(actor).map(Actor::animation_done))
                 .unwrap_or(true),
+            Op::AwaitSoundEnd(sound) => host.sound_ended(sound),
+            Op::AwaitStepEnd(actor, step) => host
+                .field()
+                .and_then(|field| field.actor(actor).map(|actor| actor.ends_step(step)))
+                .unwrap_or(true),
             Op::AwaitAnyFlag(flags) => flags.iter().any(|&flag| host.flag(flag)),
             Op::AwaitPlayer { column, rows } => host.field().is_some_and(|field| {
                 let player = field.player();
@@ -903,18 +981,129 @@ impl Events {
         Flow::Yield
     }
 
+    /// Holds the game for a fade op.
+    fn hold_fade(&mut self, slot: usize, op: Op) {
+        match op {
+            Op::FadeInHolding => self.fade_in_holding(),
+            Op::FadeInHoldingSlow => {
+                self.hold = Some(Hold::FadeIn {
+                    delay: SLOW_FADE_IN_DELAY,
+                    settle: 0,
+                    tasks_first: false,
+                    slow: true,
+                });
+            }
+            Op::FadeOutHoldingAfter(delay) => {
+                self.hold = Some(Hold::FadeOut {
+                    delay,
+                    resume: Some(slot),
+                });
+            }
+            _ => {
+                self.hold = Some(Hold::FadeOut {
+                    delay: 0,
+                    resume: Some(slot),
+                });
+            }
+        }
+    }
+
+    /// A frame of an [`Op::Glide`]: a pixel of the cell under way, or the
+    /// checks that start the next cell or end it.
+    fn glide(
+        &mut self,
+        slot: usize,
+        actor: usize,
+        (to, speed, frames, camera): ((i32, i32), i32, u32, bool),
+        host: &mut impl EventHost,
+    ) -> Flow {
+        let Some(field) = host.field() else {
+            return Flow::Next;
+        };
+        let Some(task) = self.tasks[slot].as_mut() else {
+            return Flow::Stop;
+        };
+        let mut glide = task.glide.take().unwrap_or(Glide {
+            along_y: false,
+            left: 0,
+            step: (0, 0),
+            standing: field.actor(actor).map_or(0, |actor| actor.animation_id),
+        });
+        let target = (to.0 * PIXEL, to.1 * PIXEL);
+        let mut checked = 0;
+        while glide.left == 0 {
+            if checked == 2 {
+                if let Some(actor) = field.actor_mut(actor) {
+                    if let Some(facing) = Direction::from_index(glide.standing) {
+                        actor.facing = facing;
+                    }
+                    actor.play(glide.standing);
+                }
+                return Flow::Next;
+            }
+            checked += 1;
+            let Some(position) = field.actor(actor).map(Actor::fixed_position) else {
+                return Flow::Next;
+            };
+            let (at, goal) = if glide.along_y {
+                (position.1, target.1)
+            } else {
+                (position.0, target.0)
+            };
+            let along_y = glide.along_y;
+            glide.along_y = !along_y;
+            if at == goal {
+                continue;
+            }
+            checked = 0;
+            let forward = at < goal;
+            let step = if forward { speed } else { -speed } * PIXEL;
+            let facing = match (along_y, forward) {
+                (false, false) => Direction::Left,
+                (false, true) => Direction::Right,
+                (true, false) => Direction::Up,
+                (true, true) => Direction::Down,
+            };
+            if let Some(actor) = field.actor_mut(actor) {
+                actor.play(facing.index() + WALKING);
+            }
+            glide.standing = facing.index();
+            glide.left = frames;
+            glide.step = if along_y { (0, step) } else { (step, 0) };
+        }
+        if let Some(moving) = field.actor_mut(actor) {
+            moving.move_by(glide.step.0, glide.step.1);
+        }
+        if actor == 0 && camera {
+            field.pan_by(glide.step.0, glide.step.1);
+        }
+        glide.left -= 1;
+        if let Some(task) = self.tasks[slot].as_mut() {
+            task.glide = Some(glide);
+            task.wait = 1;
+        }
+        Flow::Yield
+    }
+
     /// Holds the game while a map loads. A handler the game calls directly
     /// loads within the entry that called it: a map's handler run by a
     /// warp delays the warp's fade in by the load instead.
     fn hold_loading(&mut self, slot: usize, count: usize) -> Flow {
         let frames = LOAD_FRAMES + u32::try_from(count).unwrap_or(u32::MAX);
         if slot == IMMEDIATE {
-            if let Some(Hold::FadeIn { delay, settle, .. }) = self.hold {
+            if let Some(Hold::FadeIn {
+                delay,
+                settle,
+                slow,
+                ..
+            }) = self.hold
+            {
                 let delay = delay.saturating_add(u8::try_from(frames).unwrap_or(u8::MAX));
                 self.hold = Some(Hold::FadeIn {
                     delay,
                     settle,
                     tasks_first: false,
+                    slow,
                 });
             }
             return Flow::Next;
@@ -1004,6 +1193,7 @@ fn apply(op: Op, host: &mut impl EventHost) {
     match op {
         Op::Flag(flag, set) => host.set_flag(flag, set),
         Op::Music(song) => host.play_music(song),
+        Op::RestartMusic(song) => host.restart_music(song),
         Op::Sound(sound) => host.play_sound(sound),
         Op::Meet(group) => host.meet(group),
         Op::LearnCommand(command) => host.learn_command(command),
@@ -1179,6 +1369,10 @@ mod tests {
             self.log.push(format!("music {song}"));
         }
 
+        fn restart_music(&mut self, song: u16) {
+            self.log.push(format!("restart music {song}"));
+        }
+
         fn play_sound(&mut self, sound: u16) {
             self.log.push(format!("sound {sound}"));
         }
@@ -1254,6 +1448,10 @@ mod tests {
 
         fn set_sprite(&mut self, actor: usize, sprite: usize) {
             self.log.push(format!("sprite {actor} {sprite}"));
+        }
+
+        fn sound_ended(&self, _: u16) -> bool {
+            true
         }
     }
 

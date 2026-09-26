@@ -187,6 +187,44 @@ pub fn character_unit(state: &[u8], character: u8) -> Option<u8> {
     (unit != NO_UNIT).then_some(unit)
 }
 
+/// An object sprite of bit 15 names a party member's Zoid.
+const PARTY_ZOID_SPRITE: u16 = 0x8000;
+/// Such a sprite's low byte plus this, wrapped to a byte, is the character.
+const PARTY_ZOID_CHARACTER: u16 = 0x68;
+/// The sprite of the Zoid the character pilots: its unit's Zoid index.
+const UNIT_ZOID_INDEX: usize = 6;
+/// What such an object shows when its character has no unit: the carrier
+/// for the player's, a soldier's Zoid for the others'.
+const PLAYER_ZOID_FALLBACK: (u16, u16) = (0x98, 0x39);
+const MEMBER_ZOID_FALLBACK: (u16, u16) = (0x99, 0x46);
+const MEMBERS_AFTER_PLAYER: u16 = 3;
+
+/// The sprite an object of sprite `sprite` shows (`0x080086E0`): with bit
+/// 15 set, the Zoid of character `(sprite + 0x68) & 0xFF` (`0x08037484`:
+/// its unit's Zoid index), or when it has none `0x39` for `0x8098` and
+/// `0x46` for `0x8099`–`0x809B`; any other sprite as it is.
+#[must_use]
+pub fn object_sprite(state: &[u8], sprite: u16) -> u16 {
+    if sprite & PARTY_ZOID_SPRITE == 0 {
+        return sprite;
+    }
+    let character = u8::try_from(sprite.wrapping_add(PARTY_ZOID_CHARACTER) & 0xFF).unwrap_or(0);
+    let zoid = character_unit(state, character)
+        .and_then(|unit| state.get(unit_at(unit) + UNIT_ZOID_INDEX).copied())
+        .filter(|&zoid| zoid != NO_UNIT);
+    if let Some(zoid) = zoid {
+        return u16::from(zoid);
+    }
+    let plain = sprite & !PARTY_ZOID_SPRITE;
+    if plain == PLAYER_ZOID_FALLBACK.0 {
+        PLAYER_ZOID_FALLBACK.1
+    } else if plain.wrapping_sub(MEMBER_ZOID_FALLBACK.0) < MEMBERS_AFTER_PLAYER {
+        MEMBER_ZOID_FALLBACK.1
+    } else {
+        plain
+    }
+}
+
 /// The formation slots: the unit and its pilot, or `None` for an empty
 /// slot.
 #[must_use]
@@ -423,6 +461,206 @@ pub fn equip(
         }
     }
     Some(())
+}
+
+/// The items the pause menu can use on a Zoid, by id: what each gives
+/// back (`0x08039580` with the routines at ROM `0x683AA8`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemEffect {
+    /// Hit points back, at most the full.
+    Repair(i32),
+    /// Paralysis gone (the unit's bit `0x4000`).
+    Cure,
+    /// Paralysis gone and the hit points full.
+    Restore,
+    /// Half the full hit points back.
+    RepairHalf,
+}
+
+/// Item `item`'s effect on a Zoid, for the items that have one (0–5).
+#[must_use]
+pub const fn item_effect(item: u8) -> Option<ItemEffect> {
+    match item {
+        0 => Some(ItemEffect::Repair(300)),
+        1 => Some(ItemEffect::Repair(150)),
+        2 => Some(ItemEffect::Repair(50)),
+        3 => Some(ItemEffect::Cure),
+        4 => Some(ItemEffect::Restore),
+        5 => Some(ItemEffect::RepairHalf),
+        _ => None,
+    }
+}
+
+const PARALYSED: u16 = 0x4000;
+const UNIT_HP: usize = 8;
+
+/// Uses item `item` on unit `unit` of the game-state block: its hit points
+/// (`+8`, at most the full at `+0x28`) and its paralysis (bit `0x4000` of
+/// the first half-word), as `0x0803967C` and its neighbours do.
+pub fn use_item(state: &mut [u8], unit: u8, item: u8) -> Option<()> {
+    let effect = item_effect(item)?;
+    let at = unit_at(unit);
+    let record = state.get_mut(at..at + UNIT_LEN)?;
+    let signed = |value: u32| i32::from_ne_bytes(value.to_ne_bytes());
+    let full = signed(word(record, UNIT_STATS));
+    let repair = |record: &mut [u8], amount: i32| {
+        let hp = signed(word(record, UNIT_HP)).wrapping_add(amount);
+        let hp = if hp > full { full } else { hp };
+        set_word(record, UNIT_HP, u32::from_ne_bytes(hp.to_ne_bytes()));
+    };
+    match effect {
+        ItemEffect::Repair(amount) => repair(record, amount),
+        ItemEffect::RepairHalf => repair(record, full >> 1),
+        ItemEffect::Cure | ItemEffect::Restore => {
+            let flags = half(record, 0) & !PARALYSED;
+            set_half(record, 0, flags);
+            if effect == ItemEffect::Restore {
+                set_word(record, UNIT_HP, word(record, UNIT_STATS));
+            }
+        }
+    }
+    Some(())
+}
+
+const BROKEN: u16 = 0x800;
+const UNIT_EP: usize = 0xC;
+const ZOID_PRICE: usize = 0x28;
+const REVIVAL_DIVISOR: i32 = 10;
+const ZI_DATA: usize = 0x33E2;
+const ZI_DATA_COUNT: usize = 0x99;
+
+/// The units whose Zoid is broken (`0x080552A8`): every unit slot with a
+/// Zoid (`+6` not 0) whose first half-word has bit `0x800`.
+#[must_use]
+pub fn broken_units(state: &[u8]) -> Vec<u8> {
+    (0..ALL_UNITS)
+        .filter_map(|unit| u8::try_from(unit).ok())
+        .filter(|&unit| {
+            let at = unit_at(unit);
+            state.get(at..at + UNIT_LEN).is_some_and(|record| {
+                half(record, UNIT_ZOID_INDEX) != 0 && half(record, 0) & BROKEN != 0
+            })
+        })
+        .collect()
+}
+
+/// What the lab asks to revive unit `unit` (`0x08055E60`): its Zoid
+/// record's price (`+0x28`) raised by the unit's training in percent, a
+/// tenth of it.
+#[must_use]
+pub fn revival_price(rom: &[u8], state: &[u8], unit: u8) -> Option<u32> {
+    let record = state.get(unit_at(unit)..unit_at(unit) + UNIT_LEN)?;
+    let zoid = zoid_record(rom, half(record, UNIT_ZOID_INDEX))?;
+    let value = i32::from_ne_bytes(word(zoid, ZOID_PRICE).to_ne_bytes());
+    let raised = value.wrapping_add(percent(value, i32::from(record[UNIT_TRAINING])));
+    u32::try_from(raised / REVIVAL_DIVISOR).ok()
+}
+
+/// Revives unit `unit` (`0x08055F0C`): the broken bit cleared, the hit
+/// and energy points full.
+pub fn revive(state: &mut [u8], unit: u8) {
+    let at = unit_at(unit);
+    let Some(record) = state.get_mut(at..at + UNIT_LEN) else {
+        return;
+    };
+    set_half(record, 0, half(record, 0) & !BROKEN);
+    fill(record);
+}
+
+/// Fills the hit and energy points of every unit in use (`0x08037148`,
+/// after the lab): broken ones too, which stay broken.
+pub fn heal_all(state: &mut [u8]) {
+    for unit in (0..ALL_UNITS).filter_map(|unit| u8::try_from(unit).ok()) {
+        let at = unit_at(unit);
+        if let Some(record) = state.get_mut(at..at + UNIT_LEN)
+            && half(record, 2) & IN_USE != 0
+        {
+            fill(record);
+        }
+    }
+}
+
+fn fill(record: &mut [u8]) {
+    set_word(record, UNIT_HP, word(record, UNIT_STATS));
+    set_word(record, UNIT_EP, word(record, UNIT_STATS + 4));
+}
+
+/// Whether a unit in use (`+6` not 0) is short of its full hit or energy
+/// points and not broken: the lab then says it repaired them
+/// (`0x080558E0`).
+#[must_use]
+pub fn any_damaged(state: &[u8]) -> bool {
+    (0..ALL_UNITS)
+        .filter_map(|unit| u8::try_from(unit).ok())
+        .any(|unit| {
+            let at = unit_at(unit);
+            state.get(at..at + UNIT_LEN).is_some_and(|record| {
+                half(record, UNIT_ZOID_INDEX) != 0
+                    && half(record, 0) & BROKEN == 0
+                    && (word(record, UNIT_STATS) > word(record, UNIT_HP)
+                        || word(record, UNIT_STATS + 4) > word(record, UNIT_EP))
+            })
+        })
+}
+
+/// The party member who pilots unit `unit`, if any.
+#[must_use]
+pub fn pilot_of(state: &[u8], unit: u8) -> Option<u8> {
+    members(state)
+        .into_iter()
+        .find(|&character| character_unit(state, character) == Some(unit))
+}
+
+/// How many Zoids' Zi data the party holds (`0x0804E3A0`: bytes `+0x33E2`
+/// on, for the Zoids 0–0x98).
+#[must_use]
+pub fn zi_data_count(state: &[u8]) -> usize {
+    state
+        .get(ZI_DATA..ZI_DATA + ZI_DATA_COUNT)
+        .map_or(0, |bytes| bytes.iter().filter(|&&byte| byte != 0).count())
+}
+
+/// The units the party has (`+0x3304`).
+#[must_use]
+pub fn unit_count(state: &[u8]) -> u8 {
+    state.get(UNIT_COUNT).copied().unwrap_or(0)
+}
+
+/// Puts the formation right after pilots changed Zoids (the lab's way
+/// out, `0x0805581A`): a slot whose pilot has no unit any more, or a
+/// broken one, is emptied; one whose pilot flies another unit now takes
+/// that unit.
+pub fn fix_formation(state: &mut [u8]) {
+    for slot in 0..FORMATION_SLOTS {
+        let at = FORMATION + slot * 4;
+        let (Some(&unit), Some(&character)) = (state.get(at), state.get(at + 1)) else {
+            continue;
+        };
+        if unit == NO_UNIT {
+            continue;
+        }
+        let flown = character_unit(state, character).unwrap_or(NO_UNIT);
+        if flown == unit {
+            continue;
+        }
+        let broken = flown != NO_UNIT
+            && state
+                .get(unit_at(flown)..unit_at(flown) + 2)
+                .is_some_and(|flags| half(flags, 0) & BROKEN != 0);
+        if flown == NO_UNIT || broken {
+            leave_formation(state, slot);
+            continue;
+        }
+        let old = unit_at(unit) + 2;
+        let new = unit_at(flown) + 2;
+        if state.len() >= old.max(new) + 2 {
+            let flags = half(state, old) & !IN_FORMATION;
+            set_half(state, old, flags);
+            let flags = half(state, new) | IN_FORMATION;
+            set_half(state, new, flags);
+            state[at] = flown;
+        }
+    }
 }
 
 fn half(bytes: &[u8], at: usize) -> u16 {
@@ -770,6 +1008,54 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
+    #[test]
+    fn the_lab_revives_broken_units_for_a_tenth_of_their_trained_price() {
+        let mut rom = vec![0u8; ZOID_RECORDS + 4 * ZOID_RECORD_LEN];
+        let price_at = ZOID_RECORDS + 3 * ZOID_RECORD_LEN + ZOID_PRICE;
+        rom[price_at..price_at + 4].copy_from_slice(&6000u32.to_le_bytes());
+        let mut state = vec![0u8; STATE_LEN];
+        for unit in [1u8, 2] {
+            let at = unit_at(unit);
+            set_half(&mut state, at + 2, IN_USE);
+            set_half(&mut state, at + UNIT_ZOID_INDEX, 3);
+            set_word(&mut state, at + UNIT_HP, 10);
+            set_word(&mut state, at + UNIT_STATS, 100);
+            set_word(&mut state, at + UNIT_STATS + 4, 20);
+        }
+        set_half(&mut state, unit_at(2), BROKEN);
+        state[unit_at(2) + UNIT_TRAINING] = 10;
+        assert_eq!(broken_units(&state), [2]);
+        assert_eq!(revival_price(&rom, &state, 2), Some(660));
+        assert!(any_damaged(&state));
+        revive(&mut state, 2);
+        assert!(broken_units(&state).is_empty());
+        assert_eq!(word(&state, unit_at(2) + UNIT_HP), 100);
+        assert_eq!(word(&state, unit_at(2) + UNIT_EP), 20);
+        heal_all(&mut state);
+        assert_eq!(word(&state, unit_at(1) + UNIT_HP), 100);
+        assert!(!any_damaged(&state));
+    }
+
+    #[test]
+    fn items_repair_up_to_the_full_and_cure_paralysis() {
+        let mut state = vec![0u8; UNITS + 3 * UNIT_LEN];
+        let at = unit_at(2);
+        set_word(&mut state, at + UNIT_HP, 40);
+        set_word(&mut state, at + UNIT_STATS, 100);
+        set_half(&mut state, at, 0x4001);
+        use_item(&mut state, 2, 2).expect("in use");
+        assert_eq!(word(&state, at + UNIT_HP), 90);
+        use_item(&mut state, 2, 0).expect("in use");
+        assert_eq!(word(&state, at + UNIT_HP), 100);
+        set_word(&mut state, at + UNIT_HP, 10);
+        use_item(&mut state, 2, 5).expect("in use");
+        assert_eq!(word(&state, at + UNIT_HP), 60);
+        use_item(&mut state, 2, 3).expect("in use");
+        assert_eq!(half(&state, at), 1);
+        use_item(&mut state, 2, 4).expect("in use");
+        assert_eq!(word(&state, at + UNIT_HP), 100);
+        assert!(use_item(&mut state, 2, 6).is_none());
+    }
 
     #[test]
     fn percentages_round_small_values_and_truncate_large_ones() {

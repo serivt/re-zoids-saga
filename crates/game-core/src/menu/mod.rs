@@ -31,6 +31,7 @@ use crate::{ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
 mod equipment;
 pub(crate) mod formation;
+mod items;
 mod parts;
 mod shop;
 
@@ -166,6 +167,9 @@ const SHOP_INTRO_HOLD: u32 = 9;
 /// Frames from B on a shop's choice until the field returns: the shop
 /// darkens as the menu does, then the map is loaded again in the dark.
 const SHOP_CLOSE_FRAMES: u32 = 50;
+/// The same for the lab, whose way out takes three frames more in the
+/// dark (measured in Arcana, with and without the keeper's word).
+const LAB_CLOSE_FRAMES: u32 = 53;
 const SHOP_CLOSE_DELAY: u32 = 3;
 const CLOSE_DELAY: u32 = 4;
 const GUIDE_FADE_TOP: u32 = 31;
@@ -316,6 +320,16 @@ enum Return {
     /// The equipment screen's rack list.
     Racks,
     Character,
+    /// The main list after notice 56, with sound `0x41`.
+    EmptyMain,
+    /// The main menu built again.
+    MainRebuilt,
+    /// The item list after a refusal.
+    ItemList,
+    /// The members after a refusal.
+    ItemTarget,
+    /// Out of the members after an item's message.
+    ItemUsed,
 }
 
 /// What the menu needs after a frame.
@@ -347,6 +361,10 @@ enum MenuState {
     Arms(usize),
     /// The stocked weapons and support parts.
     Stock,
+    /// The party's items.
+    Items,
+    /// The member whose Zoid gets the item.
+    ItemTarget,
     /// The equipment screen's racks.
     Racks,
     /// The parts a rack can take.
@@ -389,12 +407,16 @@ pub struct PauseMenu {
     /// clears or presents, so the wallpaper and the blinking stand still
     /// and keys go unread.
     busy: u32,
+    /// A sound the original plays once the scripts before it are done:
+    /// the frames left, and the sound.
+    delayed_sound: Option<(u32, u8)>,
     party: Party,
     roster: Roster,
     game_state: Vec<u8>,
     stock: Vec<u16>,
     stock_page: usize,
     stock_shown: Option<usize>,
+    item_menu: items::ItemMenu,
     equipment: equipment::Equipment,
     equip_image: Option<(u16, BattleImage)>,
     weapon_sprites: Vec<((u16, usize), Option<EffectSprite>)>,
@@ -475,12 +497,14 @@ impl PauseMenu {
             shop: None,
             shop_intro: None,
             busy: 0,
+            delayed_sound: None,
             party,
             roster,
             game_state: state,
             stock: Vec::new(),
             stock_page: 0,
             stock_shown: None,
+            item_menu: items::ItemMenu::default(),
             equipment: equipment::Equipment::default(),
             equip_image: None,
             weapon_sprites: Vec::new(),
@@ -662,6 +686,15 @@ impl PauseMenu {
         if let Some(step) = self.update_phases(rom, input, windows)? {
             return Ok(step);
         }
+        if let Some((frames, sound)) = self.delayed_sound {
+            let left = frames.saturating_sub(1);
+            if left == 0 {
+                windows.play_sound(sound);
+                self.delayed_sound = None;
+            } else {
+                self.delayed_sound = Some((left, sound));
+            }
+        }
         if self.busy > 0 {
             self.busy -= 1;
             if let Some(session) = self.shop.as_mut() {
@@ -737,6 +770,8 @@ impl PauseMenu {
                 self.return_to(rom, Return::Character, windows)?;
             }
             MenuState::Stock => self.stock_choice(rom, code, choice, windows)?,
+            MenuState::Items => self.item_choice(rom, code, choice, windows)?,
+            MenuState::ItemTarget => self.target_choice(rom, code, choice, windows)?,
             MenuState::Notice(back) => self.return_to(rom, back, windows)?,
             MenuState::Shop(step) => self.shop_choice(rom, step, code, choice, windows)?,
             MenuState::Saving | MenuState::Closing(_) | MenuState::Closed => {}
@@ -759,10 +794,10 @@ impl PauseMenu {
     ) -> Result<Option<MenuStep>, GuideError> {
         if let MenuState::Closing(frames) = self.state {
             self.scroll += 1;
-            let close = if self.shop.is_some() {
-                SHOP_CLOSE_FRAMES
-            } else {
-                CLOSE_FRAMES
+            let close = match self.shop_kind() {
+                Some(Shop::Lab(_)) => LAB_CLOSE_FRAMES,
+                Some(_) => SHOP_CLOSE_FRAMES,
+                None => CLOSE_FRAMES,
             };
             if frames + 1 < close {
                 self.state = MenuState::Closing(frames + 1);
@@ -1178,6 +1213,16 @@ impl PauseMenu {
     }
 
     /// Prints Zoid `zoid`'s name (`0x08032800`).
+    /// Loads the status sprite of Zoid `zoid` when the menu has not yet.
+    fn load_zoid_sprite(&mut self, rom: &[u8], zoid: u16) {
+        if self.zoid_sprites.iter().any(|(known, _)| *known == zoid) {
+            return;
+        }
+        if let Ok(sheet) = GameData::new(rom).zoid_status_sprite(usize::from(zoid)) {
+            self.zoid_sprites.push((zoid, sheet));
+        }
+    }
+
     fn print_zoid_name(
         &mut self,
         rom: &[u8],
@@ -1223,10 +1268,7 @@ impl PauseMenu {
                 self.run_now(rom, SCRIPT_STATUS_WINDOW, windows)?;
                 self.return_to(rom, Return::Status, windows)
             }
-            ITEM_ITEMS => {
-                windows.play_sound(EMPTY_SOUND);
-                self.notice(SCRIPT_NO_ITEMS, Return::Main)
-            }
+            ITEM_ITEMS => self.open_items(rom, windows),
             ITEM_WEAPONS => self.open_equipment(rom, windows),
             ITEM_FORMATION => {
                 let formation = formation::Formation::new(&GameData::new(rom), &self.game_state);
@@ -1327,6 +1369,17 @@ impl PauseMenu {
             Return::Character => return self.reopen_character(rom, windows),
             Return::Weapons => return self.equipment_members_again(rom, windows),
             Return::Racks => return self.racks_again(rom, windows),
+            Return::EmptyMain => {
+                windows.play_sound(EMPTY_BACK_SOUND);
+                return self.return_to(rom, Return::Main, windows);
+            }
+            Return::MainRebuilt => {
+                self.build(rom, windows)?;
+                return self.return_to(rom, Return::Main, windows);
+            }
+            Return::ItemList => return self.items_again(rom, windows),
+            Return::ItemTarget => return self.targets_again(rom, windows),
+            Return::ItemUsed => return self.item_used(rom, windows),
         }
         Ok(())
     }

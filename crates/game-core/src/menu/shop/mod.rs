@@ -24,6 +24,7 @@ use crate::script::ScriptError;
 use crate::windows::ScriptWindows;
 use platform::{Button, Input};
 
+mod lab;
 mod wares;
 
 /// A shop a keeper opens (`0x08008F58`'s kind and number).
@@ -34,6 +35,8 @@ pub enum Shop {
     /// Armaments shop `n` (kind 1): its parts are record `n` at ROM
     /// `0x75BF40`.
     Arms(u8),
+    /// Zoid lab `n` (kind 2): Dr. T's in Arcana is 1.
+    Lab(u8),
 }
 
 /// Which list, question or notice a shop is on.
@@ -59,6 +62,20 @@ pub(super) enum ShopStep {
     ConfirmSell,
     /// The keeper's answer to a sale.
     Sold,
+    /// A notice over the lab's menu.
+    LabNotice,
+    /// The keeper's word on the repair, before the lab closes.
+    LabService,
+    /// The broken Zoids.
+    Broken,
+    /// Whether to pay for a revival.
+    ReviveQuestion,
+    /// The keeper's answer to a revival refused or not paid for.
+    ReviveNotice,
+    /// The keeper's answer to a revival.
+    Revived,
+    /// The notice that no broken Zoid is left.
+    LabRevivalEnd,
 }
 
 /// A shop's scripts, by the index its task passes: the item shops' start
@@ -124,6 +141,29 @@ const ARMS_SCRIPTS: Scripts = Scripts {
     refused: 254,
     wares_window: 255,
     sell_question: 256,
+    how_many_to_buy: 0,
+    how_many_to_sell: 0,
+    quantity_window: 0,
+    count_unit: 0,
+};
+
+/// The lab's: its menu is the only list it shares with the shops.
+const LAB_SCRIPTS: Scripts = Scripts {
+    windows: lab::SCRIPT_LAB_WINDOWS,
+    welcome: lab::SCRIPT_LAB_WELCOME,
+    choice: lab::SCRIPT_LAB_CHOICE,
+    nothing_to_sell: 0,
+    goods_windows: 0,
+    held_label: 0,
+    held_unit: 0,
+    no_money: 0,
+    no_room: 0,
+    subject: 0,
+    buy_question: 0,
+    thanks: 0,
+    refused: 0,
+    wares_window: 0,
+    sell_question: 0,
     how_many_to_buy: 0,
     how_many_to_sell: 0,
     quantity_window: 0,
@@ -197,6 +237,8 @@ pub(super) struct ShopSession {
     selling: bool,
     /// The keys held last frame, for the quantity chooser's presses.
     keys: Input,
+    /// The lab's revival.
+    lab: lab::Lab,
 }
 
 impl ShopSession {
@@ -206,13 +248,13 @@ impl ShopSession {
         self.keys = input;
     }
 
-    /// Frames the welcome and the question overrun: the item shops' longer
-    /// text takes the original past a frame's CPU time, which delays them
-    /// a frame and stands the wallpaper still for it (measured in
-    /// Arcana).
+    /// Frames the welcome and the question overrun: the item shops' and
+    /// the lab's longer text takes the original past a frame's CPU time,
+    /// which delays them a frame and stands the wallpaper still for it
+    /// (measured in Arcana).
     pub(super) fn welcome_lag(&self) -> u32 {
         match self.shop {
-            Shop::Items(_) => 1,
+            Shop::Items(_) | Shop::Lab(_) => 1,
             Shop::Arms(_) => 0,
         }
     }
@@ -221,6 +263,7 @@ impl ShopSession {
         match self.shop {
             Shop::Items(_) => ITEM_SCRIPTS,
             Shop::Arms(_) => ARMS_SCRIPTS,
+            Shop::Lab(_) => LAB_SCRIPTS,
         }
     }
 
@@ -267,6 +310,7 @@ impl PauseMenu {
                 .into_iter()
                 .map(Goods::Part)
                 .collect(),
+            Shop::Lab(_) => Vec::new(),
         };
         let session = ShopSession {
             shop,
@@ -281,6 +325,7 @@ impl PauseMenu {
             most: 1,
             selling: false,
             keys: Input::default(),
+            lab: lab::Lab::default(),
         };
         let scripts = session.scripts();
         self.shop = Some(session);
@@ -301,6 +346,12 @@ impl PauseMenu {
     #[must_use]
     pub fn is_shop(&self) -> bool {
         self.shop.is_some()
+    }
+
+    /// The shop the menu is, when a keeper opened it.
+    #[must_use]
+    pub fn shop_kind(&self) -> Option<Shop> {
+        self.shop.as_ref().map(|session| session.shop)
     }
 
     /// The welcome, once the shop has brightened, and the question of the
@@ -380,6 +431,13 @@ impl PauseMenu {
         let Some(scripts) = self.shop.as_ref().map(ShopSession::scripts) else {
             return Ok(());
         };
+        if self
+            .shop
+            .as_ref()
+            .is_some_and(|session| matches!(session.shop, Shop::Lab(_)))
+        {
+            return self.lab_step(rom, step, code, line, windows);
+        }
         match step {
             ShopStep::Choice if code != CONFIRMED => {
                 windows.play_sound(LEAVE_SOUND);
@@ -410,7 +468,14 @@ impl PauseMenu {
                 self.set_redraw(Redraw::List);
                 self.enter_wares(rom, windows)
             }
-            ShopStep::Quantity => Ok(()),
+            ShopStep::Quantity
+            | ShopStep::LabNotice
+            | ShopStep::LabService
+            | ShopStep::Broken
+            | ShopStep::ReviveQuestion
+            | ShopStep::ReviveNotice
+            | ShopStep::Revived
+            | ShopStep::LabRevivalEnd => Ok(()),
         }
     }
 
@@ -888,7 +953,7 @@ impl PauseMenu {
     }
 
     /// Runs string `index` of the `item` table into `window`.
-    fn run_item_script(
+    pub(super) fn run_item_script(
         &mut self,
         rom: &[u8],
         index: usize,

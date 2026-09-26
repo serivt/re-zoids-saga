@@ -665,7 +665,7 @@ bit 1 (`2`) its side's.
   | Attack (`0x08059D10`) | The weapons aimed at the party |
   | Own (`0x08059D60`) | The weapons for its own side |
   | Support (`0x08059528`) | One time in two, and only then: restoring an ally that lacks four fifths of both its hit points and its energy (`0x0805AC1C`), else repairing one that lacks two thirds of its hit points (`0x0805AA3C`), each on the one that lacks the most, else other support on a group with an ally not under it (`0x0805AE2C`) |
-  | Lethal (`0x08059DB0`) | The groups with a unit the weapon would beat |
+  | Lethal (`0x08059DB0`) | The groups with a unit the weapon would beat: its hit points at most the damage `0x08038B00` estimates for it. That call leaves the damage routine's flags (`0x080345EC`, bit 1 a critical hit) in r3, which still holds the chance to hit just computed: a chance with bit 1 (99, 78…) weighs a critical hit, half the power more and no defense, and one without (77…) a plain one. Blood's Genosaurer at the device thus takes its melee weapon to a Liger it would not beat, far more often than the plain damage says |
   | Most (`0x0805A284`) | The groups with as many units as any |
   | Strongest (`0x08059E78`) | The groups with the unit taking the most damage any takes |
   | Pilot *n* (`0x0805AF68`) | The groups with a unit piloted by character *n* (`U+0x42`) |
@@ -1046,6 +1046,14 @@ frame, from the field's reappearance through the explosion, the darkening, the
 return point's load and its brightening, but for the enemy's own sprite, another
 Zoid. The enemy the port beat had been standing, so its animation ran at half the
 traced one's speed: each step of its explosion is identical to the original's.
+
+Story battle 1 (Blood at the device), from a save in map 21 with the party at level 1
+and A pressed every 20 frames: the original wins 6 of 14 tries with different key
+phases, the port 31 of 60 with different random starts (2 of 60 before the lethal
+estimate weighed critical hits). With the original's random state and frame the
+port draws the same sixteen rolls, and every hit and miss of the original's tries
+follows from them; the tries do not stay in step, as the port's attack scenes end a
+few frames apart from the original's and the rolls mix in the frame counter.
 
 ## Differences
 

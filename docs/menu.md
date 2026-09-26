@@ -16,7 +16,11 @@ task (`0x08037B84`) and of the routines named below, breakpoints on the script r
 the sound call and the loaders while units were taken out, placed and the list paged,
 on the party the labyrinth leaves and on one with more members, a broken unit and an
 L unit; VRAM, OAM and palette dumps, and screenshots of every frame compared with the
-port's. Saving is described in [formats/save.md](formats/save.md). Implemented in
+port's. For アイテム: a read of the menu task's states `0x2000`–`0x2100`
+(`0x08050374`–`0x08050EA4`) and of the routines named below, breakpoints on the script
+runner and the sound call while items set by hand in a save were listed, refused and used,
+and screenshots of every frame compared with the port's. Saving is described in
+[formats/save.md](formats/save.md). Implemented in
 `crates/game-core/src/menu/` (`formation.rs` for the formation screen); data in
 `crates/extraction/src/saga.rs` (`PAUSE_MENU_SCRIPTS`, `PART_NAME_SCRIPTS`,
 `pause_wallpaper`), `crates/extraction/src/saga_party.rs` (`unit_parts`, `part`,
@@ -243,6 +247,48 @@ The part under the cursor is described twice:
   whole part, not rounded) and 特殊効果： over its effects, or the narrow form of a
   support part's description.
 
+## Items
+
+アイテム on the main list builds the list of items 0–6 whose count (game state
+`+0x3305 + id`) is not 0 (`0x0804E2C4`). With none, sound `0x4F`, notice 56
+(アイテムがありません) and `0x41` when it is dismissed. Otherwise windows 3, 2 and 1 close,
+the help line clears and script 50 asks どのアイテムを使いますか？ and opens the description
+(window 1) and the list (window 2), 15×14 each.
+
+- **The list** shows six items a page: the name (`name` 241 + id) padded with spaces to
+  eight cells, × and the count in two digits, zero-padded. L and R turn the page (sound
+  `0x40`) and the arrows show more before or after; a page emptied by the last use goes
+  back one.
+- **The description** of the item under the cursor, printed again when it changes: its
+  name and on the next line its help (`item` 63 + id).
+- **A** on ショックウエイブ (3): sound `0x4F`, notice 54 (戦闘中以外では使用できません), then
+  `0x41`, the question again (51) and the list. On 緊急退避カプセル (6) where the place
+  does not allow it (`0x08009A2C`: the byte at RAM `0x0200756A` is not 1 or flag
+  `0x199` is set) the same with notice 53 (この場所では使用できません). On another item
+  the list and the description close and the members' screen opens. **B** closes them
+  too, then sound `0x3F` and the main menu is built again.
+- **The members' screen** (script 117: window 1 18×14 and window 3 13×14): the help line
+  gives the item's name and を誰が搭乗しているゾイドに使いますか？. Window 3 lists the members six a
+  page; window 1 shows the Zoid of the one under the cursor: its name, then
+  `ＨＰ：` a space and the hit points in four cells (or 戦闘不能, script 87, for a broken
+  unit, flag `0x800`), `／` and the full, `ＥＰ：` and five cells, `／` and the full,
+  `ＳＰ：` four cells, `ＤＦ：` three cells and ％, and the Zoid's picture at (40, 88); or
+  搭乗ゾイドなし, not printed again while the cursor stays on members without one.
+- **A** on a member without a Zoid or with a broken one: sound `0x4F`, 124
+  (キャラクターがゾイドに搭乗していないので使えません) or 126 (ゾイドが戦闘不能状態なので使えません), a
+  key, `0x41`, and the question again. Otherwise sound `0x50`, the effect on the unit
+  (`0x08039580`: the routines at ROM `0x683AA8`, as in battle), one fewer of the item,
+  window 1 printed again, and in the help line the item's name, を使いました, and on the
+  next line the Zoid's name and `item` 70 + id (のＨＰが３００回復した…). After a key,
+  `0x41`, the list is counted again, windows 3 and 1 close and the list comes back where
+  it was, printed again whole; with no items left, notice 56 and the main menu. **B**:
+  sound `0x3F` and the same way back.
+
+The effects work on the unit's record: hit points at `+8`, full at `+0x28`, paralysis bit
+`0x4000` of the first half-word. Items 0–2 give back 300, 150 and 50 points and 5 half
+the full, never past the full; 3 clears the paralysis; 4 clears it and fills the hit
+points. The items are used whatever the Zoid's hit points.
+
 ## Equipment screen
 
 武装 (states `0x3000`–`0x3200` and `0x3FFF` of the menu's state machine) changes the
@@ -442,7 +488,8 @@ the screen does not run the entities' animations.
 
 ## Flows
 
-START on the field opens the menu; B on the main list closes it (see above). ステータス opens the
+START on the field opens the menu; B on the main list closes it (see above). アイテム shows
+the items (see above). ステータス opens the
 status list: 部隊 shows the unit list, which A or B leaves; キャラクター the character
 screen; 武器 the weapons list; Ｚｉデータ and Ｚｉデータ用アイテム print their notices;
 図鑑 asks ゾイド or キャラ and opens that guide (see [guide.md](guide.md)). 武装 shows the
@@ -453,6 +500,16 @@ and answers セーブしました, or セーブを中止しました when it cou
 いいえ or B answer セーブを中止しました.
 
 ## Not modeled yet
+
+緊急退避カプセル: what sets the byte at RAM `0x0200756A` that allows it is not traced, so
+the port always refuses it (notice 53); the original's yes/no question (52, 61), the
+count taken and the menu's exit to the lab (state `0xFFFE`) are not ported.
+
+The item screens were compared on every frame with items set by hand in a save from the
+factory (map 21): the screens, the cursor, the pages, the refusals and the uses match;
+the transitions show their last picture at once (see below), the key wait after an
+item's message starts up to three frames early (the original's printing runs past its
+frames), and the wallpaper drifts after the way back to the main menu.
 
 The ボタン page of the config ends in the まだできてません notice.
 

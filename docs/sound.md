@@ -50,13 +50,17 @@ one 49-entry table (0–24, then 28, 30, 32, 36, 40, 42, 44, 48, 52, 54, 56, 60,
 68, 72, 76, 78, 80, 84, 88, 90, 92, 96; `0xCF` is a tie held until `0xCE`). A note
 reads up to three arguments below `0x80` (key, velocity, extra gate ticks) and repeats
 the previous ones otherwise; a bare argument after a one-byte command repeats that
-command. `0xB1` ends the track, `0xB2` jumps, `0xB3`/`0xB4` call and return from a
+command. Only the commands from `0xBD` on become the running status: after `0xBA`,
+`0xBB` or `0xBC` a bare byte repeats the command before them (sound `0x68` bends on
+past its tempo change). `0xB1` ends the track, `0xB2` jumps, `0xB3`/`0xB4` call and return from a
 pattern, `0xBA`–`0xC8` set priority, tempo, key shift, voice, volume, pan, bend, bend
 range, LFO speed and delay, modulation depth and type, and tune; `0xCD` is an extended
 command the songs here do not use.
 
 Tempo `t` adds `2t` to a counter each frame and every 150 is one tick, so 75 is one
-tick per frame. A note's volume is velocity × track volume / 128 (0–126). Sampled
+tick per frame. A player whose tracks have all ended sets its status's pause bit in
+the next frame; that is when the game sees the song end (`0x08001A28`): sound `0x68`,
+two tracks, takes 140 frames from its start. A note's volume is velocity × track volume / 128 (0–126). Sampled
 envelopes add the attack per frame to 255, multiply by decay/256 down to the sustain,
 and multiply by release/256 after the key goes up; PSG envelopes rise to volume / 8
 (at most 15) and step one level every attack, decay or release frames (0 is at once),

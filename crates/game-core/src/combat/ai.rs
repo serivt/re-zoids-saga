@@ -106,6 +106,9 @@ pub struct Target {
 const RESTORES: u32 = 0x40_0000;
 const REPAIRS: u32 = 0x8_0000;
 const ALWAYS_REACHES: u32 = 0x800;
+/// The bit of the chance to hit the original's estimate takes for the
+/// damage routine's critical flag (see [`reach`]).
+const ESTIMATE_CRITICAL: u16 = 2;
 
 /// What each of `side`/`slot`'s weapons can do (`0x08038B00`): its groups
 /// of slots on the side it aims at, less those out of the battle, each slot
@@ -161,6 +164,10 @@ pub fn candidates(sides: &Sides, side: usize, slot: usize, terrain: u8) -> Vec<C
     found
 }
 
+/// What a weapon does to one target: its chance to hit and the damage the
+/// choice weighs. `0x08038B00` calls the damage routine without its flags,
+/// which then are the chance to hit it has just computed: the damage is a
+/// critical hit's when the chance has bit 1 (99 and 78 do, 77 does not).
 fn reach(
     unit: &BattleUnit,
     stats: &Derived,
@@ -188,7 +195,8 @@ fn reach(
     }
     let target_stats = target.derived();
     let hit = hit_chance((unit, stats), (target, &target_stats), weapon, terrain);
-    let damage = damage((unit, stats), (target, &target_stats), weapon, false);
+    let critical = hit & ESTIMATE_CRITICAL != 0;
+    let damage = damage((unit, stats), (target, &target_stats), weapon, critical);
     Some(Target {
         hit,
         damage,

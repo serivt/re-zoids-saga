@@ -64,6 +64,13 @@ Commands come from the table at ROM `0x08666EA8`:
 
 Flag `0x400` plays the animation once, and flag `0x4` marks that it ended.
 
+`0x08011F18(entity − 1, x, y, cell, speed, camera)` moves along x a cell if the sprite
+is not at `x` yet, then along y, and again, `speed` pixels a frame for `cell / speed`
+frames a cell with the walking animation of that way (7 right, 6 left, 5 down, 4 up),
+the first pixel in the call's own frame; the camera follows the player when `camera`
+is set. Once both axes are there it plays the standing animation of the last way, or
+the one it had. A cell of 16 moves to `x − 8` (not used by the ported scenes).
+
 ## Helpers
 
 | Routine | Use |
@@ -76,6 +83,11 @@ Flag `0x400` plays the animation once, and flag `0x4` marks that it ended.
 | `0x08007188` | Warp to a map |
 | `0x080019B4`, `0x080019EC` | Play a song, play a sound |
 | `0x08008324` | Pan the camera |
+| `0x08011F18` | Move an entity's sprite to a map pixel a cell at a time, its cell left as it was (below) |
+| `0x08001A08` | Stop a song; with `0x02000B54` cleared, `0x080019B4` then plays it from its start |
+| `0x08001A28` | Whether a song has ended: its player's status has the pause bit |
+| `0x08011E08`, `0x08011E24` | Fade out from 0 or in from 31 within the task, a level every two frames |
+| `0x080014A8` | Fade in holding the game: `n` = 1 gives two frames a level, after two at black |
 | `0x08009938` | Flash the screen |
 | `0x08008E4C` | Stage a battle scene (descriptors at ROM `0x0866429C`; see [battle.md](battle.md)) |
 | `0x080378F0` | Learn a deck command: byte `+0x347B + n` of the game state |
@@ -110,6 +122,9 @@ comes in) the redraw fits in the close's own frame, and the window being cleared
 shows half gone on the screen. From the key to the call's return that makes 3 frames
 for a box without a portrait and 4 or 5 for one with a portrait. The port takes the
 map's kind and the sprites drawn as the measure of the time the frame has left.
+
+Continuing a save runs the map's handler with the fade in already set, so a load the
+handler makes holds the fade back, as entering by an exit does.
 
 Script operations cost frames too (see [formats/script-text.md](formats/script-text.md)).
 The original's real costs vary with the CPU time each frame takes. For example, a window
@@ -159,7 +174,9 @@ A map load shows chests whose flag is set already open.
 | Map 16, the factory's door | Until it is opened the door (object 1, off the map otherwise) stands at (4, 0) (handler `0x08010588`). After Arcana its task (`0x080105F0`) waits for the Gustav on (4, 1): it stops, Regina gives the pass code (dialogue `0x52`), a second later the door plays its opening once with sound `0x6D`, a second later sound `0x82` and the Gustav drives through the door's cell at half a pixel a frame, whole animation ticks, the controls back a frame later. The door's cell is the exit to map 13 | `0x12A` |
 | Maps 12 and 13, the factory's hall | Until Blood's squad is beaten, entering reloads map 12 with the player where it stands and Blood and three soldiers below the map (handler `0x080106C4`, list ROM `0x0832AD80`). The task (`0x08010754`) waits for the Gustav on (4, 1), brings it down a cell (dialogue `0x53`), pans the camera down 128 pixels, starts song 9 and walks the soldiers and Blood in two by two to their places; the camera comes back up 32 pixels, Blood speaks (`0x54`) and story battle 0 follows. Lost, the party goes to its return point. Won: song 4, the hall reloads as map 13 with the Gustav on (4, 3) and the four others (`0x0832ADD0`), the Gustav is placed on (4, 2) without the camera following, and after the fade in and two seconds the two wrecked soldiers play their wreck and explode (sprite `0xFD` through `0x080089A0`, sound `0x5A`); the camera goes up, dialogue `0x55`, the Gustav dashes out the top (two pixels a frame) and hides, `0x56`, Blood and the last soldier dash out the same way (the code moves Blood again where it meant the soldier), the screen darkens and the party warps to map 17 at (4, 6) | `0x12B` |
 | Map 17, the factory's corridor | Its handler (`0x080110C8`) spawns the corridor's task (`0x0801114C`) until both its flags are set, as the hall's warp does: the first time the Gustav drives in to (14, 2) (dialogue `0x57`); at (37, 1) it stops for dialogue `0x59`. The warp runs the handler within the hall's task, and the task the handler spawns into that task's own slot is lost: the hall's task goes on after the load, waits a second after the fade in starts and ends setting the field's hook `0x0801112C`, which spawns the corridor's task the next frame. After the first part the task clears the field's bit 2 (`0x02000008`), which the handler set, and roaming enemies can meet the party again | `0x12C`, `0x12D` |
-| Map 27, Dr. T's lab | Dr. T (`0x0802AB08`) talks with Regina about rebuilding the Trinity Liger (dialogue `0x2C1`), later `0x2C2`; the assistant on the left teaches データ収集, deck command 0 | `0x13F` |
+| Map 23, the space-time transfer device | Until Blood is beaten there, entering reloads the room with the party's four Zoids outside, Blood, his officer and the device (handler `0x080113A8`, list ROM `0x0832AE34`) and plays song 9. The task (`0x08011408`) drives the four Zoids in, moves the camera a pixel a frame 24 right and 32 up, and the officer takes the device: it runs once (animation 1, sound `0x6F`), the one on it leaves the map on the last frame of its 8th step and sound `0x44` plays on its 41st, then it stands again. Dialogue `0x5A`, Blood comes out (`0x5B`) and story battle 1 follows (song `0x1E` after it). Won: the fade in, `0x5C`, Blood backs off and is gone, `0x5D`, two Zoids take the device, `0x5E`, the other two drive off to the left, the Gustav takes the device last, and the party warps to map 48 (8, 1); the task then runs map 48's scene itself (`0x080129CC`), the one the map's handler spawns during the warp being lost | `0x12E` |
+| Map 48, Arcadia castle's throne room | The flashback the device room's task runs once the party has warped in (`0x080129CC`; the map's handler `0x08012948` meets the guide's list 1, loads the room with the list at ROM `0x086671F8` and the Gustav off the map, and sets the flag). 32 frames later Fran walks up to the Emperor (dialogue `0x5F`) and back (`0x60`); the task fades out, loads map 30, past the Red River (list ROM `0x08667234`: the four Zoids, Fran and the portal), restarts song `0x1E` and fades in. The portal opens three times (animation 2, sound `0x6F`) and on the last frame of its 32nd step brings a Zoid, a second and the Gustav (sound `0x49`), each driving off a cell at a time (`0x08011F18`); dialogue `0x61`, the two Zoids drive into the Gustav, 30 frames, the map's song `0x11` again, the Gustav drives up two cells and `0x63`; song 9, Fran drives in at four pixels a frame with sound `0x68`, a second and the sound's end, `0x64`, he turns, a second, and drives off with the sound again; at its end `0x65`, the Gustav drives on, the task fades out and a hook (`0x08012ED4`) warps to map 31 (22, 29), Sand Colony, with the facing kept, and fades in holding the game (`0x080014A8` with 1) | `0x143` |
+| Map 27, Dr. T's lab | Dr. T (`0x0802AB08`) talks with Regina about rebuilding the Trinity Liger (dialogue `0x2C1`), later `0x2C2`; the assistant on the left teaches データ収集, deck command 0; the keeper at (5, 5) opens Zoid lab 1 (`0x08009108`, see [shop.md](shop.md)) | `0x13F` |
 
 The map record's byte `+8` names the map's song (11 for the castle, 22 for the
 labyrinth). On maps with 32-pixel cells (the Zoid maps) the player is the carrier `mz10`
@@ -218,6 +235,12 @@ formation.
 
 ## Checked against the original
 
+- The whole of chapter 1 plays in the port from a new game: a driver in the research
+  notes presses A through the scenes and battles, walks to the next goal over the maps'
+  exits, heals at the lab after a loss and fights roaming Zoids before Blood. It sets
+  every flag of the chapter (`0x11E`–`0x12E`, `0x143`) and reaches Sand Colony (map 31)
+  after 230464 frames and 19 battles; each scene on the way was compared with the
+  original on its own (below).
 - The opening matches frame by frame. A known one-frame drift appears after dialogue 41.
 - The title, continuing and the notices match frame by frame.
 - Map exits match frame by frame.
@@ -247,6 +270,14 @@ formation.
   (see [field.md](field.md), Drawing): they are near the top of the screen. The last
   close of dialogue `0x52` shows one frame differently (the original's half-cleared
   window).
+- The space-time transfer device, entered from map 21: every event falls two frames
+  after the original's, the black after the exit being longer in the port.
+- The space-time transfer device, entered by continuing a save in map 23: every event
+  falls a frame after the original's before the battle and on its frame after it (the
+  battle's enemy set to 1 hit point in a copy of the ROM for both); the frames differ
+  in the device's idle animation, where sprites overlap at the screen's left edge, and
+  after some page turns of the long dialogue `0x5B`, whose portraits take the original
+  a frame longer with this many sprites.
 - The factory's hall: every event of the ambush falls on the original's frame
   (dialogue `0x53` at the same frame, song 9, dialogue `0x54`, the battle's sound),
   and 1223 of its 1310 frames are identical; the others are a typewriter's character
@@ -256,6 +287,14 @@ formation.
   `0x55` and the camera come a frame late, the reload of map 13 taking 11 frames
   where the original's took 10; dialogue `0x56` and the dash out match, and the
   corridor's dialogue `0x57` falls on the original's frame.
+- The throne room's flashback and the landing past the Red River, continuing a save in
+  map 21 (with the enemy of story battle 1 set to 1 hit point in both): from map 48's
+  load every interval between events not bounded by a key falls on the original's
+  (the portal's sounds 123 and 114 frames apart, dialogue `0x61` 82 frames after the
+  last, song `0x11` 96 frames before `0x63`, sound `0x68` 140 frames before `0x64` and
+  before `0x65`), and the last fade out and the fade in into Sand Colony take their 60
+  frames each. The black between them is 22 frames in the port and 35 in the
+  original: the load of map 31 is longer (see below).
 - The black after an exit's load depends on the scene. The port uses one length for
   every room: leaving Arcana's bar for the streets, the original stays black six frames
   longer, and going up to the room above, two frames shorter.
@@ -295,16 +334,17 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
 | 16, `mq0163` | `0x08010588` | The factory's door (above) | `0x12A` |
 | 12 and 13, `mq0160` | `0x080106C4` | Blood's ambush and story battle 0 (above) | `0x12B` |
 | 17, `mq0164` | `0x080110C8` | The corridor (above) | `0x12C`, `0x12D` |
-| 23, `mq0192` | `0x080113A8` | Dialogues `0x5A`–`0x65`, story battle 1, warps to maps 31 (area 2) and 48 | `0x12E` |
-| 27, Dr. T's lab | `0x08009108` | The Zoid lab (kind 2 of the shops) | |
+| 23, `mq0192` | `0x080113A8` | The space-time transfer device and story battle 1 (above); its task warps to map 48 and runs that map's scene | `0x12E` |
+| 48, `md0288` | `0x08012948` | The throne room's flashback and the landing past the Red River (map 30) (above); the chapter ends with the warp to map 31, Sand Colony, in area 2 | `0x143` |
+| 27, Dr. T's lab | `0x08009108` | The Zoid lab (kind 2 of the shops): revival, and the repair when it closes (see [shop.md](shop.md)) | |
 
 ## Not modeled yet
 
 - The fighting in battles, and the story battles (`0x08008D28`); the roaming enemies,
   meeting them, the battle screen's opening, its menu and retreating are described in
   [combat.md](combat.md).
-- Dr. T's Zoid lab (`0x08009108`, kind 2 of the shops, `0x080090C8`) and the other
-  towns' shops: speaking to their keepers does nothing yet (see [shop.md](shop.md)).
+- The Zoid lab's development, pilot change and sale, and the other towns' shops (see
+  [shop.md](shop.md)).
 - Dr. T in the other areas: whether the party has the Zoids `0x90` or `0x8F`, and the
   game-state byte `+0x3320` (flags `0x140`, `0x141`).
 - The field's per-frame hooks (RAM `0x02000000`, `0x02000004`), which the world map's
@@ -315,5 +355,11 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
   arrival sets its own and puts the field's back when it ends; after it, Arcana's
   handler (`0x0800BEE4`) only sets them.
 - The CPU-time variance of script operations.
-- The object-state overlay.
+- The door of map 20 (object `0x117`, an object state, on its exit to map 23): what
+  takes it away. The chapter's way into map 23 does not need it: the corridor (17)
+  leads through maps 18, 19 and 21 to map 23's left entrance, (0, 3), where its
+  handler stands the player; map 20 is the factory's other door, from the world map.
+- Sand Colony's arrival (map 31, area 2): in the original the Gustav's party walks in
+  and dialogue `0x66` follows, and a townsman stands elsewhere; the port lands the
+  party there with the controls.
 - A one-frame drift of the backdrop.

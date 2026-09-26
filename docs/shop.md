@@ -4,8 +4,9 @@ Source of knowledge: own reading of Zoids Saga (Japan, Rev 1) at the addresses n
 below, plus breakpoints on the script runner, the sound call, the task spawner and
 the warp, per-frame logs of the fade level and the wallpaper's scroll, and screenshots
 of every frame in a reference emulator while buying and selling in Arcana's item shop
-(map 25) and armaments shop (map 26). The port's frames were compared with the
-original's on the same inputs. Implemented in `crates/game-core/src/menu/shop.rs` (the
+(map 25) and armaments shop (map 26), and for the Zoid lab (map 27) the same with saves
+changed by hand (a broken unit, damaged units, money). The port's frames were compared
+with the original's on the same inputs. Implemented in `crates/game-core/src/menu/shop.rs` (the
 screens, as a mode of the pause menu), `crates/extraction/src/saga_shop.rs` (goods,
 prices and counts), and `crates/game-core/src/story.rs` (the keepers).
 
@@ -164,7 +165,53 @@ The task is a state machine. Its states are shown in parentheses.
 - **From the sound of B on the choice.** The fade level rises a level a frame from the
   third frame, and the field shows on the 51st.
 
+## Zoid lab
+
+The lab's keeper (`0x080090C8` with the number, `0x08009108` for Dr. T's lab in Arcana)
+first rebuilds the area's object states (`0x08006E4C` with the area, as entering an area
+does; see [events.md](events.md)), then opens the lab through `0x08008F58` as the shops
+open, and once it has closed and the field is back fills the hit and energy points of
+every unit in use (`0x08037148`), broken ones too, which stay broken.
+
+The lab's task (`0x08055418`) builds its screen from pause-menu script 257 (the help
+line, 研究所 in window 2 11×4 and the menu in window 3 11×10), the money box as the
+shops', the welcome 258 and the question 259, whose menu offers ゾイドの復活, ゾイド開発,
+ゾイド乗せ換え and ゾイドを売る. The welcome overruns its frame as the item shops' does.
+
+- **ゾイドの復活** lists the broken units (`0x080552A8`: every unit slot with a Zoid whose
+  first half-word has bit `0x800`). With none, sound `0x4F`, notice 262 (戦闘不能ゾイドは
+  いないみたいですよ) and `0x41`. Otherwise windows 3 and 2 close and script 328 opens the
+  Zoid's window (2, 16×14) and the list (3, 15×10, four Zoids a page). Each pass prints
+  329 (どのゾイドを復活させたいのですか？ スタートボタン：ゾイド詳細表示) in the help line;
+  when the Zoid under the cursor changes, window 2 is cleared and shows its name, 300 and
+  the full hit points in four cells, 301 and the full energy points in three, 304
+  搭乗者： and the pilot (or 305 なし), and its picture at (40, 88). The menu is script 36.
+  A asks the price: the Zoid's name, 330 の復活には, the price left-aligned, 331 Ｇ必要ですね
+  復活させますか？ and the yes/no menu. The price is the Zoid record's `+0x28` raised by
+  the unit's training in percent, a tenth of it (660 for the Shield Liger untrained).
+  はい with too little money gives 334 (お金が足りないみたいですね); with enough, the broken
+  bit goes, the hit and energy points are full, the money is taken and printed again,
+  332 (わかりました カンペキな状態にしておきますからね), `0x41`, and the list again, or with
+  none left 262 and the lab's menu. いいえ gives 333 (それでバトルに支障はきたさないのですか？);
+  B on the question sound `0x3F` and the list. B on the list: `0x3F`, windows 3 and 2
+  close and script 257 builds the lab's screen again.
+- **ゾイド開発** with no Zi data (`0x0804E3A0`: the bytes `+0x33E2` for the Zoids 0–0x98)
+  gives notice 260 (Ｚｉデータを持ってないと開発できませんよ), and with more than 0x98 units
+  261 (これ以上ゾイドを持てないみたいですね), each with `0x4F` and `0x41`.
+- **B** on the menu: when the player or one of the three warriors (characters 0–3) has no
+  unit, sound `0x4F` and おっと。 (263) followed by あなたは (264) when only the player has
+  none, あなたと三獣士たちは (265, 266) when the player and a warrior have none, or
+  三獣士たちは (266), then 267 (戦わなくていいんですか？…) and the menu again. Otherwise sound
+  `0x3F`; the formation is put right (a slot whose pilot now flies another unit takes it,
+  one whose pilot has none or a broken one is emptied); when a unit not broken is short
+  of its full hit or energy points the keeper says 271 (あ、ゾイドの回復はサービスでやって
+  おきましたよ); and the lab closes as a shop does, black three frames longer.
+
 ## Checked against the original
+
+- Dr. T's lab: every frame from the talk to the welcome, through a revival refused for
+  money, one paid for, the keeper's word on the repair and the way out, matches once
+  aligned, but for the transitions and the wallpaper visible between the windows.
 
 - Opening an item shop and leaving it matches pixel for pixel from the talk to the
   field's return. So does opening the armaments shop.
@@ -179,4 +226,6 @@ The task is a state machine. Its states are shown in parentheses.
 - The original drops a frame here and there while it prints (one to three when a list
   or a question opens), which stands the wallpaper still. The port models only the
   welcome's, so after the first list its wallpaper runs a few pixels ahead.
-- The Zoid lab (kind 2) and the other towns' shops are not implemented.
+- The Zoid lab's ゾイド開発 (with Zi data), ゾイド乗せ換え and ゾイドを売る, and START on the
+  revival's list (the Zoid's details), are not implemented: the port answers with the
+  pause menu's まだできてません. The other towns' shops are not implemented either.

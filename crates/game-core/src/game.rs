@@ -757,6 +757,10 @@ impl<'rom> Game<'rom> {
         if !self.windows.flag(OPENING_SEEN_FLAG) && map == FIRST_ROOM_MAP {
             return self.start_new_game_room();
         }
+        // The fade in is set before the map's handler runs, so a load the
+        // handler makes holds it back.
+        self.events.set_brightness(BLACK);
+        self.events.fade_in_holding();
         self.enter_map(map, cell)?;
         let song = Some(usize::from(progress.song))
             .filter(|song| *song != 0)
@@ -766,8 +770,6 @@ impl<'rom> Game<'rom> {
             Self::emit(&self.extensions, &Event::SoundRequested(song));
             self.sound.play(song)?;
         }
-        self.events.set_brightness(BLACK);
-        self.events.fade_in_holding();
         self.screen = Screen::Field;
         Ok(())
     }
@@ -861,6 +863,7 @@ impl<'rom> Game<'rom> {
             .enter(&self.data, &mut self.state, map, frame_counter(self.frame));
         let mut field = Field::load(&self.data, map, cell)?;
         AreaObjects::place(&self.data, &self.state, map, &mut field)?;
+        field.show_party_zoids(&self.data, &self.state)?;
         show_opened_chests(&mut field, &self.windows);
         self.field = Some(field);
         Self::emit(&self.extensions, &Event::RoomEntered { map, cell });
@@ -950,6 +953,9 @@ impl<'rom> Game<'rom> {
             if let Some(shop) = self.shop.take() {
                 self.party = shop.party();
                 self.state.clone_from_slice(shop.state());
+                if matches!(shop.shop_kind(), Some(Shop::Lab(_))) {
+                    extraction::saga_party::heal_all(&mut self.state);
+                }
                 Self::emit(&self.extensions, &Event::ShopClosed);
             }
         }
@@ -1156,6 +1162,7 @@ impl<'rom> Game<'rom> {
         );
         let warp = field.warp(&self.data, exit)?;
         AreaObjects::place(&self.data, &self.state, destination, field)?;
+        field.show_party_zoids(&self.data, &self.state)?;
         show_opened_chests(field, &self.windows);
         let arrived = field.map();
         Self::emit(
@@ -1277,6 +1284,7 @@ impl<'rom> Game<'rom> {
         );
         let mut field = Field::load(&self.data, point.map, point.cell)?;
         AreaObjects::place(&self.data, &self.state, point.map, &mut field)?;
+        field.show_party_zoids(&self.data, &self.state)?;
         field.player_mut().face(Direction::Up);
         show_opened_chests(&mut field, &self.windows);
         self.field = Some(field);
@@ -1527,6 +1535,10 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn start_shop(&mut self, shop: Shop) {
+        if matches!(shop, Shop::Lab(_)) {
+            self.objects
+                .rebuild_current(&self.data, self.state, self.frame);
+        }
         let rom = self.data.bytes();
         let menu = PauseMenu::new(&self.data, self.party.clone(), self.state.clone());
         match menu {
@@ -1630,6 +1642,14 @@ impl EventHost for Host<'_, '_> {
         }
     }
 
+    fn restart_music(&mut self, song: u16) {
+        let song = usize::from(song);
+        Game::emit(self.extensions, &Event::SoundRequested(song));
+        if let Err(error) = self.sound.play(song) {
+            self.fail(error);
+        }
+    }
+
     fn play_sound(&mut self, sound: u16) {
         let sound = usize::from(sound);
         Game::emit(self.extensions, &Event::SoundRequested(sound));
@@ -1651,7 +1671,11 @@ impl EventHost for Host<'_, '_> {
             .data
             .objects_at(objects, count)
             .map_err(FieldError::from)
-            .and_then(|objects| Field::load_with(&self.data, map, player, &objects));
+            .and_then(|objects| Field::load_with(&self.data, map, player, &objects))
+            .and_then(|mut field| {
+                field.show_party_zoids(&self.data, self.state)?;
+                Ok(field)
+            });
         match loaded {
             Ok(field) => *self.field = Some(field),
             Err(error) => self.fail(error),
@@ -1778,6 +1802,10 @@ impl EventHost for Host<'_, '_> {
             .map(|point| (point.map, point.cell))
     }
 
+    fn sound_ended(&self, n: u16) -> bool {
+        self.sound.song_ended(usize::from(n))
+    }
+
     fn set_sprite(&mut self, actor: usize, sprite: usize) {
         let sheet = match self.data.sprite_sheet(sprite) {
             Ok(sheet) => sheet,
@@ -1792,7 +1820,9 @@ impl EventHost for Host<'_, '_> {
     fn warp(&mut self, map: usize, cell: (usize, usize), facing: Option<Direction>) -> usize {
         self.objects.enter(&self.data, self.state, map, self.frame);
         let loaded = Field::load(&self.data, map, cell).and_then(|mut field| {
-            AreaObjects::place(&self.data, self.state, map, &mut field).map(|()| field)
+            AreaObjects::place(&self.data, self.state, map, &mut field)?;
+            field.show_party_zoids(&self.data, self.state)?;
+            Ok(field)
         });
         match loaded {
             Ok(mut field) => {

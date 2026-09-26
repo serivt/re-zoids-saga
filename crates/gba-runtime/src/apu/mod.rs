@@ -156,6 +156,19 @@ impl<'rom> SoundEngine<'rom> {
         &self.sampled
     }
 
+    /// Whether song `song` has ended: its player no longer plays it (the
+    /// status's pause bit, `0x08001A28`). A player sees its last track end
+    /// in the frame after, as the driver sets that bit.
+    #[must_use]
+    pub fn song_ended(&self, song: usize) -> bool {
+        let Ok((_, player)) = self.song(song) else {
+            return true;
+        };
+        self.players
+            .get(player)
+            .is_none_or(|player| player.song() != Some(song))
+    }
+
     /// Song on player `player`, if one is playing.
     #[must_use]
     pub fn playing(&self, player: usize) -> Option<usize> {
@@ -170,6 +183,11 @@ impl<'rom> SoundEngine<'rom> {
     pub fn frame(&mut self) -> Result<&[i16], M4aError> {
         self.events.clear();
         let mut events = std::mem::take(&mut self.events);
+        for player in &mut self.players {
+            if player.song().is_some() && player.is_finished() {
+                player.stop();
+            }
+        }
         for (index, player) in self.players.iter_mut().enumerate() {
             player.frame(self.rom, index, &mut events)?;
         }
@@ -179,11 +197,6 @@ impl<'rom> SoundEngine<'rom> {
         self.events = events;
         self.age_channels();
         self.mix();
-        for player in &mut self.players {
-            if player.song().is_some() && player.is_finished() {
-                player.stop();
-            }
-        }
         Ok(&self.output)
     }
 
@@ -488,8 +501,12 @@ mod tests {
         );
         engine.frame().unwrap();
         assert_eq!(engine.playing(0), Some(0));
+        assert!(!engine.song_ended(0));
+        engine.frame().unwrap();
+        assert_eq!(engine.playing(0), Some(0));
         engine.frame().unwrap();
         assert_eq!(engine.playing(0), None);
+        assert!(engine.song_ended(0));
         engine.play(1).unwrap();
         assert_eq!(engine.playing(2), None);
         assert!(engine.play(2).is_err());

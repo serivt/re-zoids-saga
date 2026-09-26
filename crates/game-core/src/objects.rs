@@ -77,6 +77,14 @@ impl AreaObjects {
         }
     }
 
+    /// Rebuilds the object states of the area last entered (`0x08006E4C`
+    /// with it, as the lab's keeper does before the lab opens).
+    pub fn rebuild_current(&mut self, data: &GameData<'_>, state: &mut [u8], frame: u16) {
+        if let Some(area) = self.area {
+            self.rebuild(data, state, area, frame);
+        }
+    }
+
     /// The area index the block holds: the area less one (`0x02000B5C +
     /// 3`).
     #[must_use]

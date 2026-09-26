@@ -298,6 +298,9 @@ pub struct Actor {
     pub pause: u16,
     /// The sheet a wrecked actor explodes with.
     explosion: Option<Box<SpriteSheet>>,
+    /// For an object showing a party member's Zoid, its sprite as listed
+    /// (bit 15 set), resolved once the game state is known.
+    party_sprite: Option<u16>,
     /// The shift the animation's first step was timed with, when not the
     /// current one: the shift in effect when it started (`0x08000BD8`), a
     /// walk's step setting its own before. The player's own step starts its
@@ -340,6 +343,7 @@ impl Actor {
             group: 0,
             pause: 0,
             explosion: None,
+            party_sprite: None,
             start_shift: None,
         }
     }
@@ -352,6 +356,7 @@ impl Actor {
         actor.chest = object.chest();
         actor.behavior = object.behavior;
         actor.command = command_for(object.kind);
+        actor.party_sprite = (object.sprite_sheet_id().is_none()).then_some(object.sprite);
         actor
     }
 
@@ -381,6 +386,18 @@ impl Actor {
     #[must_use]
     pub fn walking(&self) -> bool {
         self.step.is_some()
+    }
+
+    /// Its sprite's position in 16.16 map pixels (entity `+0x08`, `+0x0C`).
+    #[must_use]
+    pub fn fixed_position(&self) -> (i32, i32) {
+        (self.x, self.y)
+    }
+
+    /// Moves the sprite by `(dx, dy)` 16.16 pixels, its cell unchanged.
+    pub fn move_by(&mut self, dx: i32, dy: i32) {
+        self.x = self.x.wrapping_add(dx);
+        self.y = self.y.wrapping_add(dy);
     }
 
     /// Top-left of its 32×32 box in map pixels.
@@ -522,17 +539,44 @@ impl Actor {
         if self.animation_done() {
             return steps.last().map(|step| step.frame);
         }
+        frame_at(
+            sheet,
+            self.animation_id,
+            self.elapsed(steps)?,
+            self.animation_shift,
+        )
+    }
+
+    /// The frames into the animation as its steps at the current shift
+    /// count them, its first step having taken the length it started with.
+    fn elapsed(&self, steps: &[extraction::saga::AnimationStep]) -> Option<u32> {
         let first = steps.first()?.duration;
         let now = tick_length(first, self.animation_shift);
         let started = self
             .start_shift
             .map_or(now, |shift| tick_length(first, shift));
-        let elapsed = if self.animation < started {
+        Some(if self.animation < started {
             0
         } else {
             self.animation - started + now
+        })
+    }
+
+    /// Whether the animation shows the last frame of its step `step` (the
+    /// step's countdown at 1).
+    #[must_use]
+    pub fn ends_step(&self, step: usize) -> bool {
+        let Some(sheet) = self.sheet.as_ref() else {
+            return false;
         };
-        frame_at(sheet, self.animation_id, elapsed, self.animation_shift)
+        let Some(steps) = sheet.animations.get(self.animation_id) else {
+            return false;
+        };
+        let Some(elapsed) = self.elapsed(steps) else {
+            return false;
+        };
+        let at = |elapsed| step_at(sheet, self.animation_id, elapsed, self.animation_shift);
+        at(elapsed) == Some(step) && at(elapsed + 1) != Some(step)
     }
 }
 
@@ -607,6 +651,13 @@ pub fn current_frame(sheet: &SpriteSheet, id: usize, elapsed: u32) -> Option<usi
 /// already counts one, so its first step shows a frame shorter.
 #[must_use]
 pub fn frame_at(sheet: &SpriteSheet, id: usize, elapsed: u32, shift: i8) -> Option<usize> {
+    let step = step_at(sheet, id, elapsed, shift)?;
+    sheet.animations.get(id)?.get(step).map(|step| step.frame)
+}
+
+/// The step of `sheet`'s animation `id` shown after `elapsed` frames, the
+/// animation looping (see [`frame_at`]).
+fn step_at(sheet: &SpriteSheet, id: usize, elapsed: u32, shift: i8) -> Option<usize> {
     let steps = sheet.animations.get(id)?;
     let length = |ticks: u32| tick_length(ticks, shift);
     let cycle: u32 = steps.iter().map(|step| length(step.duration)).sum();
@@ -614,18 +665,15 @@ pub fn frame_at(sheet: &SpriteSheet, id: usize, elapsed: u32, shift: i8) -> Opti
         return None;
     }
     let mut remaining = elapsed % cycle;
-    steps
-        .iter()
-        .find(|step| {
-            let frames = length(step.duration);
-            if remaining < frames {
-                true
-            } else {
-                remaining -= frames;
-                false
-            }
-        })
-        .map(|step| step.frame)
+    steps.iter().position(|step| {
+        let frames = length(step.duration);
+        if remaining < frames {
+            true
+        } else {
+            remaining -= frames;
+            false
+        }
+    })
 }
 
 /// The animation shift of an actor standing still: characters' steps last
@@ -1328,6 +1376,26 @@ impl Field {
             panned(base_x, self.pan.0, max_x),
             panned(base_y, self.pan.1, max_y),
         )
+    }
+
+    /// Gives the objects that show a party member's Zoid its sprite
+    /// ([`extraction::saga_party::object_sprite`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError`] when a sprite cannot be read.
+    pub fn show_party_zoids(
+        &mut self,
+        data: &GameData<'_>,
+        state: &[u8],
+    ) -> Result<(), FieldError> {
+        for actor in &mut self.actors {
+            if let Some(sprite) = actor.party_sprite.take() {
+                let sprite = extraction::saga_party::object_sprite(state, sprite);
+                actor.sheet = Some(data.sprite_sheet(usize::from(sprite))?);
+            }
+        }
+        Ok(())
     }
 
     /// Whether the map is one of the Zoid's, whose cells are twice a room's.

@@ -17,6 +17,10 @@ const MAX_TRACKS: u8 = 16;
 const FIRST_WAIT: u8 = 0x80;
 const LAST_WAIT: u8 = 0xB0;
 const TIE: u8 = 0xCF;
+/// The first command a bare argument can repeat: the driver keeps the
+/// running status from `VOICE` on, so after `PRIO`, `TEMPO` or `KEYSH` a
+/// bare byte repeats the command before them.
+const FIRST_RUNNING: u8 = 0xBD;
 const SAMPLE_LOOP_FLAG: u32 = 0x4000_0000;
 const VOICE_DIRECT: u8 = 0x00;
 const VOICE_DIRECT_FIXED: u8 = 0x08;
@@ -412,7 +416,7 @@ pub fn read_command(
         };
         return match command {
             TIE..=0xFF => Ok(note(bytes, at, command)),
-            0xBA..=0xC8 => Ok((one_argument(command, first, at)?, at + 1)),
+            FIRST_RUNNING..=0xC8 => Ok((one_argument(command, first, at)?, at + 1)),
             _ => Err(M4aError::BadCommand {
                 byte: first,
                 offset: at,
@@ -431,7 +435,9 @@ pub fn read_command(
         0xB5 => Ok((Command::Repeat, at + 1)),
         0xB9 => Ok((Command::MemoryAccess, at + 4)),
         0xBA..=0xC8 => {
-            running.0 = Some(first);
+            if first >= FIRST_RUNNING {
+                running.0 = Some(first);
+            }
             let argument = byte(bytes, at + 1)?;
             Ok((one_argument(first, argument, at + 1)?, at + 2))
         }
@@ -608,6 +614,34 @@ mod tests {
         assert_eq!(
             Sample::read(&rom, 0),
             Err(M4aError::Truncated { offset: 16 })
+        );
+    }
+
+    #[test]
+    fn a_tempo_keeps_the_running_status_of_the_command_before_it() {
+        let track = [0xC0, 0x02, 0x82, 0xBB, 0x4B, 0x08, 0xBA, 0x10, 0x0A, 0xB1];
+        let mut running = Running::default();
+        let mut at = 0;
+        let mut commands = Vec::new();
+        loop {
+            let (command, next) = read_command(&track, at, &mut running).unwrap();
+            commands.push(command);
+            at = next;
+            if command == Command::Fine {
+                break;
+            }
+        }
+        assert_eq!(
+            commands,
+            [
+                Command::Bend(2),
+                Command::Wait(2),
+                Command::Tempo(75),
+                Command::Bend(8),
+                Command::Priority(16),
+                Command::Bend(10),
+                Command::Fine,
+            ]
         );
     }
 

@@ -219,5 +219,5 @@ START opens the menu described in [menu.md](menu.md); the field waits underneath
 ## Not modeled yet
 
 The black after a door for loads other than the one measured, the code-driven scripts of characters
-beyond the opening chapter, objects that show the party's Zoid, and the diagonal input priority of the original (this engine takes the
+beyond the opening chapter, and the diagonal input priority of the original (this engine takes the
 first held direction in the order up, down, left, right).

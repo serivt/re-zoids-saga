@@ -58,7 +58,7 @@ impl PauseMenu {
                 .into_iter()
                 .map(Goods::Part)
                 .collect(),
-            None => Vec::new(),
+            Some(Shop::Lab(_)) | None => Vec::new(),
         }
     }
     /// State `0x201` from its start: the wares listed again from the game
