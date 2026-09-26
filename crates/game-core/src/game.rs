@@ -36,6 +36,7 @@ use crate::battle::BattleStage;
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::combat::{Combat, Outcome};
 use crate::data::GameData;
+use crate::demo::{DemoEnd, DemoStep};
 use crate::event::{BLACK, ChestKind, EventHost, Events, HoldStep, MAP_TASK, Op};
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
@@ -48,7 +49,8 @@ use crate::slots::{self, Pick, Purpose, Slot, SlotPicker};
 use crate::story;
 use crate::text::TextMetrics;
 use crate::translation::{
-    DIALOGUE_TABLE, ITEM_TABLE, NAME_TABLE, PART_TABLE, Translation, TranslationExtension,
+    DIALOGUE_TABLE, ITEM_TABLE, NAME_TABLE, PART_TABLE, PAUSE_MENU_TABLE, Translation,
+    TranslationExtension,
 };
 use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows};
 use crate::{ScriptHost, TextPainter, WindowPainter};
@@ -200,6 +202,8 @@ enum Screen {
     Menu(Box<PauseMenu>),
     Continuing(Continuing),
     Guide(Box<Guide>),
+    /// The port's end of the demo, over the field.
+    DemoEnd(Box<DemoEnd>),
 }
 
 /// Where continuing is: frames since the title's script ended (the title
@@ -269,6 +273,8 @@ pub struct Game<'rom> {
     /// Whether the port's debugging mode is on (see
     /// [`Game::toggle_debug_mode`]).
     debug: bool,
+    /// The map and flag where the demo ends (see [`Game::set_demo_end`]).
+    demo_end: Option<(usize, u16)>,
     events: Events,
     screen: Screen,
     pending_talk: Option<(Talk, u32)>,
@@ -349,6 +355,14 @@ impl<'rom> Game<'rom> {
         self.slot
     }
 
+    /// Ends the demo, a port feature, once the player walks freely on
+    /// `map` with `flag` set: the game thanks the player, offers to save
+    /// and goes back to the title (see [`crate::demo`]). `None` lets the
+    /// game go on. By default the demo ends where the port's story does.
+    pub fn set_demo_end(&mut self, end: Option<(usize, u16)>) {
+        self.demo_end = end;
+    }
+
     /// The extensions the game raises events to and asks questions of.
     #[must_use]
     pub fn extensions(&self) -> &SharedExtensions {
@@ -414,6 +428,7 @@ impl<'rom> Game<'rom> {
             defeated: false,
             field: None,
             debug: false,
+            demo_end: Some(story::DEMO_END),
             events: Events::new(),
             screen: Screen::Loading,
             pending_talk: None,
@@ -444,7 +459,7 @@ impl<'rom> Game<'rom> {
             Screen::Title(_) => Stage::Title,
             Screen::NameEntry(_) => Stage::NameEntry,
             Screen::Loading | Screen::LeavingNameEntry(..) => Stage::Loading,
-            Screen::Field | Screen::OpeningMenu(_) => Stage::Field,
+            Screen::Field | Screen::OpeningMenu(_) | Screen::DemoEnd(_) => Stage::Field,
             Screen::Menu(_) => Stage::Menu,
             Screen::Continuing(_) => Stage::Continuing,
             Screen::Guide(_) => Stage::Guide,
@@ -544,12 +559,15 @@ impl<'rom> Game<'rom> {
             Screen::NameEntry(_) | Screen::LeavingNameEntry(..) => self.update_name_entry(input)?,
             Screen::Loading => {}
             Screen::Field => {
-                if start && self.player_in_control() {
+                if self.demo_ends_here() {
+                    self.begin_demo_end(input);
+                } else if start && self.player_in_control() {
                     self.screen = Screen::OpeningMenu(0);
                 } else {
                     self.update_field(input)?;
                 }
             }
+            Screen::DemoEnd(_) => self.update_demo_end(input)?,
             Screen::OpeningMenu(frames) => {
                 if let Some(field) = &mut self.field {
                     field.update(Input::default());
@@ -1066,6 +1084,73 @@ impl<'rom> Game<'rom> {
         }
     }
 
+    /// Whether the demo ends now: the player walks freely, in full light,
+    /// on its last map with its flag set.
+    fn demo_ends_here(&self) -> bool {
+        self.demo_end.is_some_and(|(map, flag)| {
+            self.windows.flag(flag)
+                && self.field.as_ref().is_some_and(|field| field.map() == map)
+                && self.events.brightness() == 0
+                && self.player_in_control()
+        })
+    }
+
+    /// Starts the end of the demo over the field.
+    fn begin_demo_end(&mut self, input: Input) {
+        let offsets = self
+            .data
+            .script_offsets(PAUSE_MENU_TABLE)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        let (contents, line) = if self.slots.len() > 1 {
+            let contents = self.slot_contents();
+            let line = self.default_save_slot(&contents);
+            (contents, line)
+        } else {
+            (Vec::new(), 0)
+        };
+        let mut demo = DemoEnd::new(offsets, contents, line);
+        demo.open(input);
+        self.screen = Screen::DemoEnd(Box::new(demo));
+    }
+
+    /// A frame of the end of the demo: the field goes on moving behind it,
+    /// the game is saved when asked, and the title follows the fade.
+    fn update_demo_end(&mut self, input: Input) -> Result<(), GameError> {
+        if let Some(field) = &mut self.field {
+            field.update(Input::default());
+        }
+        let rom = self.data.bytes();
+        let Screen::DemoEnd(demo) = &mut self.screen else {
+            return Ok(());
+        };
+        match demo.update(rom, input, &mut self.windows)? {
+            DemoStep::Continue => {}
+            DemoStep::Save(slot) => {
+                let party = self.party.clone();
+                let written = self.write_save(&party, slot);
+                if let Screen::DemoEnd(demo) = &mut self.screen {
+                    demo.saved(written, &mut self.windows);
+                }
+            }
+            DemoStep::Leaving => self.sound.stop_music(),
+            DemoStep::Title => {
+                self.windows.close_window(None);
+                self.field = None;
+                self.screen = Screen::Title(TitleScreen::new(&self.data)?);
+                Self::emit(&self.extensions, &Event::TitleShown);
+                Self::play(
+                    &mut self.sound,
+                    &self.data,
+                    &self.extensions,
+                    GameSound::TitleMusic,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// Whether the player walks freely: no conversation, event hold or
     /// talk about to start, and the player's own command in force.
     fn player_in_control(&self) -> bool {
@@ -1575,6 +1660,13 @@ impl<'rom> Game<'rom> {
             }
             Screen::Menu(menu) => menu.draw(frame, &self.windows, &self.skin, &self.painter),
             Screen::Guide(guide) => guide.draw(frame, &self.windows, &self.skin, &self.painter),
+            Screen::DemoEnd(demo) => {
+                if let Some(field) = &self.field {
+                    field.draw(frame);
+                }
+                self.windows.draw(frame, &self.skin, &self.painter);
+                darken(frame, demo.darkness());
+            }
             Screen::Continuing(continuing) => {
                 let darkness = continuing.darkness();
                 if darkness < FADE_STEPS {

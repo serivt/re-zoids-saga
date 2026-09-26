@@ -4,6 +4,7 @@ pub mod battle;
 pub mod boot;
 pub mod combat;
 pub mod data;
+pub mod demo;
 pub mod event;
 pub mod extension;
 pub mod field;

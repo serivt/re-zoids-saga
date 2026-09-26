@@ -1702,6 +1702,9 @@ const PORTAL_ARRIVAL_SOUND: u16 = 0x49;
 const PORTAL_BRINGS_STEP: usize = 32;
 /// Sand Colony's field, where the party goes on (map 31).
 const SAND_COLONY_FIELD: usize = 31;
+/// Where the port's story stops, and its demo ends: Sand Colony's field
+/// once the throne room's flashback has been shown.
+pub const DEMO_END: (usize, u16) = (SAND_COLONY_FIELD, THRONE_ROOM_SEEN);
 /// A cell off the map, left of its top row.
 const BESIDE_THE_MAP: (usize, usize) = (0xFF, 0);
 

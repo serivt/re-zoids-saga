@@ -45,6 +45,13 @@ pub const SLOT_QUESTION: &str = "port/save-slots/question";
 /// The question before saving over a slot's game.
 pub const SLOT_OVERWRITE: &str = "port/save-slots/overwrite";
 
+/// The thanks at the end of the demo, in the story box.
+pub const DEMO_THANKS: &str = "port/demo/thanks";
+/// The question after the thanks.
+pub const DEMO_QUESTION: &str = "port/demo/question";
+/// The notice once the game is saved at the end of the demo.
+pub const DEMO_SAVED: &str = "port/demo/saved";
+
 /// Every message of the port, in the order the template lists them.
 pub const PORT_TEXTS: &[PortText] = &[
     PortText {
@@ -93,6 +100,24 @@ pub const PORT_TEXTS: &[PortText] = &[
         key: SLOT_OVERWRITE,
         text: "スロット{slot}に上書きしますか？",
         note: "The question before saving over a slot's game, {slot} its number; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: DEMO_THANKS,
+        text: "あそんでくれて　ありがとう！\nこの体験版は　ここまでです。\nつづきは　これからのバージョンで！",
+        note: "The thanks once chapter 1, the end of the demo, is over: up to 3 lines of 224 pixels in the story box",
+        pixels: 224,
+    },
+    PortText {
+        key: DEMO_QUESTION,
+        text: "ここまでの記録を　セーブしますか？",
+        note: "The question after the demo's thanks, over the original's yes/no window: up to 3 lines of 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: DEMO_SAVED,
+        text: "セーブしました。",
+        note: "The notice once the game is saved at the end of the demo: up to 3 lines of 224 pixels",
         pixels: 224,
     },
 ];

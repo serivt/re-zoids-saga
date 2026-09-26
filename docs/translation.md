@@ -70,7 +70,8 @@ written, so the name prints and draws through the same rules as any text.
 
 ## The port's own messages
 
-What the port adds to the game (the save slots, see [menu.md](menu.md)) has no ROM
+What the port adds to the game (the save slots, see [menu.md](menu.md), and the end of
+the demo, see [events.md](events.md)) has no ROM
 text, so its messages are this project's own, in Japanese by default, under reserved
 keys that start with `port/`. The template lists them with the scope `port` (part of
 the default scopes), each with a note on its room; markers `{level}`, `{area}`,
@@ -87,6 +88,9 @@ translated message wider than its note allows.
 | `port/save-slots/load-help` | どのデータからつづけますか？ | The help line while continuing, 224 pixels |
 | `port/save-slots/question` | スロット{slot}にセーブしますか？ | The question for an empty slot, 224 pixels |
 | `port/save-slots/overwrite` | スロット{slot}に上書きしますか？ | The question over a slot's game, 224 pixels |
+| `port/demo/thanks` | あそんでくれて　ありがとう！ and two more lines | The thanks at the end of the demo, 3 lines of 224 pixels |
+| `port/demo/question` | ここまでの記録を　セーブしますか？ | The question after them, over the original's はい/いいえ |
+| `port/demo/saved` | セーブしました。 | The notice once saved |
 
 ## Fonts and layout
 

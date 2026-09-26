@@ -319,6 +319,21 @@ formation.
   every room: leaving Arcana's bar for the streets, the original stays black six frames
   longer, and going up to the room above, two frames shorter.
 
+## The end of the demo (a port feature)
+
+Source of knowledge: this project's own design. The port's story stops where chapter 1
+does, in Sand Colony's field (map 31) once the throne room's flashback has been shown
+(flag `0x143`). When the player walks freely there in full light (after the scene's
+fade in, or after continuing a save made there), the game waits a second and ends the
+demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the
+player (`port/demo/thanks`) and waits for A with the prompt blinking; it then asks
+`port/demo/question` over the original's はい/いいえ window (`pause-menu` 61). はい saves:
+with several save slots their list comes first, with the title's layout, B going back
+to the question; `port/demo/saved` follows. いいえ, B, or a notice dismissed closes the
+windows, stops the music and fades to black over 16 frames, and 30 frames later the
+title starts again. The field keeps moving behind the windows. `Game::set_demo_end`
+moves the end, or with `None` lets the game go on.
+
 ## Story inventory
 
 The chapters follow the areas: the low byte of a map record's id (see
