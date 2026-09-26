@@ -8,7 +8,9 @@
 //! (see `docs/events.md`). Dialogue indices are strings of the `dialogue`
 //! table; actors are object indices (the game's entity index minus one).
 
-use crate::event::{ChestKind, HERE, MAP_TASK, Op};
+mod chapter2;
+
+use crate::event::{BLACK, ChestKind, HERE, MAP_TASK, Op};
 use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
@@ -32,6 +34,10 @@ const HALF: i32 = PIXEL / 2;
 const DOUBLE: i32 = PIXEL * 2;
 const QUARTER: i32 = PIXEL / 4;
 const HELPER_TASK: usize = 4;
+/// The slot that stands for the field's per-frame hook (RAM
+/// `0x02000000`), which runs outside the tasks: a slot before the map's
+/// task, so a load the hook makes lets the map's handler start its task.
+const FIELD_HOOK: usize = 2;
 const REGINA: usize = 1;
 const PLAYER: usize = 0;
 const KING: usize = 2;
@@ -67,6 +73,12 @@ const fn through(actor: usize, to: (usize, usize), speed: i32, shift: i8) -> Op 
         through: true,
     }
 }
+
+/// Darkening a scene and waiting for black (`0x08011E08`): the level is
+/// set, and from the next frame it steps a level every other frame.
+const SCENE_DARKEN: &[Op] = &[Op::Brightness(0), Op::Wait(1), Op::FadeOut(1)];
+/// Brightening a scene and waiting for full light (`0x08011E24`).
+const SCENE_BRIGHTEN: &[Op] = &[Op::Brightness(BLACK), Op::Wait(1), Op::FadeIn(1)];
 
 /// The fade-out task (`0x0800C6A4`): from normal to black, a level every
 /// other frame.
@@ -790,7 +802,7 @@ const TRINITY_LIGER: u8 = 0x8F;
 /// stops and talks.
 const TUNNEL_TALK: &[Op] = &[
     Op::AwaitPlayer {
-        column: Some(23),
+        columns: Some((23, 23)),
         rows: None,
     },
     Op::Flag(TUNNEL_NOTICED, true),
@@ -814,7 +826,7 @@ const LONG_TUNNEL: &[Op] = &[Op::IfFlags {
 /// the carrier stops by the wreck, Regina recognizes it and keeps its data.
 const TRINITY: &[Op] = &[
     Op::AwaitPlayer {
-        column: Some(2),
+        columns: Some((2, 2)),
         rows: Some((2, 3)),
     },
     Op::Flag(TRINITY_FOUND, true),
@@ -1264,7 +1276,7 @@ const DRIVE_OFF_SOUND: u16 = 0x82;
 /// player has the controls back from the next frame, the step going on.
 const FACTORY_DOOR_TASK: &[Op] = &[
     Op::AwaitPlayer {
-        column: Some(4),
+        columns: Some((4, 4)),
         rows: Some((1, 1)),
     },
     Op::Flag(FACTORY_DOOR_OPENED, true),
@@ -1438,7 +1450,7 @@ const HALL_WON: &[Op] = &[
 /// speaks (dialogue `0x54`) and story battle 0 follows.
 const HALL_AMBUSH: &[Op] = &[
     Op::AwaitPlayer {
-        column: Some(4),
+        columns: Some((4, 4)),
         rows: Some((1, 1)),
     },
     stride(PLAYER, (4, 2)),
@@ -1524,7 +1536,7 @@ const CORRIDOR_TASK: &[Op] = &[
         none: &[CORRIDOR_END_REACHED],
         then: &[
             Op::AwaitPlayer {
-                column: Some(37),
+                columns: Some((37, 37)),
                 rows: Some((1, 1)),
             },
             Op::Control(false),
@@ -1702,9 +1714,9 @@ const PORTAL_ARRIVAL_SOUND: u16 = 0x49;
 const PORTAL_BRINGS_STEP: usize = 32;
 /// Sand Colony's field, where the party goes on (map 31).
 const SAND_COLONY_FIELD: usize = 31;
-/// Where the port's story stops, and its demo ends: Sand Colony's field
-/// once the throne room's flashback has been shown.
-pub const DEMO_END: (usize, u16) = (SAND_COLONY_FIELD, THRONE_ROOM_SEEN);
+/// Where the port's story stops, and its demo ends: chapter 3's first map
+/// once chapter 2 is over.
+pub const DEMO_END: (usize, u16) = chapter2::STORY_END;
 /// A cell off the map, left of its top row.
 const BESIDE_THE_MAP: (usize, usize) = (0xFF, 0);
 
@@ -1752,7 +1764,7 @@ const PORTAL_BRINGS_PLAYER: [Op; 9] = portal_brings(PLAYER);
 /// talks (`0x63`) until Fran drives in (`0x64`) and away (`0x65`); the
 /// Gustav drives on and the field darkens, and from the next frame a hook
 /// (`0x08012ED4`) warps to Sand Colony's field and brightens it holding the
-/// game.
+/// game (see [`TO_SAND_COLONY`]).
 const THRONE_ROOM_SCENE: &[Op] = &[
     Op::Wait(32),
     stride(FRAN_IN_THE_THRONE_ROOM, (8, 4)),
@@ -1761,8 +1773,7 @@ const THRONE_ROOM_SCENE: &[Op] = &[
     stride(FRAN_IN_THE_THRONE_ROOM, (8, 12)),
     Op::AwaitArrival(FRAN_IN_THE_THRONE_ROOM),
     Op::Dialogue(0x60),
-    Op::Brightness(0),
-    Op::FadeOut(1),
+    Op::Call(SCENE_DARKEN),
     Op::LoadMap {
         map: RED_RIVER,
         player: (19, 19),
@@ -1771,8 +1782,7 @@ const THRONE_ROOM_SCENE: &[Op] = &[
     },
     Op::Place(PLAYER, OFF_THE_MAP),
     Op::RestartMusic(RED_RIVER_MUSIC),
-    Op::Brightness(31),
-    Op::FadeIn(1),
+    Op::Call(SCENE_BRIGHTEN),
     Op::Call(&PORTAL_BRINGS_FIRST),
     glide(FIRST_ZOID, (0x240, 0x260), 1, true),
     Op::Call(&PORTAL_BRINGS_SECOND),
@@ -1805,9 +1815,15 @@ const THRONE_ROOM_SCENE: &[Op] = &[
     Op::AwaitSoundEnd(FRAN_SOUND),
     Op::Dialogue(0x65),
     glide(PLAYER, (0x220, 0x1C0), 1, true),
-    Op::Brightness(0),
-    Op::FadeOut(1),
-    Op::Wait(1),
+    Op::Call(SCENE_DARKEN),
+    Op::Spawn(FIELD_HOOK, TO_SAND_COLONY),
+    Op::End,
+];
+
+/// The hook the flashback's task leaves (`0x08012ED4`): the frame after,
+/// it warps to Sand Colony's field, facing kept, and brightens it holding
+/// the game, so the town's handler starts its own arrival.
+const TO_SAND_COLONY: &[Op] = &[
     Op::Warp {
         map: SAND_COLONY_FIELD,
         cell: (22, 29),
@@ -2065,6 +2081,12 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
         DEVICE_ROOM => Some(DEVICE_ROOM_ARRIVAL),
         ARCADIA_THRONE_ROOM => Some(THRONE_ROOM_ARRIVAL),
         ARCANA => Some(ARCANA_STREETS),
+        SAND_COLONY_FIELD => Some(chapter2::SAND_COLONY),
+        30 => Some(chapter2::DESERT_ARRIVAL),
+        32 => Some(chapter2::BAR_ARRIVAL),
+        34 => Some(chapter2::HOUSE_ARRIVAL),
+        37 => Some(chapter2::HIDEOUT_ARRIVAL),
+        38 => Some(chapter2::CANYON_ARRIVAL),
         _ => None,
     }
 }
@@ -2138,6 +2160,6 @@ pub fn talk_handler(address: u32) -> Option<&'static [Op]> {
         0x0800_90F0 => Some(ARCANA_ITEM_SHOP),
         0x0800_90FC => Some(ARCANA_ARMS_SHOP),
         0x0800_9108 => Some(ARCANA_LAB),
-        _ => None,
+        _ => chapter2::talk_handler(address),
     }
 }

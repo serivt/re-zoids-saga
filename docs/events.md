@@ -319,13 +319,80 @@ formation.
   every room: leaving Arcana's bar for the streets, the original stays black six frames
   longer, and going up to the room above, two frames shorter.
 
+## Chapter 2
+
+Source of knowledge: own reading of the area's map handlers (map record `+12`), the
+tasks and field hooks they install, the objects' code and the party routines named
+below; checked against a reference emulator with saves patched to each scene's flags
+(and, for the party's changes, with the lists joined), frame by frame and by the game
+state after each change. Implemented in `crates/game-core/src/story/chapter2.rs`.
+
+Area 2 is maps 30 to 49: the desert past the Red River (30), Sand Colony (31) with its
+bar (32), Dr. T's lab (33) and a house (34), the thieves' tunnels (35 to 47, with
+chests 11 to 25), the throne room (48) and the ruins (49). Its story is a chain of
+flags, each scene setting the next:
+
+| Where | Handler | Condition | What happens | Sets |
+|---|---|---|---|---|
+| 31 | `0x08012350` | `0x143`, not `0x144` | The town loads with the party's six (ROM `0x08666F50`) and the arrival runs (task `0x08012EF8`): the party walks in, Regina and Jack talk (`0x66`), Van crashes into the prince to song 8 and runs off after Fran with Zeke (`0x67`), the town's song comes back (`0x68`) and the town loads again | `0x144` |
+| 32 | `0x08012408` | not `0x145` | The bar loads with Moonbay, Irvine and a stranger (ROM `0x08666FC8`); speaking to Moonbay (`0x08012444`) starts the scene (task `0x080133DC`, dialogues `0x75`, `0x76`): everyone files out and Irvine and Moonbay join (list 1) | `0x145` |
+| 31 | `0x08012350` | `0x145`, not `0x146` | The party plans its search (task `0x080131B0`, `0x77`) | `0x146` |
+| 30 | `0x080120C0` | `0x146`, not `0x147` | A field hook (`0x080122F0`) waits for the Gustav at x `0x340`, y `0x60` to `0xA0`; Van fights the thieves (task `0x080131EC`, `0x7C`, `0x7D`) and story battle 2 follows from the next hook (`0x0801328C`) | `0x147` on winning |
+| 30 | | `0x147`, not `0x148` | The talk after the ambush (task `0x08013304`, `0x7E`) | `0x148` |
+| 34 | `0x08012498` | `0x148`, not `0x149` | The house's talk (task `0x0801334C`, `0x7F`); its six people each tell a piece (`0x80` to `0x85`, before `0x87` to `0x8C`) | `0x149`, then `0x14A` to `0x14F` |
+| 30 | | `0x14A` to `0x14F`, not `0x150` | The party puts it together (task `0x08013620`, `0x86`) | `0x150` |
+| 37 | `0x080125A4` | `0x150`, not `0x151` | The hideout: the Zoids gather, the camera goes up, Van and Zeke join (list 2, flag `0x197`, `0x8D`), story battle 3 (hook `0x080137D0`) | `0x151` on winning |
+| 37 | | `0x151`, not `0x152` | Everyone drives out (task `0x08013840`, `0x8E`, `0x90`) | `0x152` |
+| 38 | `0x080126E0` | `0x152`, the Gustav at x `0x200` or less, not `0x153` | A hook (`0x08012888`) waits for it at y `0xA0`, x `0x80` or less; Raven's ambush (task `0x08013964`, `0x98`), story battle 4 (hook `0x08013AD0`) | `0x153` on winning |
+| 38 | | `0x153`, not `0x154` | Raven drives off (task `0x08013B2C`, `0x99` to `0x9C`); Irvine, Moonbay, Van and Zeke leave (lists 1 and 2) and a hook (`0x08013CCC`) takes the prince to the desert | `0x154`, `0x157` |
+| 30 | | `0x154`, `0x157`, not `0x155` | Raven alone (task `0x08013D70`, `0x9D`), story battle 5 (hook `0x08013DD8`); the handler clears `0x157` | `0x155` on winning |
+| 30 | | `0x155`, not `0x156` | The chapter's end (task `0x08013E34`): the throne room (`0xA0` to `0xA2`), the ruins (`0xA3`), the Gustav into the portal past the Red River (`0xA4`) and out of the ruins' portal (`0xA5` to `0xA7`); a hook (`0x0801423C`) warps to map 82 | `0x156` |
+
+A lost story battle takes the party to its return point (`0x08006E08` with 1) and the
+field brightens at once; the flags stay, so the scene runs again. The townsfolk of Sand
+Colony and the bar speak by progress (`0x0801247C` tests `0x145`, `0x080126D0` tests
+`0x151`); the town has item shop 2 (`0x08009114`), armaments shop 2 (`0x08009120`), Dr.
+T's lab 2 in map 33 (`0x0800912C`) and a teacher of deck command 2 (`0x08006824`); the
+house has one of deck command `0x18` (`0x080068FC`); both use `0x08012090`.
+
+What the chapter's code needed of the event engine:
+
+- **Field hooks.** Several tasks end by storing a routine in the field's per-frame hook
+  (RAM `0x02000000`) and ending: the hook runs the story battle or warps the frame
+  after, outside the tasks, so the map's handler it causes can start its own task in
+  the map's slot. The port runs these in task slot 2, before the map's (3). A map
+  handler that sets a hook to wait for the player runs as the map's task instead.
+- **Entities and objects.** Turns and animations (`0x08000BD8`) and sprites
+  (`0x080089A0`) take an entity, one past the object; placing (`0x08008B70`) and
+  gliding (`0x08011F18`) take the object.
+- **Scene fades.** `0x08011E08` and `0x08011E24` set the level and wait a frame before
+  stepping it, a frame more than the fades the port had.
+- **The cutscene loader** (`0x080076C0`) starts the map's song unless it plays, as its
+  last step: a scene that changes the song right after never lets the map's be heard.
+- **Glides in rooms** use cells of 16 and move their target 8 pixels left.
+- **Position tests** of the hooks read the entity's pixel position (`+0x08`, `+0x0C`),
+  which a step reaches at its end, rather than its cell.
+- **The party.** A list of ROM `0x0867E380` joins (`0x080374B8`, as the hangar's) or
+  leaves (`0x080374E4`): a leaving character comes out of the formation (`0x08037B1C`),
+  its own unit (character bit `0x08`) is cleared, another unit loses its pilot
+  (`0x08036C2C`: values worked out again without one, what is left capped), and bits
+  `0x04` and `0x02` go; if no member then has a working unit, the prince's is repaired
+  (`0x08037510`). The characters, units and formation after the bar's join and after the
+  canyon's parting matched the original byte for byte.
+
+Checked against the original: the arrival matched frame for frame from the walk in to
+the town's reload, the bar's scene in 1643 of its 1650 frames (the others a message's
+key timing), the town's talk, the ambush, the chase's talk and the shops' screens;
+the chapter's end event for event, its sounds and songs on the same frames relative to
+each load. The loads themselves take longer in the original, 10 to 23 frames each at
+Sand Colony, the desert and the ruins.
+
 ## The end of the demo (a port feature)
 
-Source of knowledge: this project's own design. The port's story stops where chapter 1
-does, in Sand Colony's field (map 31) once the throne room's flashback has been shown
-(flag `0x143`). When the player walks freely there in full light (after the scene's
-fade in, or after continuing a save made there), the game waits a second and ends the
-demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the
+Source of knowledge: this project's own design. The port's story stops where chapter 2
+does, in chapter 3's first map (82) once the chapter's end has run (flag `0x156`). When
+the player walks freely there in full light (after the scene's fade in, or after
+continuing a save made there), the game waits a second and ends the demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the
 player (`port/demo/thanks`) and waits for A with the prompt blinking; it then asks
 `port/demo/question` over the original's はい/いいえ window (`pause-menu` 61). はい saves:
 with several save slots their list comes first, with the title's layout, B going back
@@ -394,7 +461,8 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
   takes it away. The chapter's way into map 23 does not need it: the corridor (17)
   leads through maps 18, 19 and 21 to map 23's left entrance, (0, 3), where its
   handler stands the player; map 20 is the factory's other door, from the world map.
-- Sand Colony's arrival (map 31, area 2): in the original the Gustav's party walks in
-  and dialogue `0x66` follows, and a townsman stands elsewhere; the port lands the
-  party there with the controls.
+- Chapter 2: the time the original's loader takes for each map (the cutscene loads
+  and warps of Sand Colony, the desert and the ruins take 10 to 23 frames longer than
+  the port's estimate, see "Chapter 2" above), and the page turns of a message under
+  keys pressed every other frame, which the original takes two frames longer to accept.
 - A one-frame drift of the backdrop.

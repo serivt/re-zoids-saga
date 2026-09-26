@@ -211,6 +211,18 @@ impl<'rom> GameData<'rom> {
         saga_save::meet_characters(self.rom, state, list)
     }
 
+    /// Adds the characters of list `list` to the party in `state`, each
+    /// with a unit of its Zoid; `None` when the list cannot be read.
+    pub fn join_group(&self, state: &mut [u8], list: usize) -> Option<()> {
+        saga_party::join_group(self.rom, state, list)
+    }
+
+    /// Takes the characters of list `list` out of the party in `state`;
+    /// `None` when the list cannot be read.
+    pub fn leave_group(&self, state: &mut [u8], list: usize) -> Option<()> {
+        saga_party::leave_group(self.rom, state, list)
+    }
+
     /// Battle scene `index` of the table cutscenes stage.
     #[must_use]
     pub fn battle_scene(&self, index: usize) -> Option<BattleScene> {

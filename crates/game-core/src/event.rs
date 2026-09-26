@@ -132,6 +132,11 @@ pub enum Op {
     /// Marks the characters of group `group` as met, for the character
     /// guide (`0x08037858`).
     Meet(u8),
+    /// Adds the characters of list `list` to the party, each with a unit of
+    /// its Zoid (`0x080374B8`).
+    Join(u8),
+    /// Takes the characters of list `list` out of the party (`0x080374E4`).
+    Leave(u8),
     /// Steps the brightness toward black every `mask + 1` frames until it
     /// is black (the loop of the task at `0x0800C6A4`).
     FadeOut(u16),
@@ -213,13 +218,36 @@ pub enum Op {
     Shift(usize, i8),
     /// Waits until one of the flags is set.
     AwaitAnyFlag(&'static [u16]),
-    /// Waits until the player's cell is on column `column` (when given)
-    /// and between rows `rows.0` and `rows.1` inclusive (when given).
+    /// Waits until the player's cell is between columns `columns.0` and
+    /// `columns.1` inclusive (when given) and between rows `rows.0` and
+    /// `rows.1` (when given).
     AwaitPlayer {
-        /// Column the player must reach.
-        column: Option<usize>,
+        /// First and last column that count.
+        columns: Option<(usize, usize)>,
         /// First and last row that count.
         rows: Option<(usize, usize)>,
+    },
+    /// Waits until the player's sprite is within `x` and `y`, inclusive
+    /// ranges of map pixels of its box's top-left (the hooks that test the
+    /// entity's position, `+0x08` and `+0x0C`): a step only gets there at
+    /// its end.
+    AwaitPlayerSprite {
+        /// First and last x that count.
+        x: (i32, i32),
+        /// First and last y that count.
+        y: (i32, i32),
+    },
+    /// Runs `then` when the player's sprite is within `x` and `y` (as
+    /// [`Op::AwaitPlayerSprite`] counts them), `otherwise` else.
+    IfPlayerSprite {
+        /// First and last x that count.
+        x: (i32, i32),
+        /// First and last y that count.
+        y: (i32, i32),
+        /// Program run when it is.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
     },
     /// Marks Zoid picture `id` as seen, entering it in the Zoid guide
     /// (`0x08037098`).
@@ -336,10 +364,17 @@ pub trait EventHost {
     fn restart_music(&mut self, song: u16);
     /// Plays sound effect `sound`.
     fn play_sound(&mut self, sound: u16);
-    /// Loads a map for a cutscene.
+    /// Loads a map for a cutscene (`0x080076C0`).
     fn load_map(&mut self, map: usize, player: (usize, usize), objects: u32, count: usize);
+    /// Starts map `map`'s song unless it plays already, as the cutscene
+    /// loader does last.
+    fn start_map_music(&mut self, map: usize);
     /// Marks the characters of group `group` as met.
     fn meet(&mut self, group: u8);
+    /// Adds the characters of list `list` to the party.
+    fn join(&mut self, list: u8);
+    /// Takes the characters of list `list` out of the party.
+    fn leave(&mut self, list: u8);
     /// Starts string `index` of script table `table`; the game holds until
     /// it ends.
     fn start_script(&mut self, table: &'static str, index: u16);
@@ -525,6 +560,9 @@ pub struct Events {
     tasks: [Option<Task>; TASKS + 1],
     hold: Option<Hold>,
     brightness: u8,
+    /// The map a task's cutscene load brings, whose song starts once the
+    /// load is over.
+    loading_map: Option<usize>,
 }
 
 impl Events {
@@ -737,6 +775,9 @@ impl Events {
     /// after it run.
     fn end_loading(&mut self, slot: usize, host: &mut impl EventHost) {
         self.hold = None;
+        if let Some(map) = self.loading_map.take() {
+            host.start_map_music(map);
+        }
         self.run_task(slot, host);
         self.run_slots(slot + 1, host);
     }
@@ -870,6 +911,7 @@ impl Events {
             | Op::AwaitSoundEnd(_)
             | Op::AwaitAnyFlag(_)
             | Op::AwaitPlayer { .. }
+            | Op::AwaitPlayerSprite { .. }
             | Op::FadeInHolding
             | Op::FadeInHoldingSlow
             | Op::FadeOutHolding
@@ -883,6 +925,7 @@ impl Events {
             | Op::IfLost { .. }
             | Op::IfChest { .. }
             | Op::IfZiDataHeld { .. }
+            | Op::IfPlayerSprite { .. }
             | Op::Call(_)
             | Op::Repeat(..)
             | Op::Spawn(..)
@@ -980,6 +1023,11 @@ impl Events {
                 count,
             } => {
                 host.load_map(map, player, objects, count);
+                if slot == IMMEDIATE {
+                    host.start_map_music(map);
+                } else {
+                    self.loading_map = Some(map);
+                }
                 return self.hold_loading(slot, count);
             }
             Op::Warp { map, cell, facing } => {
@@ -1007,11 +1055,8 @@ impl Events {
                 .and_then(|field| field.actor(actor).map(|actor| actor.ends_step(step)))
                 .unwrap_or(true),
             Op::AwaitAnyFlag(flags) => flags.iter().any(|&flag| host.flag(flag)),
-            Op::AwaitPlayer { column, rows } => host.field().is_some_and(|field| {
-                let player = field.player();
-                column.is_none_or(|column| player.column == column)
-                    && rows.is_none_or(|(first, last)| (first..=last).contains(&player.row))
-            }),
+            Op::AwaitPlayer { columns, rows } => player_within(host, columns, rows),
+            Op::AwaitPlayerSprite { x, y } => sprite_within(host, x, y),
             _ => true,
         };
         if ready {
@@ -1189,6 +1234,12 @@ impl Events {
                 otherwise,
             } => taken(host.chest_kind() == Some(kind), then, otherwise),
             Op::IfZiDataHeld { then, otherwise } => taken(host.zi_data_held(), then, otherwise),
+            Op::IfPlayerSprite {
+                x,
+                y,
+                then,
+                otherwise,
+            } => taken(sprite_within(host, x, y), then, otherwise),
             Op::IfLost { then, otherwise } => taken(host.battle_lost(), then, otherwise),
             Op::Call(program) => program,
             Op::Repeat(times, program) => {
@@ -1234,6 +1285,30 @@ impl Events {
     }
 }
 
+/// Whether the player's cell is within `columns` and `rows`, each an
+/// inclusive range when given.
+fn player_within(
+    host: &mut impl EventHost,
+    columns: Option<(usize, usize)>,
+    rows: Option<(usize, usize)>,
+) -> bool {
+    host.field().is_some_and(|field| {
+        let player = field.player();
+        columns.is_none_or(|(first, last)| (first..=last).contains(&player.column))
+            && rows.is_none_or(|(first, last)| (first..=last).contains(&player.row))
+    })
+}
+
+/// Whether the player's sprite is within `x` and `y`, inclusive ranges of
+/// map pixels of its box's top-left.
+fn sprite_within(host: &mut impl EventHost, x: (i32, i32), y: (i32, i32)) -> bool {
+    host.field().is_some_and(|field| {
+        let (at_x, at_y) = field.player().fixed_position();
+        (x.0..=x.1).contains(&at_x.div_euclid(PIXEL))
+            && (y.0..=y.1).contains(&at_y.div_euclid(PIXEL))
+    })
+}
+
 /// Applies an op that changes the game's state and returns at once.
 fn apply(op: Op, host: &mut impl EventHost) {
     match op {
@@ -1242,6 +1317,8 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::RestartMusic(song) => host.restart_music(song),
         Op::Sound(sound) => host.play_sound(sound),
         Op::Meet(group) => host.meet(group),
+        Op::Join(list) => host.join(list),
+        Op::Leave(list) => host.leave(list),
         Op::LearnCommand(command) => host.learn_command(command),
         Op::FormParty(choice) => host.form_party(choice),
         Op::SeeZoid(id) => host.see_zoid(id),
@@ -1433,6 +1510,18 @@ mod tests {
 
         fn meet(&mut self, group: u8) {
             self.log.push(format!("meet {group}"));
+        }
+
+        fn start_map_music(&mut self, map: usize) {
+            self.log.push(format!("map music {map}"));
+        }
+
+        fn join(&mut self, list: u8) {
+            self.log.push(format!("join {list}"));
+        }
+
+        fn leave(&mut self, list: u8) {
+            self.log.push(format!("leave {list}"));
         }
 
         fn start_script(&mut self, table: &'static str, index: u16) {
@@ -1732,7 +1821,7 @@ mod tests {
             .count();
         assert_eq!(events.brightness(), BLACK);
         assert_eq!(held, 24);
-        assert_eq!(host.log, ["map 24"]);
+        assert_eq!(host.log, ["map 24", "map music 24"]);
     }
 
     const TWICE: &[Op] = &[

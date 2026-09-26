@@ -484,6 +484,13 @@ impl<'rom> Game<'rom> {
         self.events.brightness()
     }
 
+    /// The game-state block as the game holds it, the one a save keeps
+    /// (see `docs/formats/save.md`).
+    #[must_use]
+    pub fn state(&self) -> &[u8] {
+        &self.state
+    }
+
     /// The player's name.
     #[must_use]
     pub fn player_name(&self) -> &str {
@@ -870,8 +877,10 @@ impl<'rom> Game<'rom> {
             return self.start_new_game_room();
         }
         // The fade in is set before the map's handler runs, so a load the
-        // handler makes holds it back.
+        // handler makes holds it back. The frame shows black already: its
+        // level was latched while the title was still dark.
         self.events.set_brightness(BLACK);
+        self.shown_brightness = BLACK;
         self.events.fade_in_holding();
         self.enter_map(map, cell)?;
         let song = Some(usize::from(progress.song))
@@ -1940,8 +1949,40 @@ impl EventHost for Host<'_, '_> {
         }
     }
 
+    fn start_map_music(&mut self, map: usize) {
+        let song = self
+            .extensions
+            .borrow()
+            .music_for_map(map)
+            .or_else(|| self.data.map_music(map))
+            .and_then(|song| u16::try_from(song).ok());
+        if let Some(song) = song {
+            self.play_music(song);
+        }
+    }
+
     fn meet(&mut self, group: u8) {
         self.data.meet_characters(self.state, usize::from(group));
+    }
+
+    fn join(&mut self, list: u8) {
+        if self
+            .data
+            .join_group(self.state, usize::from(list))
+            .is_none()
+        {
+            self.fail(GameError::Text(format!("no party list {list}")));
+        }
+    }
+
+    fn leave(&mut self, list: u8) {
+        if self
+            .data
+            .leave_group(self.state, usize::from(list))
+            .is_none()
+        {
+            self.fail(GameError::Text(format!("no party list {list}")));
+        }
     }
 
     fn start_script(&mut self, table: &'static str, index: u16) {

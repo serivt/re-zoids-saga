@@ -957,6 +957,100 @@ fn clear_bits(state: &mut [u8], at: usize, bits: u16) {
     }
 }
 
+/// Adds the characters of list `list` to the party (`0x080374B8`): each
+/// entry marks its character and gives it a unit of its Zoid, as the
+/// hangar's first list does (see [`form_party`]).
+pub fn join_group(rom: &[u8], state: &mut [u8], list: usize) -> Option<()> {
+    if state.len() != STATE_LEN {
+        return None;
+    }
+    for (character, bits, zoid) in starting_list(rom, list)? {
+        add_character(rom, state, character, bits, zoid)?;
+    }
+    Some(())
+}
+
+/// Takes the characters of list `list` out of the party (`0x080374E4`):
+/// out of the formation, their own units gone with them, their seats in
+/// other units left empty. When no member is left with a working unit,
+/// the prince's is repaired (`0x08037510`).
+pub fn leave_group(rom: &[u8], state: &mut [u8], list: usize) -> Option<()> {
+    if state.len() != STATE_LEN {
+        return None;
+    }
+    for (character, _, _) in starting_list(rom, list)? {
+        remove_character(rom, state, character)?;
+    }
+    if !members(state).iter().any(|&member| {
+        character_unit(state, member).is_some_and(|unit| half(state, unit_at(unit)) & BROKEN == 0)
+    }) && let Some(unit) = character_unit(state, 0)
+    {
+        let at = unit_at(unit);
+        let (full, energy) = (
+            word(state, at + UNIT_STATS),
+            word(state, at + UNIT_STATS + 4),
+        );
+        set_word(state, at + 8, full);
+        set_word(state, at + 12, energy);
+        let flags = half(state, at) & !BROKEN;
+        set_half(state, at, flags);
+    }
+    Some(())
+}
+
+/// Takes `character` out of the party (`0x0803738C`).
+fn remove_character(rom: &[u8], state: &mut [u8], character: u8) -> Option<()> {
+    let entry = CHARACTERS + usize::from(character) * CHARACTER_LEN;
+    if half(state, entry) & PARTY_MEMBER == 0 {
+        return Some(());
+    }
+    if half(state, entry) & CHARACTER_IN_FORMATION != 0 {
+        let slot = (0..FORMATION_SLOTS).find(|slot| state[FORMATION + slot * 4 + 1] == character);
+        if let Some(slot) = slot {
+            unplace(state, slot);
+        }
+        let flags = half(state, entry) & !CHARACTER_IN_FORMATION;
+        set_half(state, entry, flags);
+    }
+    if half(state, entry) & KEEPS_EQUIPMENT != 0 {
+        let at = unit_at(state[entry + CHARACTER_UNIT]);
+        state.get_mut(at..at + UNIT_LEN)?.fill(0);
+        state[entry + CHARACTER_UNIT] = NO_UNIT;
+        let flags = half(state, entry) & !KEEPS_EQUIPMENT;
+        set_half(state, entry, flags);
+    }
+    if state[entry + CHARACTER_UNIT] != NO_UNIT {
+        unassign(rom, state, character)?;
+    }
+    let flags = half(state, entry) & !(SPECIAL_UNIT | PARTY_MEMBER);
+    set_half(state, entry, flags);
+    Some(())
+}
+
+/// Leaves `character`'s unit without a pilot (`0x08036C2C`): its values
+/// are worked out again without one, and what it has left is capped by
+/// them.
+fn unassign(rom: &[u8], state: &mut [u8], character: u8) -> Option<()> {
+    let seat = CHARACTERS + usize::from(character) * CHARACTER_LEN + CHARACTER_UNIT;
+    let unit = state[seat];
+    if unit == NO_UNIT {
+        return Some(());
+    }
+    state[seat] = NO_UNIT;
+    let at = unit_at(unit);
+    let flags = half(state, at + 2) & !PILOTED;
+    set_half(state, at + 2, flags);
+    compute_stats(rom, state, NO_UNIT, unit)?;
+    for (current, full) in [(at + 8, at + UNIT_STATS), (at + 12, at + UNIT_STATS + 4)] {
+        let signed = |at| i32::from_ne_bytes(word(state, at).to_ne_bytes());
+        if signed(full) < signed(current) {
+            let value = word(state, full);
+            set_word(state, current, value);
+        }
+    }
+    Some(())
+}
+
 /// The entries of starting list `list` (ROM `0x67E380`): the character's
 /// flag bits, the character and its Zoid.
 fn starting_list(rom: &[u8], list: usize) -> Option<Vec<(u8, u16, u16)>> {
@@ -1118,6 +1212,47 @@ mod tests {
         assert_eq!(state[CHARACTERS + CHARACTER_LEN + CHARACTER_UNIT], 1);
         assert_eq!(state[FORMATION + 16..FORMATION + 18], [1, 1]);
         assert_eq!(half(&state, CHARACTERS + CHARACTER_LEN) & 0x13, 0x13);
+    }
+
+    #[test]
+    fn a_list_joins_the_party_and_leaves_it_again() {
+        let mut rom = rom();
+        let list = 0x0067_E100u32;
+        rom[STARTING_LISTS + 4..STARTING_LISTS + 8]
+            .copy_from_slice(&(ROM_BASE + list).to_le_bytes());
+        let list = list as usize;
+        rom[list..list + 12]
+            .copy_from_slice(&[0x0A, 0, 4, 0x46, 0x02, 0, 5, 0x39, 0, 0, 0xFF, 0xFF]);
+        let record = ROM_BASE + 0x0067_E200;
+        for character in [4, 5] {
+            let at = PILOT_TABLE + character * PILOT_CHAPTERS * 4;
+            rom[at..at + 4].copy_from_slice(&record.to_le_bytes());
+        }
+        let mut state = state();
+        mark_member(&mut state, 0);
+        form_party(&rom, &mut state, 0).expect("party");
+        join_group(&rom, &mut state, 1).expect("join");
+        assert_eq!(members(&state), [0, 1, 4, 5]);
+        let (own, borrowed) = (
+            character_unit(&state, 4).expect("unit"),
+            character_unit(&state, 5).expect("unit"),
+        );
+        assert_eq!(word(&state, unit_at(own) + 8), 100);
+        join_formation(&mut state, 3, 4);
+        assert_eq!(formation(&state)[3], Some((own, 4)));
+        leave_group(&rom, &mut state, 1).expect("leave");
+        assert_eq!(members(&state), [0, 1]);
+        assert_eq!(formation(&state)[3], None);
+        assert!(
+            state[unit_at(own)..unit_at(own) + UNIT_LEN]
+                .iter()
+                .all(|&byte| byte == 0)
+        );
+        assert_eq!(half(&state, unit_at(borrowed) + 6), 0x39);
+        assert_eq!(half(&state, unit_at(borrowed) + 2) & PILOTED, 0);
+        assert_eq!(character_unit(&state, 5), None);
+        assert_eq!(half(&state, CHARACTERS + 4 * CHARACTER_LEN) & 0x1E, 0);
+        assert_eq!(join_group(&rom, &mut state[..8], 1), None);
     }
 
     #[test]
