@@ -33,6 +33,7 @@ mod equipment;
 pub(crate) mod formation;
 mod items;
 mod parts;
+mod save_slots;
 mod shop;
 
 pub use shop::Shop;
@@ -354,6 +355,8 @@ enum MenuState {
     Speed,
     Save,
     Saving,
+    /// The port's list of save slots before the question.
+    SaveSlot,
     Unit,
     Character,
     Zoid,
@@ -417,6 +420,8 @@ pub struct PauseMenu {
     stock_page: usize,
     stock_shown: Option<usize>,
     item_menu: items::ItemMenu,
+    /// The port's save slots.
+    save: save_slots::SaveSlots,
     equipment: equipment::Equipment,
     equip_image: Option<(u16, BattleImage)>,
     weapon_sprites: Vec<((u16, usize), Option<EffectSprite>)>,
@@ -505,6 +510,7 @@ impl PauseMenu {
             stock_page: 0,
             stock_shown: None,
             item_menu: items::ItemMenu::default(),
+            save: save_slots::SaveSlots::default(),
             equipment: equipment::Equipment::default(),
             equip_image: None,
             weapon_sprites: Vec::new(),
@@ -686,15 +692,7 @@ impl PauseMenu {
         if let Some(step) = self.update_phases(rom, input, windows)? {
             return Ok(step);
         }
-        if let Some((frames, sound)) = self.delayed_sound {
-            let left = frames.saturating_sub(1);
-            if left == 0 {
-                windows.play_sound(sound);
-                self.delayed_sound = None;
-            } else {
-                self.delayed_sound = Some((left, sound));
-            }
-        }
+        self.count_delayed_sound(windows);
         if self.busy > 0 {
             self.busy -= 1;
             if let Some(session) = self.shop.as_mut() {
@@ -712,6 +710,7 @@ impl PauseMenu {
         match self.state {
             MenuState::Closed => return Ok(MenuStep::Closed),
             MenuState::Saving => return Ok(MenuStep::Save),
+            MenuState::SaveSlot => return self.save_slot_frame(rom, input, windows),
             _ => {}
         }
         if !self.runner.update(rom, input, windows)? {
@@ -774,7 +773,8 @@ impl PauseMenu {
             MenuState::ItemTarget => self.target_choice(rom, code, choice, windows)?,
             MenuState::Notice(back) => self.return_to(rom, back, windows)?,
             MenuState::Shop(step) => self.shop_choice(rom, step, code, choice, windows)?,
-            MenuState::Saving | MenuState::Closing(_) | MenuState::Closed => {}
+            MenuState::Saving | MenuState::SaveSlot | MenuState::Closing(_) | MenuState::Closed => {
+            }
         }
         self.load_equip_image(rom);
         Ok(if self.state == MenuState::Closed {
@@ -782,6 +782,20 @@ impl PauseMenu {
         } else {
             MenuStep::Open
         })
+    }
+
+    /// Counts down the sound waiting for the scripts before it, and plays
+    /// it when its time comes.
+    fn count_delayed_sound(&mut self, windows: &mut ScriptWindows<'_>) {
+        if let Some((frames, sound)) = self.delayed_sound {
+            let left = frames.saturating_sub(1);
+            if left == 0 {
+                windows.play_sound(sound);
+                self.delayed_sound = None;
+            } else {
+                self.delayed_sound = Some((left, sound));
+            }
+        }
     }
 
     /// The frames the menu spends outside its menus: darkening to close,
@@ -1287,6 +1301,11 @@ impl PauseMenu {
                 windows.set_cursor(SPEED_WINDOW, Some(line));
                 self.runner.start(SCRIPT_SPEED_MENU)?;
                 self.state = MenuState::Speed;
+                Ok(())
+            }
+            ITEM_SAVE if self.offers_slots() => {
+                windows.clear_window(HELP_WINDOW);
+                self.open_save_slots(windows);
                 Ok(())
             }
             ITEM_SAVE => {

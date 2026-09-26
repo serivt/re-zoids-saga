@@ -363,6 +363,21 @@ impl TitleScreen {
         Ok(None)
     }
 
+    /// Runs the menu again, as START does, for the port's save slots left
+    /// with B; `held` are the buttons down now, which are not read as
+    /// presses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScriptError`] when the menu script cannot start.
+    pub fn reopen_menu(&mut self, held: Input) -> Result<(), ScriptError> {
+        self.runner.start(0)?;
+        self.runner.hold(held);
+        self.previous = held;
+        self.state = TitleState::Menu;
+        Ok(())
+    }
+
     /// Darkness of the current frame.
     #[must_use]
     pub fn darkness(&self) -> u8 {

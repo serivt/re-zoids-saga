@@ -71,7 +71,8 @@ pub enum Op {
     /// (`0x08011F18`): a cell along x if it is not there yet, then one
     /// along y, and so on, `speed` pixels a frame for `frames` frames a
     /// cell with the walking animation of the way it goes, its cell left as
-    /// it was; the camera follows the player when `camera`. It then stands
+    /// it was; the camera scrolls along with the player when `camera` and
+    /// otherwise stays, as it never follows a gliding sprite. It then stands
     /// facing its last way.
     Glide {
         /// Actor index.
@@ -82,7 +83,7 @@ pub enum Op {
         speed: i32,
         /// Frames a cell takes.
         frames: u32,
-        /// Whether the camera follows the player.
+        /// Whether the camera scrolls along with the player.
         camera: bool,
     },
     /// Waits until sound or song `n` has ended (`0x08001A28`).
@@ -228,16 +229,33 @@ pub enum Op {
     OpenChest,
     /// Marks the chest being searched as opened.
     MarkChest,
-    /// Runs `then` when the chest holds money, `otherwise` else.
-    IfChestMoney {
-        /// Program run for money.
+    /// Runs `then` when the chest gives a reward of `kind`, `otherwise`
+    /// else.
+    IfChest {
+        /// The kind of reward.
+        kind: ChestKind,
+        /// Program run for it.
         then: &'static [Op],
         /// Program run otherwise.
         otherwise: &'static [Op],
     },
-    /// Adds the chest's money and prints the amount into window 1
-    /// (`0x08037100`, `0x08001848`).
-    TakeChestMoney,
+    /// Runs `then` when the party already holds the Zi data the chest
+    /// gives (`0x08037098`), `otherwise` else.
+    IfZiDataHeld {
+        /// Program run when it does.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Gives the chest's reward (`0x08037014`, `0x08037040`, `0x0803706C`,
+    /// `0x08037098`, `0x08037100`); money is also printed into window 1
+    /// (`0x08001848`).
+    TakeChest,
+    /// Prints the name of the chest's reward, holding the game while its
+    /// script runs: `name` 241 + n for a consumable (`0x08032840`), `item`
+    /// n for a core (`0x080328E4`), `part` n (`0x086664F0`) and `name`
+    /// 1 + n for a Zoid (`0x08032800`).
+    ChestName,
     /// Runs `then` when the last menu answered its first line (the saved
     /// var1 is 0 and var0 is not), `otherwise` else.
     IfChoice {
@@ -341,10 +359,16 @@ pub trait EventHost {
     fn open_chest(&mut self);
     /// Marks the searched chest as opened.
     fn mark_chest(&mut self);
-    /// The money in the searched chest.
-    fn chest_money(&self) -> u32;
-    /// Adds the searched chest's money and prints it into window 1.
-    fn take_chest_money(&mut self);
+    /// The kind of reward the searched chest gives, if any.
+    fn chest_kind(&self) -> Option<ChestKind>;
+    /// Whether the party already holds the Zi data the searched chest
+    /// gives.
+    fn zi_data_held(&self) -> bool;
+    /// Gives the searched chest's reward; money is printed into window 1.
+    fn take_chest(&mut self);
+    /// Starts the script that prints the name of the searched chest's
+    /// reward.
+    fn start_chest_name(&mut self);
     /// Takes the player to `cell` of `map` with its own objects and runs the
     /// map's handler; returns how many objects the map places.
     fn warp(&mut self, map: usize, cell: (usize, usize), facing: Option<Direction>) -> usize;
@@ -396,6 +420,21 @@ impl Task {
             glide: None,
         }
     }
+}
+
+/// What kind of reward a chest gives, as [`Op::IfChest`] tests it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChestKind {
+    /// A Zoid core.
+    Core,
+    /// A Zoid's Zi data.
+    ZiData,
+    /// A part.
+    Part,
+    /// A consumable.
+    Consumable,
+    /// Money.
+    Money,
 }
 
 /// Where an [`Op::Glide`] stands.
@@ -824,6 +863,7 @@ impl Events {
             | Op::WarpHome
             | Op::Freeze(_)
             | Op::Script(..)
+            | Op::ChestName
             | Op::AwaitArrival(_)
             | Op::AwaitAnimation(_)
             | Op::AwaitStepEnd(..)
@@ -841,7 +881,8 @@ impl Events {
             | Op::IfArea { .. }
             | Op::IfChoice { .. }
             | Op::IfLost { .. }
-            | Op::IfChestMoney { .. }
+            | Op::IfChest { .. }
+            | Op::IfZiDataHeld { .. }
             | Op::Call(_)
             | Op::Repeat(..)
             | Op::Spawn(..)
@@ -907,6 +948,7 @@ impl Events {
             }
             Op::Dialogue(_)
             | Op::Script(..)
+            | Op::ChestName
             | Op::Battle(_)
             | Op::Shop(_)
             | Op::Combat
@@ -1071,11 +1113,10 @@ impl Events {
             glide.left = frames;
             glide.step = if along_y { (0, step) } else { (step, 0) };
         }
-        if let Some(moving) = field.actor_mut(actor) {
+        if actor == 0 {
+            field.glide_player(glide.step.0, glide.step.1, camera);
+        } else if let Some(moving) = field.actor_mut(actor) {
             moving.move_by(glide.step.0, glide.step.1);
-        }
-        if actor == 0 && camera {
-            field.pan_by(glide.step.0, glide.step.1);
         }
         glide.left -= 1;
         if let Some(task) = self.tasks[slot].as_mut() {
@@ -1142,7 +1183,12 @@ impl Events {
                 let vars = host.saved_vars();
                 taken(vars[1] == 0 && vars[0] != 0, then, otherwise)
             }
-            Op::IfChestMoney { then, otherwise } => taken(host.chest_money() > 0, then, otherwise),
+            Op::IfChest {
+                kind,
+                then,
+                otherwise,
+            } => taken(host.chest_kind() == Some(kind), then, otherwise),
+            Op::IfZiDataHeld { then, otherwise } => taken(host.zi_data_held(), then, otherwise),
             Op::IfLost { then, otherwise } => taken(host.battle_lost(), then, otherwise),
             Op::Call(program) => program,
             Op::Repeat(times, program) => {
@@ -1201,7 +1247,7 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::SeeZoid(id) => host.see_zoid(id),
         Op::OpenChest => host.open_chest(),
         Op::MarkChest => host.mark_chest(),
-        Op::TakeChestMoney => host.take_chest_money(),
+        Op::TakeChest => host.take_chest(),
         Op::AfterCombat => host.after_combat(),
         _ => {}
     }
@@ -1293,6 +1339,10 @@ fn start_hold(slot: usize, op: Op, host: &mut impl EventHost) -> Hold {
     match op {
         Op::Script(table, index) => {
             host.start_script(table, index);
+            Hold::Dialogue(slot)
+        }
+        Op::ChestName => {
+            host.start_chest_name();
             Hold::Dialogue(slot)
         }
         Op::Battle(scene) => {
@@ -1421,12 +1471,20 @@ mod tests {
             self.log.push("mark".to_owned());
         }
 
-        fn chest_money(&self) -> u32 {
-            0
+        fn chest_kind(&self) -> Option<ChestKind> {
+            None
         }
 
-        fn take_chest_money(&mut self) {
-            self.log.push("money".to_owned());
+        fn zi_data_held(&self) -> bool {
+            false
+        }
+
+        fn take_chest(&mut self) {
+            self.log.push("chest".to_owned());
+        }
+
+        fn start_chest_name(&mut self) {
+            self.log.push("chest name".to_owned());
         }
 
         fn warp(&mut self, map: usize, _: (usize, usize), _: Option<Direction>) -> usize {

@@ -14,6 +14,7 @@ use std::collections::HashSet;
 
 use crate::data::GameData;
 use crate::extension::{Extension, Rect};
+use crate::port_text::{self, PORT_PREFIX};
 use formats::script_ops::{Instruction, MessageStep, decode_instruction, decode_message_step};
 use thiserror::Error;
 
@@ -50,6 +51,9 @@ pub const BATTLE_LABEL_TABLE: &str = "battle-label";
 pub const ALPHABET_PREFIX: &str = "name-entry/alphabet/";
 /// Key of the name entry's help line.
 pub const NAME_HELP_KEY: &str = "name-entry/help";
+/// The template scope of the port's own messages, which are not in the
+/// ROM (see [`crate::port_text`]).
+pub const PORT_SCOPE: &str = "port";
 const EMPTY_CELL: char = '\u{3000}';
 const STRING_LIMIT: usize = 0x1000;
 const SCREEN_COLUMNS: usize = 30;
@@ -387,6 +391,15 @@ impl Translation {
                 entry.pixels = entry.pixels.max(pixels);
             }
         }
+        problems.extend(self.reserved_problems(metrics));
+        problems.sort();
+        Ok(problems)
+    }
+
+    /// The name entry's lines and the port's own messages that are wider
+    /// than their windows allow.
+    fn reserved_problems(&self, metrics: &TextMetrics) -> Vec<String> {
+        let mut problems = Vec::new();
         if let Some(help) = &self.name_entry_help
             && metrics.width(help) > NAME_HELP_PIXELS
         {
@@ -403,8 +416,14 @@ impl Translation {
                 ));
             }
         }
-        problems.sort();
-        Ok(problems)
+        problems.extend(port_text::problems(
+            self.messages
+                .iter()
+                .filter(|(key, _)| key.starts_with(PORT_PREFIX))
+                .map(|(key, text)| (key.as_str(), text.as_str())),
+            metrics,
+        ));
+        problems
     }
 
     /// The rectangle window `id`, opened by string `index` of `table` as
@@ -448,6 +467,16 @@ impl Translation {
     #[must_use]
     pub fn enlarged_windows(&self) -> usize {
         self.fits.len()
+    }
+
+    /// The translation of one of the port's own messages (see
+    /// [`crate::port_text`]), if the file has one.
+    #[must_use]
+    pub fn port_text(&self, key: &str) -> Option<&str> {
+        key.starts_with(PORT_PREFIX)
+            .then(|| self.messages.get(key))
+            .flatten()
+            .map(String::as_str)
     }
 
     /// The translation of a message, if the file has one.
@@ -785,6 +814,10 @@ pub fn template(data: &GameData<'_>, scopes: &[Scope]) -> Result<String, Transla
     let rom = data.bytes();
     let mut out = String::from(TEMPLATE_HEADER);
     for scope in scopes {
+        if scope.table == PORT_SCOPE {
+            port_entries(&mut out);
+            continue;
+        }
         let offsets = table_offsets(data, &scope.table)?;
         let (first, last) = scope.range.unwrap_or((0, offsets.len().saturating_sub(1)));
         let mut sorted: Vec<usize> = offsets.iter().copied().filter(|o| *o != 0).collect();
@@ -812,6 +845,17 @@ pub fn template(data: &GameData<'_>, scopes: &[Scope]) -> Result<String, Transla
         }
     }
     Ok(out)
+}
+
+/// The port's own messages, keyed `port/...`, with the port's Japanese
+/// text as their source.
+fn port_entries(out: &mut String) {
+    for text in port_text::PORT_TEXTS {
+        let _ = writeln!(out, "#. {}", text.note);
+        let _ = writeln!(out, "msgctxt {}", quote(text.key));
+        let _ = writeln!(out, "msgid {}", quote(text.text));
+        let _ = writeln!(out, "msgstr \"\"\n");
+    }
 }
 
 /// The name entry's help line and character pages: the pages are keyed
@@ -897,6 +941,10 @@ impl Extension for TranslationExtension {
 
     fn name_entry_help(&self) -> Option<String> {
         self.translation.name_entry_help().map(str::to_owned)
+    }
+
+    fn port_text(&self, key: &str) -> Option<String> {
+        self.translation.port_text(key).map(str::to_owned)
     }
 }
 
@@ -1185,6 +1233,24 @@ mod tests {
         assert_eq!(pages[0].label, "ABC");
         assert_eq!(pages[1].rows[1], ['n', EMPTY_CELL, 'o']);
         assert_eq!(pages[1].rows[0].len(), 13);
+    }
+
+    #[test]
+    fn the_port_messages_are_read_checked_and_listed_in_the_template() {
+        let po = "msgctxt \"port/save-slots/empty\"\nmsgid \"\"\nmsgstr \"Vacía\"\n\nmsgctxt \"port/save-slots/level\"\nmsgid \"\"\nmsgstr \"Level of the party {level}\"\n";
+        let mut translation = Translation::from_po(po).unwrap();
+        assert_eq!(translation.port_text(port_text::SLOT_EMPTY), Some("Vacía"));
+        assert_eq!(translation.port_text(port_text::SLOT_BROKEN), None);
+        let problems = translation
+            .fit(&GameData::new(&[]), &TextMetrics::standard())
+            .unwrap();
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].starts_with(port_text::SLOT_LEVEL));
+        let port = Scope::parse(PORT_SCOPE).unwrap();
+        let template = template(&GameData::new(&[]), &[port]).unwrap();
+        for text in port_text::PORT_TEXTS {
+            assert!(template.contains(&format!("msgctxt \"{}\"", text.key)));
+        }
     }
 
     #[test]

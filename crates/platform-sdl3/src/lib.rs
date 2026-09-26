@@ -3,7 +3,7 @@
 
 mod storage;
 
-pub use storage::FileStorage;
+pub use storage::{FileStorage, slot_path};
 
 use platform::{AudioOut, Button, Display, Event, Frame, Input, PlatformError};
 use sdl3::audio::{AudioFormat, AudioSpec, AudioStreamOwner};

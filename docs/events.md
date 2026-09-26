@@ -135,18 +135,29 @@ costs.
 
 A chest is an object of behavior 4 whose script reference holds the chest number in its
 low half-word (`0x80000000` is chest 0). Its opened flag is `0x1E + n`. The treasure
-table at ROM `0x0866BCE4` has 12-byte records: money (4 bytes), a Zoid (2 bytes), an
-item (2 bytes) and two more bytes.
+table at ROM `0x0866BCE4` has 12-byte records: money (4 bytes), a Zoid's Zi data (a
+picture id, 0 for none), a part (2 bytes, `0xFFFF` for none), a consumable and a Zoid
+core (a byte each, `0xFF` for none) and two unused bytes.
 
 Opening one plays sound `0x46` for `tb00` or `0x48` for `tb01` and switches the chest to
-its open animation (1). After 30 frames it sets the flag and shows the message:
+its open animation (1). After 30 frames it sets the flag and runs the reward routine
+(`0x080376A8`): dialogue `0x1F` opens the message box, the one reward the chest gives is
+announced, and dialogue `0x22` closes it. The routine checks the fields in this order and
+gives the first one there:
 
-- dialogue `0x1F`;
-- battle-menu strings 6 and 7;
-- the amount;
-- battle-text string 10 (Ｇ手に入れた);
-- battle-menu string 5;
-- dialogue `0x22`.
+| Reward | What it adds | Message |
+|---|---|---|
+| Zoid core | its count at `+0x330C`, to 99 (`0x08037040`) | Ｚｉデータ用アイテム「`item` n」を手に入れた (`battle-text` 40, 9) |
+| Zi data | sets its byte at `+0x33E2` (`0x08037098`) | Ｚｉデータ「`name` 1 + n」を手に入れた (42, 43); when the byte was set already, `battle-menu` 20 and だが、そのＺｉデータは既に持っていた・・・ (44) follow |
+| Part | its stock at `+0x334C`, to 9 (`0x0803706C`) | 武装「`part` n」を手に入れた (41, 9) |
+| Consumable | its count at `+0x3305`, to 99 (`0x08037014`) | アイテム「`name` 241 + n」を手に入れた (39, 9) |
+| Money | the party's money, to 9,999,999 (`0x08037100`) | the amount and Ｇ手に入れた (10) |
+
+Each message is framed by `battle-menu` 6 and 7 before and 5 after. The factory's
+chests of chapter 1 hold Zi data (chests 2–4, 6, 7, 9 and 10: Zoids 46, 15, 21, 92, 2,
+60 and 71) and チョバムアーマー (part 96: chests 5 and 8). The part chest and a Zi-data
+chest held already were compared with the original frame by frame, and every picture
+matched.
 
 A map load shows chests whose flag is set already open.
 
@@ -163,6 +174,7 @@ A map load shows chests whose flag is set already open.
 | Departure | The party forms and the Gustav warps to map 9, cell (4, 1), facing down | |
 | Map 10, the long tunnel | Stepping on column 23 plays dialogue `0x43` | `0x126` |
 | Labyrinth chests | Chest 0: 4200 G (map `mq0158`, cell (18, 5)). Chest 1: 1400 G (`mq0159`, (4, 5)) | `0x1E`, `0x1F` |
+| Factory chests | Maps 17–19: Zi data in chests 2–4, 6, 7, 9 and 10, part 96 in chests 5 and 8 (see Chests above) | `0x20`–`0x28` |
 | Map 11, the exit | Reaching column 2 on row 2 or 3 walks the Gustav to (1, 3), plays dialogue `0x2C0` and sees the Trinity Liger (Zoid `0x8F`) | `0x127` |
 | Map 1, the world map | The first time (handler `0x08010358`) the Gustav faces right and stands still; its task (`0x080103B4`) waits 60 frames from the end of the fade in, plays dialogue `0x44` (Regina: to the nearby town of Arcana), walks the Gustav at a pixel a frame to (11, 6), then (11, 7), then toward (14, 7), and ends 60 frames after starting that walk. The Gustav runs into the town's door at (14, 7) and takes it into map 24 at (23, 29) | `0x11E` |
 | Map 24, Arcana | The first time (handler `0x0800E850`) the town reloads with the arrival's objects (ROM `0x0832AC54`: the prince, Regina, Ace, Jack, Roman and three soldiers), song 6 plays, and the arrival task (`0x0800E8B8`) starts: the party splits up (dialogue `0x49`; helper tasks `0x0800FBA0`, `0x0800FE14`, `0x08010088` walk Jack, Ace and Regina around town), the prince finds the bar (`0x4A`), the soldiers surround the party (`0x4B`), Roman comes out (`0x4C`, `0x4D`), the soldiers leave and everyone goes into the bar (`0x4E`) | `0x128` |
@@ -295,6 +307,14 @@ formation.
   before `0x65`), and the last fade out and the fade in into Sand Colony take their 60
   frames each. The black between them is 22 frames in the port and 35 in the
   original: the load of map 31 is longer (see below).
+  Compared by picture as well, with the frames aligned on each dialogue: the portal,
+  the Zoids it brings, the Gustav's drive up, Fran's coming and going and the last
+  drive are identical, but for the portal's idle bobbing, whose phase follows how long
+  the dialogues before were held. This comparison found the camera running at twice
+  the Gustav's speed when it drove up, which left it below the screen: the glide
+  (`0x08011F18`) moves the entity and scrolls the camera by the same amount
+  (`0x08008324`), and the camera never follows a gliding sprite by itself, which the
+  port's camera, anchored to the player, did.
 - The black after an exit's load depends on the scene. The port uses one length for
   every room: leaving Arcana's bar for the streets, the original stays black six frames
   longer, and going up to the room above, two frames shorter.

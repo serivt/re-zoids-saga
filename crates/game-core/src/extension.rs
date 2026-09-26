@@ -171,6 +171,13 @@ pub trait Extension {
         None
     }
 
+    /// The text of one of the port's own messages (see
+    /// [`crate::port_text`]), by key.
+    fn port_text(&self, key: &str) -> Option<String> {
+        let _ = key;
+        None
+    }
+
     /// The song number for a game sound.
     fn sound_for(&self, sound: GameSound) -> Option<usize> {
         let _ = sound;
@@ -262,6 +269,12 @@ impl Extensions {
     #[must_use]
     pub fn name_entry_help(&self) -> Option<String> {
         self.first(|extension| extension.name_entry_help())
+    }
+
+    /// The first text offered for one of the port's own messages.
+    #[must_use]
+    pub fn port_text(&self, key: &str) -> Option<String> {
+        self.first(|extension| extension.port_text(key))
     }
 
     /// The first song number offered for a game sound.

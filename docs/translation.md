@@ -18,11 +18,12 @@ files translators produce are downloaded by each player and handed to the launch
    launcher baserom.gba --export-template zoids-saga.pot
    ```
 
-   By default it covers the title menu, the name entry and dialogue strings 30–41 (the
-   helpers every conversation shares and the opening). Any tables and ranges can be
+   By default it covers the title menu, the name entry, dialogue strings 30–41 (the
+   helpers every conversation shares and the opening) and the port's own messages. Any tables and ranges can be
    named instead: `title`, `name-entry`, `pause-menu`, `part` (the parts' names),
    `dialogue` or `dialogue:30-41`,
-   and the guides' `system`, `zoid-guide` and `character-guide` (see [guide.md](guide.md)).
+   the guides' `system`, `zoid-guide` and `character-guide` (see [guide.md](guide.md)),
+   and `port`, the port's own messages (see below).
 2. The template is uploaded to Weblate as the source of a gettext component; every
    language is a PO file with the same keys.
 3. A player downloads the PO file of their language and starts the game with it:
@@ -66,6 +67,26 @@ as their source text:
 A translation may have any number of pages; SELECT cycles them. The label window
 grows to the left for longer labels. Characters the player picks are stored as
 written, so the name prints and draws through the same rules as any text.
+
+## The port's own messages
+
+What the port adds to the game (the save slots, see [menu.md](menu.md)) has no ROM
+text, so its messages are this project's own, in Japanese by default, under reserved
+keys that start with `port/`. The template lists them with the scope `port` (part of
+the default scopes), each with a note on its room; markers `{level}`, `{area}`,
+`{money}` and `{slot}` print the value with full-width digits. The launcher reports a
+translated message wider than its note allows.
+
+| Key | Default | Where |
+|---|---|---|
+| `port/save-slots/level` | Ｌｖ{level} | A slot's level, from cell 11 of the list, 32 pixels |
+| `port/save-slots/empty` | データなし | An empty slot, 112 pixels |
+| `port/save-slots/broken` | こわれたデータ | A slot whose copies are both broken, 112 pixels |
+| `port/save-slots/details` | エリア{area}　所持金{money}Ｇ | The help's second line for a slot with a game, 224 pixels |
+| `port/save-slots/save-help` | どのスロットにセーブしますか？ | The help line while saving, 224 pixels |
+| `port/save-slots/load-help` | どのデータからつづけますか？ | The help line while continuing, 224 pixels |
+| `port/save-slots/question` | スロット{slot}にセーブしますか？ | The question for an empty slot, 224 pixels |
+| `port/save-slots/overwrite` | スロット{slot}に上書きしますか？ | The question over a slot's game, 224 pixels |
 
 ## Fonts and layout
 

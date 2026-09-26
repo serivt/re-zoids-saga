@@ -89,6 +89,7 @@ last):
 | `fit_window(table, index, id, kind, rect)` | Rectangle a window should take | the translation's layout fit |
 | `music_for_map(map)` | Song to play on entering | the call found in the map's code |
 | `alphabet_pages()` | Character pages of the name entry | the translation's pages, else the ROM's |
+| `port_text(key)` | Text of one of the port's own messages (`port/...`) | the translation's, else the port's Japanese text |
 | `sound_for(event)` | Song number for a game sound (door, confirm) | the constants in `extraction` |
 | `resource(id)` | Bytes or decoded asset for an identifier | mod packs, then the ROM |
 
@@ -151,7 +152,7 @@ first.
   `SaveRequested`, `LoadRequested`,
   `StorageFailed`. Not yet raised: `MenuChoice`.
 - Hooks asked today: `translate_message`, `fit_window`, `music_for_map`,
-  `alphabet_pages`, `name_entry_help`, `sound_for`. `resource` waits for mod packs.
+  `alphabet_pages`, `name_entry_help`, `port_text`, `sound_for`. `resource` waits for mod packs.
 - The loaded translation is `TranslationExtension`, an ordinary extension installed
   by `Game::set_translation`; the engine's defaults (the ROM's music per map, the
   sound constants, the ROM's name-entry pages) are consulted only when no extension

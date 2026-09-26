@@ -1445,13 +1445,31 @@ impl Field {
         };
         placed.place(cell);
         if actor == 0 {
-            let ((base_x, _), (base_y, _)) = self.camera_base();
-            let offset = |camera: usize, base: usize| {
-                (i32::try_from(camera).unwrap_or(0) - i32::try_from(base).unwrap_or(0))
-                    << FRACTION_BITS
-            };
-            self.pan = (offset(before.0, base_x), offset(before.1, base_y));
+            self.hold_camera(before);
         }
+    }
+
+    /// Moves the player's sprite by `(dx, dy)` 16.16 pixels as a scene's
+    /// glide does (`0x08011E40`, `0x08011EAC`): the camera does not follow
+    /// the sprite, but scrolls by the same amount when `camera`
+    /// (`0x08008324`).
+    pub fn glide_player(&mut self, dx: i32, dy: i32, camera: bool) {
+        let before = self.camera();
+        self.player_mut().move_by(dx, dy);
+        self.hold_camera(before);
+        if camera {
+            self.pan_by(dx, dy);
+        }
+    }
+
+    /// Sets the pan so the camera stays at `before` whatever the player's
+    /// anchor now asks for.
+    fn hold_camera(&mut self, before: (usize, usize)) {
+        let ((base_x, _), (base_y, _)) = self.camera_base();
+        let offset = |camera: usize, base: usize| {
+            (i32::try_from(camera).unwrap_or(0) - i32::try_from(base).unwrap_or(0)) << FRACTION_BITS
+        };
+        self.pan = (offset(before.0, base_x), offset(before.1, base_y));
     }
 
     /// Scrolls the camera by `(dx, dy)` 16.16 pixels (`0x08008324`): a move
@@ -2349,5 +2367,22 @@ mod tests {
         large.player_mut().place((1000, 1000));
         assert_eq!(large.camera(), (640 - 240, 320 - 160));
         assert_eq!(field(6, 5).camera(), (0, 0));
+    }
+
+    #[test]
+    fn a_gliding_player_takes_the_camera_along_only_when_asked() {
+        let mut large = field(40, 20);
+        large.player_mut().place((13, 7));
+        let pixel = 1 << FRACTION_BITS;
+        for _ in 0..8 {
+            large.glide_player(0, -pixel, false);
+        }
+        assert_eq!(large.player().position(), (200, 104));
+        assert_eq!(large.camera(), (96, 48));
+        for _ in 0..8 {
+            large.glide_player(0, -pixel, true);
+        }
+        assert_eq!(large.player().position(), (200, 96));
+        assert_eq!(large.camera(), (96, 40));
     }
 }

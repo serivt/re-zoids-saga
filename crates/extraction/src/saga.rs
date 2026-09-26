@@ -1436,18 +1436,59 @@ impl MapObject {
 pub struct Treasure {
     /// Money in G.
     pub money: u32,
-    /// A Zoid (a picture id), when the chest holds one.
+    /// A Zoid's Zi data (its picture id), when the chest holds one.
     pub zoid: Option<u8>,
-    /// An item, when it holds one.
-    pub item: Option<u16>,
-    /// Two more kinds of reward the port does not model yet (bytes 8 and 9).
-    pub other: [Option<u8>; 2],
+    /// A part for the stock (bytes 6 and 7).
+    pub part: Option<u16>,
+    /// A consumable (byte 8).
+    pub consumable: Option<u8>,
+    /// A Zoid core (byte 9).
+    pub core: Option<u8>,
+}
+
+/// What opening a chest gives: one thing, the first of its fields the
+/// game checks (`0x080376A8`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reward {
+    /// A Zoid core: its count at `+0x330C` goes up by one, to 99.
+    Core(u8),
+    /// A Zoid's Zi data: its byte at `+0x33E2` is set.
+    ZiData(u8),
+    /// A part: its stock at `+0x334C` goes up by one, to 9.
+    Part(u16),
+    /// A consumable: its count at `+0x3305` goes up by one, to 99.
+    Consumable(u8),
+    /// Money, up to 9,999,999 in all.
+    Money(u32),
+    /// Nothing.
+    Nothing,
+}
+
+impl Treasure {
+    /// What the chest gives: the core, else the Zi data, the part, the
+    /// consumable, the money.
+    #[must_use]
+    pub fn reward(&self) -> Reward {
+        if let Some(core) = self.core {
+            Reward::Core(core)
+        } else if let Some(zoid) = self.zoid {
+            Reward::ZiData(zoid)
+        } else if let Some(part) = self.part {
+            Reward::Part(part)
+        } else if let Some(consumable) = self.consumable {
+            Reward::Consumable(consumable)
+        } else if self.money > 0 {
+            Reward::Money(self.money)
+        } else {
+            Reward::Nothing
+        }
+    }
 }
 
 const TREASURE_TABLE: usize = 0x0066_BCE4;
 const TREASURE_LEN: usize = 12;
 const NO_TREASURE_BYTE: u8 = 0xFF;
-const NO_TREASURE_ITEM: u16 = 0xFFFF;
+const NO_TREASURE_PART: u16 = 0xFFFF;
 /// Flag `CHEST_FLAG_BASE + n` marks chest `n` as opened.
 pub const CHEST_FLAG_BASE: u16 = 0x1E;
 
@@ -1457,12 +1498,13 @@ pub fn treasure(rom: &[u8], chest: usize) -> Option<Treasure> {
     let at = TREASURE_TABLE + chest * TREASURE_LEN;
     let bytes = rom.get(at..at + TREASURE_LEN)?;
     let byte = |value: u8| (value != NO_TREASURE_BYTE).then_some(value);
-    let item = u16::from_le_bytes([bytes[6], bytes[7]]);
+    let part = u16::from_le_bytes([bytes[6], bytes[7]]);
     Some(Treasure {
         money: u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
         zoid: (bytes[4] != 0).then_some(bytes[4]),
-        item: (item != NO_TREASURE_ITEM).then_some(item),
-        other: [byte(bytes[8]), byte(bytes[9])],
+        part: (part != NO_TREASURE_PART).then_some(part),
+        consumable: byte(bytes[8]),
+        core: byte(bytes[9]),
     })
 }
 
@@ -2045,5 +2087,37 @@ mod tests {
         assert_eq!(scene.door(1, 1), None);
         assert_eq!(scene.exit(2, 0), None);
         assert_eq!(scene.exit(1, 5), None);
+    }
+
+    #[test]
+    fn a_chest_gives_the_first_reward_the_game_checks() {
+        let mut rom = vec![0; TREASURE_TABLE + 3 * TREASURE_LEN];
+        let records: [[u8; TREASURE_LEN]; 3] = [
+            [0x68, 0x10, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0],
+            [0, 0, 0, 0, 46, 0, 0x60, 0, 2, 0xFF, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0, 0],
+        ];
+        for (index, record) in records.iter().enumerate() {
+            let at = TREASURE_TABLE + index * TREASURE_LEN;
+            rom[at..at + TREASURE_LEN].copy_from_slice(record);
+        }
+        assert_eq!(treasure(&rom, 0).unwrap().reward(), Reward::Money(4200));
+        let mixed = treasure(&rom, 1).unwrap();
+        assert_eq!(mixed.part, Some(0x60));
+        assert_eq!(mixed.reward(), Reward::ZiData(46));
+        let core = Treasure {
+            core: Some(3),
+            ..mixed
+        };
+        assert_eq!(core.reward(), Reward::Core(3));
+        let part = Treasure {
+            zoid: None,
+            ..mixed
+        };
+        assert_eq!(part.reward(), Reward::Part(0x60));
+        let consumable = Treasure { part: None, ..part };
+        assert_eq!(consumable.reward(), Reward::Consumable(2));
+        assert_eq!(treasure(&rom, 2).unwrap().reward(), Reward::Nothing);
+        assert_eq!(treasure(&rom, 3), None);
     }
 }

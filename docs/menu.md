@@ -499,6 +499,24 @@ with the cursor on コンフィグ, as the original does. セーブ asks; はい
 and answers セーブしました, or セーブを中止しました when it could not be written, and
 いいえ or B answer セーブを中止しました.
 
+### Save slots (a port feature)
+
+Source of knowledge: this project's own design; the original has one save. With more than
+one save slot (see [formats/save.md](formats/save.md)), セーブ first lists them: the help
+line reads どのスロットにセーブしますか？ and, for a slot with a game, its area and money;
+window 4, a light menu, takes the columns from the main list's right edge (column 9, or
+further when a translation widened the list) to the screen's, 10 rows high, one line per
+slot: its number, then the player's name and from cell 11 the level (Ｌｖ), or データなし,
+or こわれたデータ when both copies are broken. More slots than rows scroll, with the scroll
+marks. The cursor starts on the slot the game was continued from or last saved to, else
+the first empty one, else the latest game. Moving plays `0x40` and describes the slot;
+B plays `0x3F` and goes back to the main list; A plays `0x47`, closes the list and asks
+スロットｎにセーブしますか？ (or スロットｎに上書きしますか？ over a game) in the help
+line with the original's はい/いいえ window (script 61); from there it goes on as the
+original's question. The port's messages are keyed `port/save-slots/...` in a
+translation (see [translation.md](translation.md)). Implemented in
+`crates/game-core/src/slots.rs` and `menu/save_slots.rs`.
+
 ## Not modeled yet
 
 緊急退避カプセル: what sets the byte at RAM `0x0200756A` that allows it is not traced, so

@@ -13,13 +13,17 @@
 //! brightens like any map entered. When the loader has a notice (no save, a
 //! broken one, the backup used) its script starts 40 frames after the
 //! script's end; once it is dismissed the title starts over, or, with the
-//! backup, the room loads 16 frames later.
+//! backup, the room loads 16 frames later. With several save slots, a
+//! port feature (see [`crate::slots`]), つづきから and セーブ first ask
+//! which one.
 
 use extraction::saga::{
     BootError, CHEST_FLAG_BASE, FIRST_ROOM_MAP, OPENING_SEEN_FLAG, ObjectScript, PLAYER_START,
-    SpriteSheetError,
+    Reward, SpriteSheetError,
 };
+use extraction::saga_party;
 use extraction::saga_save::SaveDataError;
+use extraction::saga_shop::{self, ITEM_LIMIT, Item, ItemKind, MONEY_LIMIT, PART_LIMIT};
 use formats::Progress;
 use formats::m4a::M4aError;
 use formats::progress::{FLAG_WORDS, encode_name};
@@ -32,7 +36,7 @@ use crate::battle::BattleStage;
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::combat::{Combat, Outcome};
 use crate::data::GameData;
-use crate::event::{BLACK, EventHost, Events, HoldStep, MAP_TASK, Op};
+use crate::event::{BLACK, ChestKind, EventHost, Events, HoldStep, MAP_TASK, Op};
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
 use crate::guide::{Cover, Guide, GuideError, GuideKind};
@@ -40,9 +44,12 @@ use crate::menu::{MenuStep, Party, PauseMenu, Shop};
 use crate::objects::AreaObjects;
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptContext, ScriptError, ScriptRunner};
+use crate::slots::{self, Pick, Purpose, Slot, SlotPicker};
 use crate::story;
 use crate::text::TextMetrics;
-use crate::translation::{DIALOGUE_TABLE, Translation, TranslationExtension};
+use crate::translation::{
+    DIALOGUE_TABLE, ITEM_TABLE, NAME_TABLE, PART_TABLE, Translation, TranslationExtension,
+};
 use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows};
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
@@ -56,6 +63,10 @@ const SMALL_CHEST_SOUND: u16 = 0x46;
 const SMALL_CHEST_SPRITE: &str = "tb00";
 const CHEST_OPEN_ANIMATION: usize = 1;
 const MONEY_WINDOW: u8 = 1;
+/// Where the Zoids' names start in the `name` table (`0x08032800`).
+const ZOID_NAMES: u16 = 1;
+/// Where the consumables' names start in the `name` table (`0x08032840`).
+const CONSUMABLE_NAMES: u16 = 241;
 /// Frames between the step onto an exit and the first darker level.
 const EXIT_FADE_DELAY: u8 = 1;
 /// Frames between pushing against a door and the screen darkening.
@@ -272,7 +283,13 @@ pub struct Game<'rom> {
     /// The area whose objects the block keeps, and its formations.
     objects: AreaObjects,
     save: SaveFile,
-    storage: Option<Box<dyn SaveStorage>>,
+    /// Where each save slot is kept; the original has one.
+    slots: Vec<Box<dyn SaveStorage>>,
+    /// The slot the game was continued from or last saved to.
+    slot: Option<usize>,
+    /// The title's list of slots, while the player chooses one to
+    /// continue.
+    slot_picker: Option<SlotPicker>,
     found: Option<Found>,
     previous: Input,
     latched: Input,
@@ -313,10 +330,23 @@ impl<'rom> Game<'rom> {
         Ok(game)
     }
 
-    /// Keeps the save in `storage`: continuing reads it and saving
-    /// replaces it.
+    /// Keeps the save in `storage`, as the original's one save:
+    /// continuing reads it and saving replaces it.
     pub fn set_save_storage(&mut self, storage: Box<dyn SaveStorage>) {
-        self.storage = Some(storage);
+        self.slots = vec![storage];
+    }
+
+    /// Keeps the saves in `slots`, a port feature: with more than one,
+    /// saving and continuing ask which slot to use (see
+    /// [`crate::slots`]).
+    pub fn set_save_slots(&mut self, slots: Vec<Box<dyn SaveStorage>>) {
+        self.slots = slots;
+    }
+
+    /// The slot the game was continued from or last saved to.
+    #[must_use]
+    pub fn save_slot(&self) -> Option<usize> {
+        self.slot
     }
 
     /// The extensions the game raises events to and asks questions of.
@@ -396,7 +426,9 @@ impl<'rom> Game<'rom> {
             state,
             objects: AreaObjects::default(),
             save,
-            storage: None,
+            slots: Vec::new(),
+            slot: None,
+            slot_picker: None,
             found: None,
             previous: Input::default(),
             latched: Input::default(),
@@ -508,25 +540,7 @@ impl<'rom> Game<'rom> {
                     )?;
                 }
             }
-            Screen::Title(title) => {
-                if start && !self.windows.any_open() {
-                    Self::play(
-                        &mut self.sound,
-                        &self.data,
-                        &self.extensions,
-                        GameSound::TitleStart,
-                    )?;
-                }
-                match title.update(rom, input, &mut self.windows)? {
-                    Some(TitleChoice::NewGame) => self.new_game(input)?,
-                    Some(TitleChoice::Continue) => self.begin_continue(),
-                    Some(TitleChoice::ZoidGuide) => self.open_guide(GuideKind::Zoids)?,
-                    Some(TitleChoice::CharacterGuide) => {
-                        self.open_guide(GuideKind::Characters)?;
-                    }
-                    _ => {}
-                }
-            }
+            Screen::Title(_) => self.update_title(input, start)?,
             Screen::NameEntry(_) | Screen::LeavingNameEntry(..) => self.update_name_entry(input)?,
             Screen::Loading => {}
             Screen::Field => {
@@ -545,6 +559,7 @@ impl<'rom> Game<'rom> {
                 if frames >= MENU_OPEN_FRAMES {
                     let mut menu =
                         PauseMenu::new(&self.data, self.party.clone(), self.state.clone())?;
+                    self.offer_save_slots(&mut menu);
                     menu.open(rom, &mut self.windows)?;
                     self.screen = Screen::Menu(Box::new(menu));
                     Self::emit(&self.extensions, &Event::MenuOpened);
@@ -554,11 +569,15 @@ impl<'rom> Game<'rom> {
                 MenuStep::Open => {}
                 MenuStep::Save => {
                     let party = menu.party();
+                    let slot = menu.save_slot();
                     self.state.clone_from_slice(menu.state());
-                    let written = self.write_save(&party);
-                    if let Screen::Menu(menu) = &mut self.screen {
+                    let written = self.write_save(&party, slot);
+                    let mut screen = std::mem::replace(&mut self.screen, Screen::Loading);
+                    if let Screen::Menu(menu) = &mut screen {
+                        self.offer_save_slots(menu);
                         menu.finish_save(written)?;
                     }
+                    self.screen = screen;
                 }
                 MenuStep::Closed => {
                     self.party = menu.party();
@@ -649,8 +668,46 @@ impl<'rom> Game<'rom> {
         Ok(())
     }
 
+    /// A frame of the title: its menu, or the port's list of save slots
+    /// while the player chooses one to continue.
+    fn update_title(&mut self, input: Input, start: bool) -> Result<(), GameError> {
+        let rom = self.data.bytes();
+        let Screen::Title(title) = &mut self.screen else {
+            return Ok(());
+        };
+        if let Some(picker) = self.slot_picker.as_mut() {
+            let pick = picker.update(rom, input, &mut self.windows)?;
+            if let Some(pick) = pick {
+                picker.close(&mut self.windows);
+                self.slot_picker = None;
+                match pick {
+                    Pick::Slot(slot) => self.begin_continue(slot),
+                    Pick::Canceled => title.reopen_menu(input)?,
+                }
+            }
+            return Ok(());
+        }
+        if start && !self.windows.any_open() {
+            Self::play(
+                &mut self.sound,
+                &self.data,
+                &self.extensions,
+                GameSound::TitleStart,
+            )?;
+        }
+        match title.update(rom, input, &mut self.windows)? {
+            Some(TitleChoice::NewGame) => self.new_game(input)?,
+            Some(TitleChoice::Continue) => self.choose_continue(input),
+            Some(TitleChoice::ZoidGuide) => self.open_guide(GuideKind::Zoids)?,
+            Some(TitleChoice::CharacterGuide) => self.open_guide(GuideKind::Characters)?,
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn new_game(&mut self, input: Input) -> Result<(), GameError> {
         self.state = self.data.new_game_state()?;
+        self.slot = None;
         self.party = Party::default();
         self.windows.set_flags([]);
         let mut entry = NameEntry::new(&self.data, &self.player_name, input)?;
@@ -668,11 +725,12 @@ impl<'rom> Game<'rom> {
     /// Leaves the title for a guide, which reads what the player has seen
     /// from the save, or from a new game's state when there is none.
     fn open_guide(&mut self, kind: GuideKind) -> Result<(), GameError> {
-        let image = self
-            .storage
-            .as_ref()
-            .and_then(|storage| storage.load().ok().flatten());
-        let state = match self.save.read(image).game() {
+        let contents = self.slot_contents();
+        let found = match Self::latest_slot(&self.slots, &contents) {
+            Some(slot) => self.read_slot(slot),
+            None => Found::Missing,
+        };
+        let state = match found.game() {
             Some(saved) => saved.state.clone(),
             None => self.data.new_game_state()?,
         };
@@ -691,19 +749,28 @@ impl<'rom> Game<'rom> {
         Ok(())
     }
 
-    /// Leaves the title for a saved game: reads the save now and starts
-    /// the fade.
-    fn begin_continue(&mut self) {
+    /// つづきから: with several save slots of which one holds anything,
+    /// the list to choose from, the cursor on the latest game; otherwise
+    /// the one slot, as the original.
+    fn choose_continue(&mut self, held: Input) {
+        let contents = self.slot_contents();
+        if self.slots.len() < 2 || contents.iter().all(|slot| *slot == Slot::Empty) {
+            self.begin_continue(0);
+            return;
+        }
+        let line = Self::latest_slot(&self.slots, &contents).unwrap_or(0);
+        self.windows.close_window(None);
+        let mut picker = SlotPicker::new(contents, Purpose::Load, slots::TITLE_LAYOUT, line);
+        picker.open(held, &mut self.windows);
+        self.slot_picker = Some(picker);
+    }
+
+    /// Leaves the title for the game saved in `slot`: reads the save now
+    /// and starts the fade.
+    fn begin_continue(&mut self, slot: usize) {
         Self::emit(&self.extensions, &Event::LoadRequested);
-        let image = match self.storage.as_ref().map(|storage| storage.load()) {
-            Some(Ok(image)) => image,
-            Some(Err(error)) => {
-                Self::emit(&self.extensions, &Event::StorageFailed(error.to_string()));
-                None
-            }
-            None => None,
-        };
-        self.found = Some(self.save.read(image));
+        self.found = Some(self.read_slot(slot));
+        self.slot = Some(slot);
         let screen = std::mem::replace(&mut self.screen, Screen::Loading);
         let Screen::Title(title) = screen else {
             self.screen = screen;
@@ -818,14 +885,74 @@ impl<'rom> Game<'rom> {
         Some(progress)
     }
 
-    /// Writes the game as it stands, with `party` from the menu, into the
-    /// save; returns whether it was stored.
-    fn write_save(&mut self, party: &Party) -> bool {
+    /// The save memory of `slot`, as continuing finds it; a slot that
+    /// cannot be read is reported and taken as empty.
+    fn read_slot(&self, slot: usize) -> Found {
+        let image = match self.slots.get(slot).map(|storage| storage.load()) {
+            Some(Ok(image)) => image,
+            Some(Err(error)) => {
+                Self::emit(&self.extensions, &Event::StorageFailed(error.to_string()));
+                None
+            }
+            None => None,
+        };
+        self.save.read(image)
+    }
+
+    /// What every save slot holds; a game's area is its map record's,
+    /// which is right even in a block made by hand whose area byte was
+    /// never written.
+    fn slot_contents(&self) -> Vec<Slot> {
+        (0..self.slots.len())
+            .map(|slot| {
+                let found = self.read_slot(slot);
+                let mut content = Slot::from_found(&found);
+                let record = found
+                    .game()
+                    .and_then(SavedGame::progress)
+                    .and_then(|progress| self.data.map_record(usize::from(progress.map)).ok());
+                if let (Slot::Game(summary), Some(record)) = (&mut content, record) {
+                    summary.area = record.id.to_le_bytes()[0];
+                }
+                content
+            })
+            .collect()
+    }
+
+    /// The slot with the game saved last (see [`slots::latest`]).
+    fn latest_slot(storages: &[Box<dyn SaveStorage>], contents: &[Slot]) -> Option<usize> {
+        let times: Vec<_> = storages.iter().map(|storage| storage.modified()).collect();
+        slots::latest(&times, contents)
+    }
+
+    /// The slot the pause menu's list starts on: the game's own, else the
+    /// first empty one, else the latest game.
+    fn default_save_slot(&self, contents: &[Slot]) -> usize {
+        self.slot
+            .filter(|slot| *slot < contents.len())
+            .or_else(|| contents.iter().position(|slot| *slot == Slot::Empty))
+            .or_else(|| Self::latest_slot(&self.slots, contents))
+            .unwrap_or(0)
+    }
+
+    /// Hands the pause menu the slots to choose from when there are
+    /// several.
+    fn offer_save_slots(&self, menu: &mut PauseMenu) {
+        if self.slots.len() > 1 {
+            let contents = self.slot_contents();
+            let line = self.default_save_slot(&contents);
+            menu.set_save_slots(contents, line);
+        }
+    }
+
+    /// Writes the game as it stands, with `party` from the menu, into save
+    /// slot `slot`; returns whether it was stored.
+    fn write_save(&mut self, party: &Party, slot: usize) -> bool {
         Self::emit(&self.extensions, &Event::SaveRequested);
         if !self.update_state(party) {
             return false;
         }
-        let Some(storage) = self.storage.as_mut() else {
+        let Some(storage) = self.slots.get_mut(slot) else {
             return false;
         };
         let failed = |extensions: &SharedExtensions, error: &dyn std::fmt::Display| {
@@ -844,7 +971,10 @@ impl<'rom> Game<'rom> {
             Err(error) => return failed(&self.extensions, &error),
         };
         match storage.store(&image) {
-            Ok(()) => true,
+            Ok(()) => {
+                self.slot = Some(slot);
+                true
+            }
             Err(error) => failed(&self.extensions, &error),
         }
     }
@@ -1519,6 +1649,15 @@ impl Host<'_, '_> {
     }
 }
 
+impl Host<'_, '_> {
+    /// What the chest being searched gives.
+    fn chest_reward(&self) -> Reward {
+        self.chest
+            .and_then(|(_, chest)| self.data.treasure(usize::from(chest)))
+            .map_or(Reward::Nothing, |treasure| treasure.reward())
+    }
+}
+
 impl EventHost for Host<'_, '_> {
     fn field(&mut self) -> Option<&mut Field> {
         self.field.as_mut()
@@ -1793,18 +1932,55 @@ impl EventHost for Host<'_, '_> {
         }
     }
 
-    fn chest_money(&self) -> u32 {
-        self.chest
-            .and_then(|(_, chest)| self.data.treasure(usize::from(chest)))
-            .map_or(0, |treasure| treasure.money)
+    fn chest_kind(&self) -> Option<ChestKind> {
+        match self.chest_reward() {
+            Reward::Core(_) => Some(ChestKind::Core),
+            Reward::ZiData(_) => Some(ChestKind::ZiData),
+            Reward::Part(_) => Some(ChestKind::Part),
+            Reward::Consumable(_) => Some(ChestKind::Consumable),
+            Reward::Money(_) => Some(ChestKind::Money),
+            Reward::Nothing => None,
+        }
     }
 
-    fn take_chest_money(&mut self) {
-        let money = self.chest_money();
-        self.party.money = self.party.money.saturating_add(money);
-        for digit in money.to_string().chars() {
-            ScriptHost::put_char(self.windows, MONEY_WINDOW, digit);
+    fn zi_data_held(&self) -> bool {
+        matches!(self.chest_reward(), Reward::ZiData(zoid)
+            if formats::progress::zoid_seen(self.state, usize::from(zoid)))
+    }
+
+    fn take_chest(&mut self) {
+        let one_more = |state: &mut [u8], kind, id| {
+            let item = Item { kind, id };
+            let count = saga_shop::item_count(state, item);
+            saga_shop::set_item_count(state, item, count.saturating_add(1).min(ITEM_LIMIT));
+        };
+        match self.chest_reward() {
+            Reward::Core(id) => one_more(self.state, ItemKind::Core, id),
+            Reward::Consumable(id) => one_more(self.state, ItemKind::Consumable, id),
+            Reward::Part(id) => {
+                let count = saga_party::stock(self.state, id);
+                saga_shop::set_stock(self.state, id, count.saturating_add(1).min(PART_LIMIT));
+            }
+            Reward::ZiData(zoid) => formats::progress::see_zoid(self.state, usize::from(zoid)),
+            Reward::Money(money) => {
+                self.party.money = self.party.money.saturating_add(money).min(MONEY_LIMIT);
+                for digit in money.to_string().chars() {
+                    ScriptHost::put_char(self.windows, MONEY_WINDOW, digit);
+                }
+            }
+            Reward::Nothing => {}
         }
+    }
+
+    fn start_chest_name(&mut self) {
+        let (table, index) = match self.chest_reward() {
+            Reward::Core(id) => (ITEM_TABLE, u16::from(id)),
+            Reward::ZiData(zoid) => (NAME_TABLE, u16::from(zoid) + ZOID_NAMES),
+            Reward::Part(id) => (PART_TABLE, id),
+            Reward::Consumable(id) => (NAME_TABLE, u16::from(id) + CONSUMABLE_NAMES),
+            Reward::Money(_) | Reward::Nothing => return,
+        };
+        self.start_script(table, index);
     }
 
     fn start_story_battle(&mut self, battle: u8) {

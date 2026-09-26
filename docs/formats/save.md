@@ -147,7 +147,8 @@ copy 1 is dismissed the screen stays black for 33 frames before the room fades i
 ## In this port
 
 The launcher keeps the save as a 32 KiB file next to the ROM with the extension `.sav`,
-as emulators do, so the same file works in both. Saving writes the game-state block into
+as emulators do, so the same file works in both (and one such file per save slot, see
+below). Saving writes the game-state block into
 both copies of the existing file, keeping its other blocks, or into a fresh image when
 there is none. The port models the position, flags, level, experience, money, message
 speed, name, song, chests, deck commands, Zoids seen, the party the hangar forms and the
@@ -166,6 +167,30 @@ written, in UTF-8, in a note in the bytes after the copies: `RZSN`, the sum of t
 game-state block it belongs to, a length byte and the name. The note is used only when
 its sum matches the block loaded, so a save rewritten by the original falls back to the
 block's own name.
+
+## Save slots (a port feature)
+
+Source of knowledge: this project's own design. The original has a single save; the port
+keeps several, each a whole save memory in the format above, so every slot is a `.sav`
+an emulator or a flash cart loads. The launcher offers four unless told otherwise
+(`--slots n`, 1 to 9): slot 1 is the usual `.sav` (next to the ROM, or `--save`) and slot
+n the same name with `.n` before the extension (`game.2.sav`). With one slot everything
+behaves as the original.
+
+With several, the pause menu's セーブ asks for a slot (see [../menu.md](../menu.md)) and
+つづきから lists them over the title, in window 1 at (5, 3) 20×10 with the help in window 2
+at (0, 14) 30×6: どのデータからつづけますか？, then the area and money of the slot under the
+cursor. The cursor starts on the latest game: the slot stored last (the file's
+modification time), the first of equal ones, or the first game when the storage keeps no
+times. An empty slot is refused with sound `0x4F`; B goes back to the title's menu,
+which starts over with its cursor on はじめから; a broken slot or one whose first copy
+is broken goes through the loader's notices above. When no slot holds anything,
+つづきから goes straight to the original's notice that there is no save. The list's
+area is the one of the saved map's record rather than the block's byte, which a block
+made by hand may lack. The title's guides read the latest game.
+
+A slot saved by the port in a new game and in the first chapter continued in the
+reference emulator on the saved map.
 
 ## Not modeled yet
 

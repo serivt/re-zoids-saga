@@ -1,5 +1,5 @@
-//! Where the game keeps its save memory between runs: one image, read at
-//! start and replaced whole on every save.
+//! Where the game keeps its save memory between runs: one image per save
+//! slot, read when needed and replaced whole on every save.
 
 use thiserror::Error;
 
@@ -30,4 +30,10 @@ pub trait SaveStorage {
     ///
     /// Returns [`StorageError::Write`] when the image cannot be written.
     fn store(&mut self, bytes: &[u8]) -> Result<(), StorageError>;
+
+    /// When the image was last stored, if the place keeps track; the
+    /// slot lists use it to find the most recent game.
+    fn modified(&self) -> Option<std::time::SystemTime> {
+        None
+    }
 }

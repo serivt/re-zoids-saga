@@ -50,8 +50,9 @@ const KEY_L: u16 = 0x200;
 /// What a move-reporting menu (`0x36`, `0x3C`) leaves in var0 for a
 /// cursor moved up or down, and for the other keys the modes that take
 /// them report.
-const MOVED_UP: u16 = 0x20;
-const MOVED_DOWN: u16 = 0x40;
+pub const MOVED_UP: u16 = 0x20;
+/// What a move-reporting menu leaves in var0 for a cursor moved down.
+pub const MOVED_DOWN: u16 = 0x40;
 const PAGE_LEFT: u16 = 2;
 const PAGE_RIGHT: u16 = 4;
 const MOVED_LEFT: u16 = 8;
@@ -486,6 +487,29 @@ impl ScriptRunner {
         self.pending.clear();
         self.window = id;
         self.begin_menu(cancelable, None, host);
+    }
+
+    /// Runs a menu on window `id` without a script that also ends when
+    /// the cursor moves, with `code` [`MOVED_UP`] or [`MOVED_DOWN`] in the
+    /// first variable, so the caller can describe the line; `mode` picks
+    /// the other keys it reports, as the menu opcode's.
+    pub fn run_reporting_menu(
+        &mut self,
+        id: u8,
+        cancelable: bool,
+        mode: u8,
+        host: &mut impl ScriptHost,
+    ) {
+        self.frames.clear();
+        self.pending.clear();
+        self.window = id;
+        self.begin_menu(cancelable, Some(mode), host);
+    }
+
+    /// Takes `input` as the buttons already held, so a key still down from
+    /// the screen before is not read as a new press.
+    pub fn hold(&mut self, input: Input) {
+        self.previous = input;
     }
 
     fn poll_key(

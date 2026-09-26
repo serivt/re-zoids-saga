@@ -11,12 +11,12 @@ use game_core::{
 use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{AudioOut, Display, Event, Frame, Rgb};
-use platform_sdl3::{FileStorage, Sdl3Display};
+use platform_sdl3::{FileStorage, Sdl3Display, slot_path};
 
 /// The function key that turns the debugging mode on or off.
 const DEBUG_KEY: u8 = 10;
-const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R, Esc quits; F10 turns a debugging mode on and off: the roaming enemies are intangible, to walk through them without battles, and the protagonist's attacks beat what they hit); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, part, dialogue, system, zoid-guide, character-guide), by default the title, the name entry and dialogue 30-41";
-const DEFAULT_TEMPLATE_SCOPES: [&str; 3] = ["title", "name-entry", "dialogue:30-41"];
+const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--slots <n>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R, Esc quits; F10 turns a debugging mode on and off: the roaming enemies are intangible, to walk through them without battles, and the protagonist's attacks beat what they hit); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --slots sets the save slots (4 by default, 1 for the original's single save): slot 1 is that .sav and slot n the same name with .n before the extension, each a save an emulator can load; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, part, dialogue, system, zoid-guide, character-guide), and the port's own messages (port), by default the title, the name entry, dialogue 30-41 and the port's messages";
+const DEFAULT_TEMPLATE_SCOPES: [&str; 4] = ["title", "name-entry", "dialogue:30-41", "port"];
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_MAP: usize = extraction::saga::FIRST_ROOM_MAP;
 const PLAYER_START: (usize, usize) = extraction::saga::PLAYER_START;
@@ -24,6 +24,8 @@ const FRAME_DURATION: std::time::Duration = std::time::Duration::from_micros(16_
 const AUDIO_QUEUE_FRAMES: usize = 6;
 const RENDER_FRAME_LIMIT: usize = 600;
 const SAVE_EXTENSION: &str = "sav";
+/// The most save slots the list shows without scrolling.
+const MAX_SLOTS: usize = 9;
 
 /// Reports on the console what the game could not read or write.
 struct StorageReport;
@@ -70,8 +72,14 @@ fn main() -> Result<()> {
         .save_path
         .clone()
         .unwrap_or_else(|| options.rom_path.with_extension(SAVE_EXTENSION));
-    println!("Save:       {}", save_path.display());
-    game.set_save_storage(Box::new(FileStorage::new(save_path)));
+    let slots: Vec<Box<dyn platform::SaveStorage>> = (0..options.slots)
+        .map(|slot| {
+            let path = slot_path(&save_path, slot);
+            println!("Save:       slot {} in {}", slot + 1, path.display());
+            Box::new(FileStorage::new(path)) as Box<dyn platform::SaveStorage>
+        })
+        .collect();
+    game.set_save_slots(slots);
     game.extensions()
         .borrow_mut()
         .insert(Box::new(StorageReport));
@@ -102,6 +110,7 @@ struct Options {
     string_id: Option<String>,
     dump_path: Option<PathBuf>,
     save_path: Option<PathBuf>,
+    slots: usize,
     room: bool,
     translation: Option<PathBuf>,
     template: Option<(PathBuf, Vec<String>)>,
@@ -114,6 +123,7 @@ impl Options {
         let mut string_id = None;
         let mut dump_path = None;
         let mut save_path = None;
+        let mut slots = game_core::slots::DEFAULT_SLOTS;
         let mut room = false;
         let mut translation = None;
         let mut template = None;
@@ -122,6 +132,13 @@ impl Options {
                 Some("--dump") => dump_path = Some(args.next().map(PathBuf::from).context(USAGE)?),
                 Some("--room") => room = true,
                 Some("--save") => save_path = Some(args.next().map(PathBuf::from).context(USAGE)?),
+                Some("--slots") => {
+                    slots = args
+                        .next()
+                        .and_then(|count| count.to_str()?.parse().ok())
+                        .filter(|count| (1..=MAX_SLOTS).contains(count))
+                        .context(USAGE)?;
+                }
                 Some("--translation") => {
                     translation = Some(args.next().map(PathBuf::from).context(USAGE)?);
                 }
@@ -142,6 +159,7 @@ impl Options {
             string_id,
             dump_path,
             save_path,
+            slots,
             room,
             translation,
             template,

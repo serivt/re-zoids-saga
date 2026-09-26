@@ -8,7 +8,7 @@
 //! (see `docs/events.md`). Dialogue indices are strings of the `dialogue`
 //! table; actors are object indices (the game's entity index minus one).
 
-use crate::event::{HERE, MAP_TASK, Op};
+use crate::event::{ChestKind, HERE, MAP_TASK, Op};
 use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
@@ -1951,25 +1951,99 @@ const ROMAN_TEACHES: &[Op] = &[Op::IfCommand {
     otherwise: &[Op::Dialogue(0x2F3), Op::Call(LEARN_ENVELOPING_ATTACK)],
 }];
 
+/// The lines around a reward's announcement: the message box's two
+/// helpers before it (`battle-menu` 6 and 7) and the one after (5).
+const BEFORE_REWARD: [Op; 2] = [Op::Script("battle-menu", 6), Op::Script("battle-menu", 7)];
+const AFTER_REWARD: Op = Op::Script("battle-menu", 5);
+
+/// A reward announced as its label, its name and 」を手に入れた
+/// (`battle-text` 9), once given.
+const fn named_reward(label: u16) -> [Op; 7] {
+    [
+        Op::TakeChest,
+        BEFORE_REWARD[0],
+        BEFORE_REWARD[1],
+        Op::Script("battle-text", label),
+        Op::ChestName,
+        Op::Script("battle-text", 9),
+        AFTER_REWARD,
+    ]
+}
+
+/// Zoid core: Ｚｉデータ用アイテム「…」を手に入れた.
+const CORE_REWARD: [Op; 7] = named_reward(0x28);
+/// Part: 武装「…」を手に入れた.
+const PART_REWARD: [Op; 7] = named_reward(0x29);
+/// Consumable: アイテム「…」を手に入れた.
+const CONSUMABLE_REWARD: [Op; 7] = named_reward(0x27);
+/// Zi data held already: だが、そのＺｉデータは既に持っていた・・・ after
+/// the announcement.
+const ZI_DATA_HELD: &[Op] = &[
+    Op::TakeChest,
+    Op::Script("battle-menu", 0x14),
+    BEFORE_REWARD[0],
+    BEFORE_REWARD[1],
+    Op::Script("battle-text", 0x2C),
+    AFTER_REWARD,
+];
+/// Zi data: Ｚｉデータ「…」を手に入れた, then whether the party had it.
+const ZI_DATA_REWARD: &[Op] = &[
+    BEFORE_REWARD[0],
+    BEFORE_REWARD[1],
+    Op::Script("battle-text", 0x2A),
+    Op::ChestName,
+    Op::Script("battle-text", 0x2B),
+    AFTER_REWARD,
+    Op::IfZiDataHeld {
+        then: ZI_DATA_HELD,
+        otherwise: &[Op::TakeChest],
+    },
+];
+/// Money: the amount and Ｇ手に入れた.
+const MONEY_REWARD: &[Op] = &[
+    BEFORE_REWARD[0],
+    BEFORE_REWARD[1],
+    Op::TakeChest,
+    Op::Script("battle-text", 10),
+    AFTER_REWARD,
+];
+
 /// Searching a chest (entity command 21 at `0x0800B938` and the reward
 /// routine at `0x080376A8`): it opens, half a second later it counts as
-/// opened, and money is announced in the message box.
+/// opened, and dialogue `0x1F` opens the message box, which announces the
+/// one reward the chest gives (a Zoid core, a Zoid's Zi data, a part, a
+/// consumable or money) before dialogue `0x22` closes it.
 pub const CHEST: &[Op] = &[
     Op::OpenChest,
     Op::Wait(30),
     Op::MarkChest,
-    Op::IfChestMoney {
-        then: &[
-            Op::Dialogue(0x1F),
-            Op::Script("battle-menu", 6),
-            Op::Script("battle-menu", 7),
-            Op::TakeChestMoney,
-            Op::Script("battle-text", 10),
-            Op::Script("battle-menu", 5),
-            Op::Dialogue(0x22),
-        ],
+    Op::Dialogue(0x1F),
+    Op::IfChest {
+        kind: ChestKind::Core,
+        then: &CORE_REWARD,
         otherwise: &[],
     },
+    Op::IfChest {
+        kind: ChestKind::ZiData,
+        then: ZI_DATA_REWARD,
+        otherwise: &[],
+    },
+    Op::IfChest {
+        kind: ChestKind::Part,
+        then: &PART_REWARD,
+        otherwise: &[],
+    },
+    Op::IfChest {
+        kind: ChestKind::Consumable,
+        then: &CONSUMABLE_REWARD,
+        otherwise: &[],
+    },
+    Op::IfChest {
+        kind: ChestKind::Money,
+        then: MONEY_REWARD,
+        otherwise: &[],
+    },
+    Op::Dialogue(0x22),
 ];
 
 /// What map `map` runs when it loads, when it runs anything.
