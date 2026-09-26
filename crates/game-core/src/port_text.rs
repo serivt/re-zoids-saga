@@ -3,8 +3,9 @@
 //!
 //! Source of knowledge: this project's own writing. Each message has a key
 //! under `port/`, which a translation's PO file uses as it uses the name
-//! entry's reserved keys, and a Japanese text shown when no extension
-//! answers. A `{name}` marker in a message stands for a value the port
+//! entry's reserved keys, and a text shown when no extension answers:
+//! Japanese for what the game shows, English for the launcher's screen,
+//! which comes before any ROM is read. A `{name}` marker in a message stands for a value the port
 //! fills in; numbers are printed with full-width digits, as the game's own
 //! values are.
 
@@ -51,6 +52,208 @@ pub const DEMO_THANKS: &str = "port/demo/thanks";
 pub const DEMO_QUESTION: &str = "port/demo/question";
 /// The notice once the game is saved at the end of the demo.
 pub const DEMO_SAVED: &str = "port/demo/saved";
+
+/// The line under the launcher's title.
+pub const LAUNCHER_SUBTITLE: &str = "port/launcher/subtitle";
+/// The label of the launcher's ROM line.
+pub const LAUNCHER_ROM: &str = "port/launcher/rom";
+/// The label of the launcher's translation line.
+pub const LAUNCHER_TRANSLATION: &str = "port/launcher/translation";
+/// The launcher's line that starts the game.
+pub const LAUNCHER_PLAY: &str = "port/launcher/play";
+/// The launcher's line that closes it.
+pub const LAUNCHER_QUIT: &str = "port/launcher/quit";
+/// The ROM line before one is chosen.
+pub const LAUNCHER_NO_ROM: &str = "port/launcher/no-rom";
+/// The translation line without one.
+pub const LAUNCHER_NO_TRANSLATION: &str = "port/launcher/no-translation";
+/// The help for the ROM line before one is chosen.
+pub const LAUNCHER_PICK_ROM: &str = "port/launcher/pick-rom";
+/// The help for the translation line.
+pub const LAUNCHER_PICK_TRANSLATION: &str = "port/launcher/pick-translation";
+/// The ROM is the known release.
+pub const LAUNCHER_ROM_VERIFIED: &str = "port/launcher/rom-verified";
+/// The ROM is the game but not the known dump.
+pub const LAUNCHER_ROM_UNVERIFIED: &str = "port/launcher/rom-unverified";
+/// The ROM is not a game the port plays.
+pub const LAUNCHER_ROM_OTHER: &str = "port/launcher/rom-other";
+/// The ROM cannot be opened or identified.
+pub const LAUNCHER_ROM_UNREADABLE: &str = "port/launcher/rom-unreadable";
+/// The translation was read, with its count of messages.
+pub const LAUNCHER_TRANSLATION_READ: &str = "port/launcher/translation-read";
+/// The translation cannot be opened or parsed.
+pub const LAUNCHER_TRANSLATION_UNREADABLE: &str = "port/launcher/translation-unreadable";
+/// The help for the play line.
+pub const LAUNCHER_READY: &str = "port/launcher/ready";
+/// The launcher's controls.
+pub const LAUNCHER_HELP: &str = "port/launcher/help";
+
+/// The label of the launcher's controls line.
+pub const LAUNCHER_CONTROLS: &str = "port/launcher/controls";
+/// The controls line while every button has its default key.
+pub const LAUNCHER_KEYS_DEFAULT: &str = "port/launcher/keys-default";
+/// The controls line once some button has another key.
+pub const LAUNCHER_KEYS_CUSTOM: &str = "port/launcher/keys-custom";
+/// The help for the controls line.
+pub const LAUNCHER_PICK_CONTROLS: &str = "port/launcher/pick-controls";
+/// The controls screen's help.
+pub const LAUNCHER_CONTROLS_HELP: &str = "port/launcher/controls-help";
+/// The controls screen while it waits for the key of `{button}`.
+pub const LAUNCHER_PRESS_KEY: &str = "port/launcher/press-key";
+/// The controls screen's line that gives every button its default key.
+pub const LAUNCHER_DEFAULT_KEYS: &str = "port/launcher/default-keys";
+/// The controls screen's line back to the launcher's.
+pub const LAUNCHER_BACK: &str = "port/launcher/back";
+/// The pad's directions on the controls screen.
+pub const LAUNCHER_UP: &str = "port/launcher/up";
+/// See [`LAUNCHER_UP`].
+pub const LAUNCHER_DOWN: &str = "port/launcher/down";
+/// See [`LAUNCHER_UP`].
+pub const LAUNCHER_LEFT: &str = "port/launcher/left";
+/// See [`LAUNCHER_UP`].
+pub const LAUNCHER_RIGHT: &str = "port/launcher/right";
+
+/// The launcher's screen, in English until a translation is chosen; one
+/// line each: up to 208 pixels in its panel, 232 across the screen (the
+/// subtitle, the status and the help).
+pub const LAUNCHER_TEXTS: &[PortText] = &[
+    launcher(
+        LAUNCHER_CONTROLS,
+        "Controls",
+        "The label of the controls line",
+    ),
+    launcher(
+        LAUNCHER_KEYS_DEFAULT,
+        "default keys",
+        "The controls line when no key was changed",
+    ),
+    launcher(
+        LAUNCHER_KEYS_CUSTOM,
+        "your keys",
+        "The controls line once a key was changed",
+    ),
+    launcher_line(
+        LAUNCHER_PICK_CONTROLS,
+        "Choose the keys of the buttons.",
+        "Help for the controls line",
+    ),
+    launcher_line(
+        LAUNCHER_CONTROLS_HELP,
+        "X: change   Z: back",
+        "The controls screen's help",
+    ),
+    launcher_line(
+        LAUNCHER_PRESS_KEY,
+        "Press a key for {button}. Esc cancels.",
+        "Waiting for a key; {button} is the button's name",
+    ),
+    launcher(
+        LAUNCHER_DEFAULT_KEYS,
+        "Default keys",
+        "The line that gives every button its default key",
+    ),
+    launcher(
+        LAUNCHER_BACK,
+        "Back",
+        "The line back to the launcher's screen",
+    ),
+    launcher(LAUNCHER_UP, "Up", "The pad's up; up to 40 pixels"),
+    launcher(LAUNCHER_DOWN, "Down", "The pad's down; up to 40 pixels"),
+    launcher(LAUNCHER_LEFT, "Left", "The pad's left; up to 40 pixels"),
+    launcher(LAUNCHER_RIGHT, "Right", "The pad's right; up to 40 pixels"),
+    launcher_line(
+        LAUNCHER_SUBTITLE,
+        "A free port of Zoids Saga (GBA)",
+        "The line under the title",
+    ),
+    launcher(LAUNCHER_ROM, "ROM", "The label of the ROM's line"),
+    launcher(
+        LAUNCHER_TRANSLATION,
+        "Translation",
+        "The label of the translation's line",
+    ),
+    launcher(LAUNCHER_PLAY, "Play", "The line that starts the game"),
+    launcher(LAUNCHER_QUIT, "Quit", "The line that closes the launcher"),
+    launcher(
+        LAUNCHER_NO_ROM,
+        "none",
+        "The ROM's line before one is chosen",
+    ),
+    launcher(
+        LAUNCHER_NO_TRANSLATION,
+        "none (Japanese)",
+        "The translation's line without one",
+    ),
+    launcher_line(
+        LAUNCHER_PICK_ROM,
+        "Choose your Zoids Saga ROM.",
+        "Help for the ROM's line before one is chosen",
+    ),
+    launcher_line(
+        LAUNCHER_PICK_TRANSLATION,
+        "Choose a translation file (.po), or none.",
+        "Help for the translation's line",
+    ),
+    launcher_line(
+        LAUNCHER_ROM_VERIFIED,
+        "Zoids Saga, a verified dump.",
+        "The ROM is the known release",
+    ),
+    launcher_line(
+        LAUNCHER_ROM_UNVERIFIED,
+        "Zoids Saga, but not a verified dump.",
+        "The ROM looks like the game but is not the known dump",
+    ),
+    launcher_line(
+        LAUNCHER_ROM_OTHER,
+        "This ROM is not Zoids Saga.",
+        "Another game, or a Zoids title the port does not play",
+    ),
+    launcher_line(
+        LAUNCHER_ROM_UNREADABLE,
+        "The ROM cannot be read.",
+        "The file could not be opened or identified",
+    ),
+    launcher_line(
+        LAUNCHER_TRANSLATION_READ,
+        "{count} translated messages.",
+        "The translation was read; {count} is its number of messages in plain digits",
+    ),
+    launcher_line(
+        LAUNCHER_TRANSLATION_UNREADABLE,
+        "The translation cannot be read.",
+        "The file could not be opened or parsed",
+    ),
+    launcher_line(LAUNCHER_READY, "Ready to play.", "Help for the play line"),
+    launcher_line(
+        LAUNCHER_HELP,
+        "Arrows: move   X: choose   Z: clear",
+        "The controls, at the bottom",
+    ),
+];
+
+/// Pixels a line of the launcher's panel may take, and one across its
+/// screen.
+const LAUNCHER_PIXELS: usize = 208;
+const LAUNCHER_LINE_PIXELS: usize = 232;
+
+const fn launcher_line(key: &'static str, text: &'static str, note: &'static str) -> PortText {
+    PortText {
+        key,
+        text,
+        note,
+        pixels: LAUNCHER_LINE_PIXELS,
+    }
+}
+
+const fn launcher(key: &'static str, text: &'static str, note: &'static str) -> PortText {
+    PortText {
+        key,
+        text,
+        note,
+        pixels: LAUNCHER_PIXELS,
+    }
+}
 
 /// Every message of the port, in the order the template lists them.
 pub const PORT_TEXTS: &[PortText] = &[
@@ -133,10 +336,14 @@ const WIDEST_VALUES: [(&str, u32); 4] = [
 /// The default text of the message `key`, if the port has one.
 #[must_use]
 pub fn default_text(key: &str) -> Option<&'static str> {
-    PORT_TEXTS
-        .iter()
+    all_texts()
         .find(|text| text.key == key)
         .map(|text| text.text)
+}
+
+/// The game's messages and the launcher's, in the template's order.
+pub fn all_texts() -> impl Iterator<Item = &'static PortText> {
+    PORT_TEXTS.iter().chain(LAUNCHER_TEXTS)
 }
 
 /// The text of the message `key`: an extension's answer, or the port's
@@ -181,7 +388,7 @@ pub fn problems<'a>(
     texts
         .into_iter()
         .filter_map(|(key, text)| {
-            let limit = PORT_TEXTS.iter().find(|port| port.key == key)?.pixels;
+            let limit = all_texts().find(|port| port.key == key)?.pixels;
             let widest = fill(text, &WIDEST_VALUES)
                 .lines()
                 .map(|line| metrics.width(line))
@@ -215,10 +422,10 @@ mod tests {
     #[test]
     fn every_key_is_under_the_prefix_and_its_default_fits() {
         let metrics = TextMetrics::standard();
-        for text in PORT_TEXTS {
+        for text in all_texts() {
             assert!(text.key.starts_with(PORT_PREFIX), "{}", text.key);
         }
-        let defaults = PORT_TEXTS.iter().map(|text| (text.key, text.text));
+        let defaults = all_texts().map(|text| (text.key, text.text));
         assert_eq!(problems(defaults, &metrics), Vec::<String>::new());
     }
 

@@ -1,5 +1,8 @@
 //! Launcher: ROM picker, title detection, transparent extraction and game start.
 
+mod front;
+mod settings;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -11,11 +14,11 @@ use game_core::{
 use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{AudioOut, Display, Event, Frame, Rgb};
-use platform_sdl3::{FileStorage, Sdl3Display, slot_path};
+use platform_sdl3::{FileStorage, Sdl3Display, preferences_dir, slot_path};
 
 /// The function key that turns the debugging mode on or off.
 const DEBUG_KEY: u8 = 10;
-const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--slots <n>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R, Esc quits; F10 turns a debugging mode on and off: the roaming enemies are intangible, to walk through them without battles, and the protagonist's attacks beat what they hit); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --slots sets the save slots (4 by default, 1 for the original's single save): slot 1 is that .sav and slot n the same name with .n before the extension, each a save an emulator can load; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, part, dialogue, system, zoid-guide, character-guide), and the port's own messages (port), by default the title, the name entry, dialogue 30-41 and the port's messages";
+const USAGE: &str = "usage: launcher [<rom-path> [string-id]] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--slots <n>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a ROM the launcher shows its own screen to choose the ROM and a translation, remembered in the user's settings folder; without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R by default, or the keys chosen on the launcher's controls screen; Esc quits; F10 turns a debugging mode on and off: the roaming enemies are intangible, to walk through them without battles, and the protagonist's attacks beat what they hit); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --slots sets the save slots (4 by default, 1 for the original's single save): slot 1 is that .sav and slot n the same name with .n before the extension, each a save an emulator can load; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, part, dialogue, system, zoid-guide, character-guide), and the port's own messages (port), by default the title, the name entry, dialogue 30-41 and the port's messages";
 const DEFAULT_TEMPLATE_SCOPES: [&str; 4] = ["title", "name-entry", "dialogue:30-41", "port"];
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_MAP: usize = extraction::saga::FIRST_ROOM_MAP;
@@ -43,11 +46,37 @@ impl Extension for StorageReport {
 }
 
 fn main() -> Result<()> {
-    let options = Options::parse()?;
-    let rom = std::fs::read(&options.rom_path)
-        .with_context(|| format!("cannot read ROM {}", options.rom_path.display()))?;
+    let mut options = Options::parse()?;
+    let mut display = None;
+    if options.rom_path.is_none()
+        && let Some(path) = &options.dump_path
+    {
+        let settings = settings_path()
+            .map(|path| settings::Settings::load(&path))
+            .unwrap_or_default();
+        let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
+        front::Front::new(&settings).draw(&mut frame);
+        return write_ppm(path, &frame);
+    }
+    if options.rom_path.is_none() {
+        let mut shown = Sdl3Display::open(
+            front::PROJECT_NAME,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+            WINDOW_SCALE,
+        )?;
+        let Some(choice) = front::run(&mut shown, settings_path().as_deref())? else {
+            return Ok(());
+        };
+        options.rom_path = Some(choice.rom);
+        options.translation = choice.translation.or(options.translation);
+        display = Some(shown);
+    }
+    let rom_path = options.rom_path.clone().context(USAGE)?;
+    let rom = std::fs::read(&rom_path)
+        .with_context(|| format!("cannot read ROM {}", rom_path.display()))?;
     let identification = extraction::identify(&rom)
-        .with_context(|| format!("cannot identify ROM {}", options.rom_path.display()))?;
+        .with_context(|| format!("cannot identify ROM {}", rom_path.display()))?;
     print_identification(&identification);
     let title = identification.title.to_string();
     if let Some(string_id) = &options.string_id {
@@ -71,7 +100,7 @@ fn main() -> Result<()> {
     let save_path = options
         .save_path
         .clone()
-        .unwrap_or_else(|| options.rom_path.with_extension(SAVE_EXTENSION));
+        .unwrap_or_else(|| rom_path.with_extension(SAVE_EXTENSION));
     let slots: Vec<Box<dyn platform::SaveStorage>> = (0..options.slots)
         .map(|slot| {
             let path = slot_path(&save_path, slot);
@@ -101,12 +130,23 @@ fn main() -> Result<()> {
             game.draw(&mut frame);
             write_ppm(path, &frame)
         }
-        None => play(&title, &mut game),
+        None => play(display, &mut game),
+    }
+}
+
+/// The launcher's settings file in the user's settings folder.
+fn settings_path() -> Option<PathBuf> {
+    match preferences_dir(settings::ORGANIZATION, settings::APP) {
+        Ok(folder) => Some(folder.join(settings::FILE_NAME)),
+        Err(error) => {
+            eprintln!("Settings:   {error}");
+            None
+        }
     }
 }
 
 struct Options {
-    rom_path: PathBuf,
+    rom_path: Option<PathBuf>,
     string_id: Option<String>,
     dump_path: Option<PathBuf>,
     save_path: Option<PathBuf>,
@@ -118,8 +158,10 @@ struct Options {
 
 impl Options {
     fn parse() -> Result<Self> {
-        let mut args = std::env::args_os().skip(1);
-        let rom_path = args.next().map(PathBuf::from).context(USAGE)?;
+        let mut args = std::env::args_os().skip(1).peekable();
+        let rom_path = args
+            .next_if(|arg| !arg.to_string_lossy().starts_with("--"))
+            .map(PathBuf::from);
         let mut string_id = None;
         let mut dump_path = None;
         let mut save_path = None;
@@ -218,7 +260,11 @@ fn render_string(rom: &[u8], title: Title, string_id: &str) -> Result<Frame> {
 fn show(title: &str, frame: &Frame) -> Result<()> {
     let mut display = Sdl3Display::open(title, frame.width(), frame.height(), WINDOW_SCALE)?;
     loop {
-        if display.poll_events().contains(&Event::Quit) {
+        if display
+            .poll_events()
+            .iter()
+            .any(|event| matches!(event, Event::Quit | Event::Back))
+        {
             return Ok(());
         }
         display.present(frame)?;
@@ -226,8 +272,22 @@ fn show(title: &str, frame: &Frame) -> Result<()> {
     }
 }
 
-fn play(title: &str, game: &mut Game<'_>) -> Result<()> {
-    let mut display = Sdl3Display::open(title, SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_SCALE)?;
+/// Runs the game in `display`, the launcher's window, or a new one.
+fn play(display: Option<Sdl3Display>, game: &mut Game<'_>) -> Result<()> {
+    let mut display = if let Some(display) = display {
+        display
+    } else {
+        let mut display = Sdl3Display::open(
+            front::PROJECT_NAME,
+            SCREEN_WIDTH,
+            SCREEN_HEIGHT,
+            WINDOW_SCALE,
+        )?;
+        if let Some(path) = settings_path() {
+            display.set_keys(&settings::Settings::load(&path).keys);
+        }
+        display
+    };
     let mut audio = match display.open_audio(SAMPLE_RATE) {
         Ok(audio) => Some(audio),
         Err(error) => {
@@ -240,7 +300,7 @@ fn play(title: &str, game: &mut Game<'_>) -> Result<()> {
         let started = std::time::Instant::now();
         for event in display.poll_events() {
             match event {
-                Event::Quit => return Ok(()),
+                Event::Quit | Event::Back => return Ok(()),
                 Event::FunctionKey(DEBUG_KEY) => {
                     let on = game.toggle_debug_mode();
                     eprintln!(
@@ -252,7 +312,7 @@ fn play(title: &str, game: &mut Game<'_>) -> Result<()> {
                         }
                     );
                 }
-                Event::FunctionKey(_) => {}
+                Event::FunctionKey(_) | Event::Key(_) => {}
             }
         }
         game.update(display.input())?;

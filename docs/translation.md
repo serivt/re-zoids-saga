@@ -91,6 +91,11 @@ translated message wider than its note allows.
 | `port/demo/thanks` | あそんでくれて　ありがとう！ and two more lines | The thanks at the end of the demo, 3 lines of 224 pixels |
 | `port/demo/question` | ここまでの記録を　セーブしますか？ | The question after them, over the original's はい/いいえ |
 | `port/demo/saved` | セーブしました。 | The notice once saved |
+| `port/launcher/...` | English | The launcher's screens, main and controls: labels and values of the panel up to 208 pixels (the pad's directions up to 40), the subtitle, status and help lines up to 232 |
+
+The launcher's screen comes before any ROM is read, so its messages are English by
+default and switch to those of the translation chosen on it; the project's name,
+Re:Zoids Saga, is never translated.
 
 ## Fonts and layout
 

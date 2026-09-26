@@ -5,7 +5,7 @@
 use formats::font::{GLYPH_HEIGHT, GLYPH_WIDTH, Glyph, GlyphIndex, shift_jis_code};
 use formats::pixel_font::{PIXEL_FONT_ROWS, PixelFont, PixelGlyph};
 use gba_runtime::ppu::{IndexedImage, Palette, draw_indexed};
-use platform::Frame;
+use platform::{Frame, Rgb};
 
 /// The project's Latin font, an original asset.
 pub const LATIN_FONT_SOURCE: &str = include_str!("../../../assets/fonts/latin/re-zoids-latin.txt");
@@ -208,6 +208,48 @@ impl TextMetrics {
     pub fn width(&self, text: &str) -> usize {
         let inset = text.chars().next().map_or(0, |first| self.inset(first));
         inset + text.chars().map(|ch| self.advance(ch)).sum::<usize>()
+    }
+    /// Pixels `text` takes drawn by [`Self::draw_plain`] at `scale`.
+    #[must_use]
+    pub fn plain_width(&self, text: &str, scale: usize) -> usize {
+        let width: usize = text
+            .chars()
+            .filter_map(|ch| self.latin_glyph(ch))
+            .map(|glyph| usize::from(glyph.width) + LATIN_SPACING)
+            .sum();
+        width.saturating_sub(LATIN_SPACING) * scale
+    }
+
+    /// Draws `text` on one line with the Latin font alone, its top-left
+    /// corner at `(x, y)`, each pixel `scale` times its size and in
+    /// `color`; characters the font lacks are skipped. For the screens
+    /// shown before a ROM is read, such as the launcher's. Returns the
+    /// pixels it took across.
+    pub fn draw_plain(
+        &self,
+        frame: &mut Frame,
+        (x, y): (usize, usize),
+        text: &str,
+        color: Rgb,
+        scale: usize,
+    ) -> usize {
+        let mut pen = x;
+        for glyph in text.chars().filter_map(|ch| self.latin_glyph(ch)) {
+            for row in 0..PIXEL_FONT_ROWS {
+                for column in 0..usize::from(glyph.width) {
+                    if !glyph.pixel(column, row) {
+                        continue;
+                    }
+                    for dy in 0..scale {
+                        for dx in 0..scale {
+                            frame.set_pixel(pen + column * scale + dx, y + row * scale + dy, color);
+                        }
+                    }
+                }
+            }
+            pen += (usize::from(glyph.width) + LATIN_SPACING) * scale;
+        }
+        pen.saturating_sub(x + LATIN_SPACING * scale)
     }
 }
 

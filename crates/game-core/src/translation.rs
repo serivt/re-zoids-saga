@@ -850,7 +850,7 @@ pub fn template(data: &GameData<'_>, scopes: &[Scope]) -> Result<String, Transla
 /// The port's own messages, keyed `port/...`, with the port's Japanese
 /// text as their source.
 fn port_entries(out: &mut String) {
-    for text in port_text::PORT_TEXTS {
+    for text in port_text::all_texts() {
         let _ = writeln!(out, "#. {}", text.note);
         let _ = writeln!(out, "msgctxt {}", quote(text.key));
         let _ = writeln!(out, "msgid {}", quote(text.text));
@@ -1248,7 +1248,7 @@ mod tests {
         assert!(problems[0].starts_with(port_text::SLOT_LEVEL));
         let port = Scope::parse(PORT_SCOPE).unwrap();
         let template = template(&GameData::new(&[]), &[port]).unwrap();
-        for text in port_text::PORT_TEXTS {
+        for text in port_text::all_texts() {
             assert!(template.contains(&format!("msgctxt \"{}\"", text.key)));
         }
     }

@@ -1,8 +1,10 @@
 //! SDL3 implementation of the platform traits, with the save kept as a
-//! file.
+//! file and the system's dialogs.
 
+mod dialog;
 mod storage;
 
+pub use dialog::{FileChoice, preferences_dir};
 pub use storage::{FileStorage, slot_path};
 
 use platform::{AudioOut, Button, Display, Event, Frame, Input, PlatformError};
@@ -18,7 +20,8 @@ const BACKEND: &str = "sdl3";
 const AUDIO_CHANNELS: i32 = 2;
 const BYTES_PER_PAIR: usize = 4;
 const BYTES_PER_PIXEL: usize = 3;
-const KEY_MAP: [(Scancode, Button); 10] = [
+/// The keys the buttons have unless the player chose others.
+const DEFAULT_KEYS: [(Scancode, Button); 10] = [
     (Scancode::Up, Button::Up),
     (Scancode::Down, Button::Down),
     (Scancode::Left, Button::Left),
@@ -35,6 +38,7 @@ const KEY_MAP: [(Scancode, Button); 10] = [
 /// with nearest-neighbor sampling.
 pub struct Sdl3Display {
     sdl: Sdl,
+    keys: Vec<(Scancode, Button)>,
     canvas: WindowCanvas,
     texture_creator: TextureCreator<WindowContext>,
     event_pump: EventPump,
@@ -71,6 +75,7 @@ impl Sdl3Display {
         let event_pump = sdl.event_pump().map_err(backend_error)?;
         Ok(Self {
             sdl,
+            keys: DEFAULT_KEYS.to_vec(),
             canvas,
             texture_creator,
             event_pump,
@@ -153,7 +158,7 @@ impl Display for Sdl3Display {
 
     fn input(&self) -> Input {
         let keys = self.event_pump.keyboard_state();
-        KEY_MAP
+        self.keys
             .iter()
             .filter(|(scancode, _)| keys.is_scancode_pressed(*scancode))
             .fold(Input::default(), |input, (_, button)| input.with(*button))
@@ -163,20 +168,62 @@ impl Display for Sdl3Display {
         self.event_pump
             .poll_iter()
             .filter_map(|event| match event {
-                SdlEvent::Quit { .. }
-                | SdlEvent::KeyDown {
+                SdlEvent::Quit { .. } => Some(Event::Quit),
+                SdlEvent::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } => Some(Event::Quit),
+                } => Some(Event::Back),
                 SdlEvent::KeyDown {
                     keycode: Some(keycode),
+                    scancode,
                     repeat: false,
                     ..
-                } => function_key(keycode).map(Event::FunctionKey),
+                } => function_key(keycode)
+                    .map(Event::FunctionKey)
+                    .or_else(|| scancode.map(|scancode| Event::Key(scancode as u32))),
                 _ => None,
             })
             .collect()
     }
+}
+
+/// The keys of the buttons, by the names [`key_name`] gives.
+pub type KeyMap = Vec<(Button, String)>;
+
+impl Sdl3Display {
+    /// Gives the buttons the keys of `map`; a button it leaves out or
+    /// whose key has no known name keeps its default one.
+    pub fn set_keys(&mut self, map: &[(Button, String)]) {
+        self.keys = DEFAULT_KEYS
+            .iter()
+            .map(|&(default, button)| {
+                let chosen = map
+                    .iter()
+                    .find(|(mapped, _)| *mapped == button)
+                    .and_then(|(_, name)| Scancode::from_name(name));
+                (chosen.unwrap_or(default), button)
+            })
+            .collect();
+    }
+}
+
+/// The buttons' default keys, by name.
+#[must_use]
+pub fn default_keys() -> KeyMap {
+    DEFAULT_KEYS
+        .iter()
+        .map(|&(scancode, button)| (button, scancode.name().to_owned()))
+        .collect()
+}
+
+/// The name of the key [`Event::Key`] reports as `code`, as settings keep
+/// it; `None` for a code with no key.
+#[must_use]
+pub fn key_name(code: u32) -> Option<String> {
+    let code = i32::try_from(code).ok()?;
+    let scancode = Scancode::from_i32(code)?;
+    let name = scancode.name();
+    (!name.is_empty()).then(|| name.to_owned())
 }
 
 /// The number of a function key, F1 to F12.

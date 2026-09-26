@@ -51,11 +51,27 @@ See [AGENTS.md](AGENTS.md) for the architecture, rules and project structure.
 cargo build
 ```
 
+Run the launcher without arguments to get its own screen, **Re:Zoids Saga**: choose your
+ROM and, optionally, a translation (`.po`) in the system's file dialog, then Play (arrows
+move, X chooses, Z clears the translation, Return plays). Controls opens the keys of the
+pad's ten buttons: choose one and press its new key (Esc cancels; a key another button had
+swaps with it), or take the defaults back; the game plays with them from then on. The
+launcher tells whether the ROM is a verified dump, speaks the chosen translation's
+language (English without one), and remembers its choices in the user's settings folder (`launcher.cfg` under
+`re-zoids-saga/launcher`, where SDL keeps a program's preferences: Application Support
+on macOS, `~/.local/share` on Linux, AppData on Windows). Giving a ROM on the command
+line skips the screen, as below.
+
+```bash
+cargo run -p launcher
+```
+
 Play from the publisher logo through the title, the name entry and the opening into the
 first room (arrows move, holding Z while moving runs, X = A, Z = B, Return = START and opens the pause menu, Backspace = SELECT, A = L, S = R, Esc quits; F10 turns a debugging mode on and off: the roaming enemies are intangible, so the player walks through them without battles, and the protagonist's attacks beat whatever they hit); the title's オプション opens the Zoid and character guides (see [docs/guide.md](docs/guide.md)); music and sound effects play through the default audio device; the pause menu's セーブ and the title's つづきから use a `.sav` file next to the ROM, in the original's format, so saves move between this port, emulators and the cartridge (`--save <file.sav>` picks another file, see [docs/formats/save.md](docs/formats/save.md)); unlike the original, the port keeps four save slots, which both ask for: slot 1 is that `.sav` and slot n the same name with `.n` before the extension (`game.2.sav`), each a save an emulator loads (`--slots <n>` sets how many, 1 to 9; `--slots 1` is the original's single save); `--translation <file.po>` shows a downloaded translation and `--export-template <file.pot>` writes the template translators start from (see [docs/translation.md](docs/translation.md));
 the port's story ends with chapter 1: on reaching Sand Colony the game thanks the player, offers to save and goes back to the title (see [docs/events.md](docs/events.md));
 `--room` skips straight to the first room; a `<table>_<index>` string id shows that
-script in its box instead; `--dump frame.ppm` writes a frame instead of opening a window:
+script in its box instead; `--dump frame.ppm` writes a frame instead of opening a window
+(without a ROM, the launcher's screen):
 
 ```bash
 cargo run -p launcher -- path/to/rom.gba

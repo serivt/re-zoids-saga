@@ -106,8 +106,45 @@ pub enum Button {
 }
 
 impl Button {
+    /// Every button, in the order the settings list them.
+    pub const ALL: [Self; 10] = [
+        Self::Up,
+        Self::Down,
+        Self::Left,
+        Self::Right,
+        Self::A,
+        Self::B,
+        Self::L,
+        Self::R,
+        Self::Start,
+        Self::Select,
+    ];
+
     const fn bit(self) -> u16 {
         1 << (self as u16)
+    }
+
+    /// The button's name in settings files, a stable identifier.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Up => "up",
+            Self::Down => "down",
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::A => "a",
+            Self::B => "b",
+            Self::Start => "start",
+            Self::Select => "select",
+            Self::L => "l",
+            Self::R => "r",
+        }
+    }
+
+    /// The button named `name` by [`Self::name`].
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|button| button.name() == name)
     }
 }
 
@@ -136,10 +173,15 @@ impl Input {
 /// Something the person did to the display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
-    /// The window was closed or the person asked to quit.
+    /// The window was closed.
     Quit,
+    /// The key that goes back or leaves (Escape) went down.
+    Back,
     /// Function key F`n` (1–12) went down: the launcher's debugging keys.
     FunctionKey(u8),
+    /// A key went down, by the backend's code for it, for choosing the
+    /// keys of the buttons.
+    Key(u32),
 }
 
 /// A failure of the platform backend.
