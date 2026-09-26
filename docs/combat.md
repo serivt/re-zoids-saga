@@ -1100,6 +1100,13 @@ few frames apart from the original's and the rolls mix in the frame counter.
   load (lines 16 to 93 in the traced scene). The port takes line 16 throughout, so a
   band that moves a pixel in a frame can show it some lines early.
 
+## Debugging aid
+
+In the port's debugging mode (F10 in the launcher, see [field.md](field.md)) the
+protagonist's attacks always land and deal at least the hit points each target has
+left, so a battle ends in a blow or two (`Combat::set_overpowered`). The original has
+no such thing.
+
 ## Not modeled yet
 
 - In the results: the link battles' results (flag `0x20`), a new unit for a party

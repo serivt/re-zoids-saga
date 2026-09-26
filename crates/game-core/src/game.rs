@@ -255,6 +255,9 @@ pub struct Game<'rom> {
     /// Whether the last battle an event fought was lost.
     battle_lost: bool,
     field: Option<Field>,
+    /// Whether the port's debugging mode is on (see
+    /// [`Game::toggle_debug_mode`]).
+    debug: bool,
     events: Events,
     screen: Screen,
     pending_talk: Option<(Talk, u32)>,
@@ -380,6 +383,7 @@ impl<'rom> Game<'rom> {
             battle_lost: false,
             defeated: false,
             field: None,
+            debug: false,
             events: Events::new(),
             screen: Screen::Loading,
             pending_talk: None,
@@ -441,8 +445,10 @@ impl<'rom> Game<'rom> {
 
     /// Keeps what the field screen shows this frame: the original copies its
     /// sprite table, scroll, text layers and brightness at the vertical
-    /// blank, so a frame shows them as the frame before left them.
+    /// blank, so a frame shows them as the frame before left them. The
+    /// field or battle just set up takes the debugging mode too.
     fn latch_screen(&mut self) {
+        self.latch_debug_mode();
         if let Some(field) = self.field.as_mut() {
             field.latch();
         }
@@ -451,6 +457,27 @@ impl<'rom> Game<'rom> {
         }
         self.windows.latch();
         self.shown_brightness = self.events.brightness();
+    }
+
+    /// Turns the port's debugging mode on or off and says whether it is on
+    /// now. While on, the roaming enemies are intangible (the player walks
+    /// through them and no battle starts) and the protagonist's attacks
+    /// always land and beat what they hurt, so a battle ends in a blow or
+    /// two. The original has no such thing.
+    pub fn toggle_debug_mode(&mut self) -> bool {
+        self.debug = !self.debug;
+        self.latch_debug_mode();
+        self.debug
+    }
+
+    /// Hands the debugging mode to the field and the battle on screen.
+    fn latch_debug_mode(&mut self) {
+        if let Some(field) = self.field.as_mut() {
+            field.set_intangible(self.debug);
+        }
+        if let Some(combat) = self.combat.as_mut() {
+            combat.set_overpowered(self.debug);
+        }
     }
 
     /// Advances one frame. The game acts on the buttons of the previous

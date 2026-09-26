@@ -138,6 +138,8 @@ impl Input {
 pub enum Event {
     /// The window was closed or the person asked to quit.
     Quit,
+    /// Function key F`n` (1–12) went down: the launcher's debugging keys.
+    FunctionKey(u8),
 }
 
 /// A failure of the platform backend.

@@ -583,6 +583,12 @@ impl Combat {
         }
     }
 
+    /// Makes the protagonist's attacks land and beat what they hurt, or
+    /// ordinary again. A debugging aid; the original has no such thing.
+    pub fn set_overpowered(&mut self, overpowered: bool) {
+        self.fight.overpowered = overpowered;
+    }
+
     /// Draws from `rng` from now on, the vertical blank counter at
     /// `vblank` (IWRAM `0x03002338`): to replay a battle of the original's.
     pub fn resume_random(&mut self, rng: Rng, vblank: u16) {

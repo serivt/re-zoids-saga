@@ -168,10 +168,35 @@ impl Display for Sdl3Display {
                     keycode: Some(Keycode::Escape),
                     ..
                 } => Some(Event::Quit),
+                SdlEvent::KeyDown {
+                    keycode: Some(keycode),
+                    repeat: false,
+                    ..
+                } => function_key(keycode).map(Event::FunctionKey),
                 _ => None,
             })
             .collect()
     }
+}
+
+/// The number of a function key, F1 to F12.
+fn function_key(keycode: Keycode) -> Option<u8> {
+    const KEYS: [Keycode; 12] = [
+        Keycode::F1,
+        Keycode::F2,
+        Keycode::F3,
+        Keycode::F4,
+        Keycode::F5,
+        Keycode::F6,
+        Keycode::F7,
+        Keycode::F8,
+        Keycode::F9,
+        Keycode::F10,
+        Keycode::F11,
+        Keycode::F12,
+    ];
+    let index = KEYS.iter().position(|&key| key == keycode)?;
+    u8::try_from(index + 1).ok()
 }
 
 fn dimension(pixels: usize) -> Result<u32, PlatformError> {

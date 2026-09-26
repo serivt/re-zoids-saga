@@ -34,6 +34,8 @@ use platform::Input;
 
 /// The frames the panels slide down in once the party engages: two pixels
 /// a frame from 16 (`0x0802E9CC`, state `0x2328`).
+/// The player's character, the protagonist.
+const PROTAGONIST: u8 = 0;
 const PANEL_SLIDE: i32 = 2;
 /// Where the panels start: two rows up, their names hidden.
 pub(super) const PANELS_HIDDEN: i32 = 16;
@@ -658,6 +660,9 @@ impl Spark {
 /// The fight's state beside the controller's.
 #[derive(Default)]
 pub(super) struct Fight {
+    /// The port's debugging aid: the protagonist's attacks always land
+    /// and beat what they hurt.
+    pub(super) overpowered: bool,
     pub(super) order: Vec<(usize, usize)>,
     pub(super) index: usize,
     pub(super) rolls: [u16; ROLLS],
@@ -1316,6 +1321,16 @@ impl Combat {
         Ok(())
     }
 
+    /// Whether the actor is the protagonist while the port's debugging aid
+    /// makes it overwhelming (see [`Combat::set_overpowered`]).
+    fn overwhelms(&self, (side, slot): (usize, usize)) -> bool {
+        self.fight.overpowered
+            && side == PARTY
+            && self.sides[side][slot]
+                .as_ref()
+                .is_some_and(|unit| unit.character == PROTAGONIST)
+    }
+
     /// Applies the chosen attack (`0x08046918`, `0x08033E40`).
     fn apply_attack(&mut self) -> Vec<Hit> {
         let (
@@ -1332,13 +1347,19 @@ impl Combat {
         } else {
             self.terrains.1
         };
+        let overwhelming = self.overwhelms(actor);
         let outcome = attack::attack(
             &mut self.sides,
             actor,
             weapon,
             &targets,
             &self.fight.rolls,
-            (&mut self.fight.accuracy_excess, terrain, self.chapter),
+            (
+                &mut self.fight.accuracy_excess,
+                terrain,
+                self.chapter,
+                overwhelming,
+            ),
         );
         self.fight.experience = self.fight.experience.wrapping_add(outcome.experience);
         self.fight.money = self.fight.money.wrapping_add(outcome.money);

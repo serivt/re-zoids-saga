@@ -13,7 +13,9 @@ use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{AudioOut, Display, Event, Frame, Rgb};
 use platform_sdl3::{FileStorage, Sdl3Display};
 
-const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R, Esc quits); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, part, dialogue, system, zoid-guide, character-guide), by default the title, the name entry and dialogue 30-41";
+/// The function key that turns the debugging mode on or off.
+const DEBUG_KEY: u8 = 10;
+const USAGE: &str = "usage: launcher <rom-path> [string-id] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R, Esc quits; F10 turns a debugging mode on and off: the roaming enemies are intangible, to walk through them without battles, and the protagonist's attacks beat what they hit); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, part, dialogue, system, zoid-guide, character-guide), by default the title, the name entry and dialogue 30-41";
 const DEFAULT_TEMPLATE_SCOPES: [&str; 3] = ["title", "name-entry", "dialogue:30-41"];
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_MAP: usize = extraction::saga::FIRST_ROOM_MAP;
@@ -218,8 +220,22 @@ fn play(title: &str, game: &mut Game<'_>) -> Result<()> {
     let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
     loop {
         let started = std::time::Instant::now();
-        if display.poll_events().contains(&Event::Quit) {
-            return Ok(());
+        for event in display.poll_events() {
+            match event {
+                Event::Quit => return Ok(()),
+                Event::FunctionKey(DEBUG_KEY) => {
+                    let on = game.toggle_debug_mode();
+                    eprintln!(
+                        "debug mode {}",
+                        if on {
+                            "on: intangible enemies, overwhelming protagonist"
+                        } else {
+                            "off"
+                        }
+                    );
+                }
+                Event::FunctionKey(_) => {}
+            }
         }
         game.update(display.input())?;
         if let Some(audio) = &mut audio

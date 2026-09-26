@@ -216,6 +216,14 @@ after the Gustav reaches the cell before the door.
 
 START opens the menu described in [menu.md](menu.md); the field waits underneath it.
 
+## Debugging aid
+
+F10 in the launcher turns a debugging mode on and off (`Game::toggle_debug_mode`). While
+it is on, on every map, the roaming enemies are intangible: the player walks through them
+and none meets it in battle. In battle the protagonist's attacks always land and beat
+what they hit (see [combat.md](combat.md)). It is not the original's: only the port has
+it, for moving around and testing quickly.
+
 ## Not modeled yet
 
 The black after a door for loads other than the one measured, the code-driven scripts of characters

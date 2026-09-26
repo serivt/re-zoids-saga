@@ -741,6 +741,9 @@ pub struct Field {
     shown: Option<Shown>,
     /// Sound effects the actors asked for, not yet played.
     sounds: Vec<u16>,
+    /// A debugging aid the original has not: the roaming enemies neither
+    /// block the player nor meet it.
+    intangible: bool,
 }
 
 impl Field {
@@ -765,6 +768,7 @@ impl Field {
             culled: vec![false],
             shown: None,
             sounds: Vec::new(),
+            intangible: false,
         }
     }
 
@@ -815,6 +819,7 @@ impl Field {
             culled: Vec::new(),
             shown: None,
             sounds: Vec::new(),
+            intangible: false,
         };
         field.player_mut().place((column, row));
         field.sort_actors();
@@ -1104,6 +1109,9 @@ impl Field {
     /// roaming enemy, on the same level, the player in control; an enemy
     /// does not reach a player on an exit's cell.
     fn meeting(&self, index: usize, direction: Direction) -> Option<usize> {
+        if self.intangible {
+            return None;
+        }
         let (dx, dy) = direction.delta();
         let (column, row) = self.actors[index].footing();
         let ahead = (column.checked_add_signed(dx)?, row.checked_add_signed(dy)?);
@@ -1275,8 +1283,22 @@ impl Field {
             other != index
                 && actor.visible
                 && actor.behavior != PASSABLE_BEHAVIOR
+                && !(self.intangible && index == 0 && Self::roaming_enemy(actor))
                 && (actor.footing() == (column, row) || actor.previous_footing() == (column, row))
         })
+    }
+
+    /// Whether `actor` is an enemy roaming a Zoid map, which meets the
+    /// player in battle.
+    fn roaming_enemy(actor: &Actor) -> bool {
+        actor.behavior == ZOID_BEHAVIOR && actor.command == Command::Chase
+    }
+
+    /// Makes the roaming enemies intangible, or solid again: when
+    /// intangible the player walks through them and none meets it in
+    /// battle. A debugging aid; the original has no such thing.
+    pub fn set_intangible(&mut self, intangible: bool) {
+        self.intangible = intangible;
     }
 
     fn talk(&mut self) -> Option<FieldEvent> {
@@ -1819,6 +1841,15 @@ mod tests {
         );
         assert_eq!(field.actors[1].facing, Direction::Left);
         assert!(!field.player().walking());
+    }
+
+    #[test]
+    fn intangible_enemies_let_the_carrier_through_without_a_battle() {
+        let mut field = zoid_field();
+        field.actors.push(enemy(4, 1));
+        field.set_intangible(true);
+        assert_eq!(field.update(held(Direction::Right)), None);
+        assert!(field.player().walking());
     }
 
     #[test]

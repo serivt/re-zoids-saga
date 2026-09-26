@@ -148,7 +148,8 @@ pub struct Outcome {
 /// below `(bonus >> 1) + 2`, `bonus` being the accuracy past 100 of the
 /// last chance to hit that went past it this turn, which each target's
 /// updates. `terrain` is the attacker's side's ground, `chapter` the
-/// game's.
+/// game's. An `overwhelming` attack, the port's debugging aid, always
+/// lands and beats what it hurts.
 #[must_use]
 pub fn attack(
     sides: &mut Sides,
@@ -156,7 +157,7 @@ pub fn attack(
     weapon: usize,
     targets: &[usize],
     rolls: &[u16; ROLLS],
-    (bonus, terrain, chapter): (&mut u16, u8, u8),
+    (bonus, terrain, chapter, overwhelming): (&mut u16, u8, u8, bool),
 ) -> Outcome {
     let mut outcome = Outcome::default();
     let Some(attacker) = sides[side][slot].clone() else {
@@ -192,12 +193,16 @@ pub fn attack(
             *bonus = excess;
         }
         let immune = target.traits & NO_CRITICAL != 0 && chapter >= CRITICAL_FROM_CHAPTER;
-        blow.flags |= landing(
-            chance,
-            rolls[ROLLS - 1 - k.min(ROLLS - 1)],
-            *bonus,
-            (arms.flags & KEEN != 0, immune),
-        );
+        blow.flags |= if overwhelming {
+            LANDED
+        } else {
+            landing(
+                chance,
+                rolls[ROLLS - 1 - k.min(ROLLS - 1)],
+                *bonus,
+                (arms.flags & KEEN != 0, immune),
+            )
+        };
         if arms.flags & OFFENSIVE == 0 {
             if let Some(unit) = sides[aimed][target_slot].as_mut() {
                 support(unit, &arms, &mut blow);
@@ -217,6 +222,9 @@ pub fn attack(
                 weapon,
                 blow.critical(),
             );
+            if overwhelming {
+                blow.damage = blow.damage.max(target.hp.saturating_mul(1 << 16));
+            }
             if let Some(unit) = sides[aimed][target_slot].as_mut() {
                 unit.hp -= blow.damage >> 16;
                 if unit.hp < 1 {
@@ -403,7 +411,14 @@ mod tests {
         let mut rolls = [99; ROLLS];
         rolls[15] = 40;
         rolls[14] = 1;
-        let outcome = attack(&mut sides, (0, 0), 0, &[2, 3], &rolls, (&mut 0, 0, 1));
+        let outcome = attack(
+            &mut sides,
+            (0, 0),
+            0,
+            &[2, 3],
+            &rolls,
+            (&mut 0, 0, 1, false),
+        );
         assert!(outcome.blows[0].landed() && !outcome.blows[0].critical());
         assert_eq!(outcome.blows[0].damage >> 16, 12);
         assert!(outcome.blows[1].critical());
@@ -432,7 +447,7 @@ mod tests {
         let mut sides: Sides = Default::default();
         sides[0][1] = Some(unit(50, Some(shield())));
         let rolls = [99; ROLLS];
-        let outcome = attack(&mut sides, (0, 1), 0, &[1], &rolls, (&mut 0, 0, 1));
+        let outcome = attack(&mut sides, (0, 1), 0, &[1], &rolls, (&mut 0, 0, 1, false));
         let blow = outcome.blows[0];
         assert!(blow.landed());
         assert_eq!((blow.kind, blow.code, blow.damage), (RAISED, 0x101, 40));
@@ -464,7 +479,14 @@ mod tests {
         let mut hurt = unit(100, Some(repair));
         hurt.hp = 80;
         sides[0][0] = Some(hurt);
-        let outcome = attack(&mut sides, (0, 0), 0, &[0], &[0; ROLLS], (&mut 0, 0, 1));
+        let outcome = attack(
+            &mut sides,
+            (0, 0),
+            0,
+            &[0],
+            &[0; ROLLS],
+            (&mut 0, 0, 1, false),
+        );
         assert_eq!(
             (outcome.blows[0].kind, outcome.blows[0].damage),
             (REPAIRED, 20)
@@ -480,7 +502,14 @@ mod tests {
             ..shield()
         };
         sides[0][0] = Some(unit(100, Some(once)));
-        let outcome = attack(&mut sides, (0, 0), 0, &[0], &[0; ROLLS], (&mut 0, 0, 1));
+        let outcome = attack(
+            &mut sides,
+            (0, 0),
+            0,
+            &[0],
+            &[0; ROLLS],
+            (&mut 0, 0, 1, false),
+        );
         assert_eq!(outcome.blows[0].kind, RESTORED);
         assert_eq!(sides[0][0].as_ref().and_then(|unit| unit.weapons[0]), None);
     }
@@ -491,8 +520,19 @@ mod tests {
         sides[0][0] = Some(unit(50, Some(gun())));
         sides[1][0] = Some(unit(20, None));
         let rolls = [95; ROLLS];
-        let outcome = attack(&mut sides, (0, 0), 0, &[0], &rolls, (&mut 0, 0, 1));
+        let outcome = attack(&mut sides, (0, 0), 0, &[0], &rolls, (&mut 0, 0, 1, false));
         assert!(!outcome.blows[0].landed());
         assert_eq!(sides[1][0].as_ref().map(|unit| unit.hp), Some(20));
+    }
+
+    #[test]
+    fn an_overwhelming_attack_lands_and_beats_its_target() {
+        let mut sides: Sides = Default::default();
+        sides[0][0] = Some(unit(50, Some(gun())));
+        sides[1][0] = Some(unit(500, None));
+        let rolls = [95; ROLLS];
+        let outcome = attack(&mut sides, (0, 0), 0, &[0], &rolls, (&mut 0, 0, 1, true));
+        assert!(outcome.blows[0].landed() && outcome.blows[0].destroyed());
+        assert_eq!(sides[1][0].as_ref().map(|unit| unit.hp), Some(0));
     }
 }
