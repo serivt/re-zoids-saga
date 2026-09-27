@@ -11,6 +11,7 @@
 mod chapter2;
 mod chapter3;
 mod chapter4;
+mod chapter5;
 
 use crate::event::{
     AT_THE_PORTAL, BELOW_THE_PORTAL, BLACK, ChestKind, EXIT_ARRIVAL, FIELD_HOOK, HERE, MAP_TASK,
@@ -1715,9 +1716,9 @@ const PORTAL_ARRIVAL_SOUND: u16 = 0x49;
 const PORTAL_BRINGS_STEP: usize = 32;
 /// Sand Colony's field, where the party goes on (map 31).
 const SAND_COLONY_FIELD: usize = 31;
-/// Where the port's story stops, and its demo ends: chapter 5's first map
-/// once chapter 4 is over.
-pub const DEMO_END: (usize, u16) = chapter4::STORY_END;
+/// Where the port's story stops, and its demo ends: chapter 6's first map
+/// once chapter 5 is over.
+pub const DEMO_END: (usize, u16) = chapter5::STORY_END;
 /// A cell off the map, left of its top row.
 const BESIDE_THE_MAP: (usize, usize) = (0xFF, 0);
 
@@ -2027,7 +2028,7 @@ const fn named_reward(label: u16) -> [Op; 7] {
 }
 
 /// Zoid core: Ｚｉデータ用アイテム「…」を手に入れた.
-const CORE_REWARD: [Op; 7] = named_reward(0x28);
+pub(super) const CORE_REWARD: [Op; 7] = named_reward(0x28);
 /// Part: 武装「…」を手に入れた.
 const PART_REWARD: [Op; 7] = named_reward(0x29);
 /// Consumable: アイテム「…」を手に入れた.
@@ -2193,7 +2194,9 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
         34 => Some(chapter2::HOUSE_ARRIVAL),
         37 => Some(chapter2::HIDEOUT_ARRIVAL),
         38 => Some(chapter2::CANYON_ARRIVAL),
-        _ => chapter3::map_handler(map).or_else(|| chapter4::map_handler(map)),
+        _ => chapter3::map_handler(map)
+            .or_else(|| chapter4::map_handler(map))
+            .or_else(|| chapter5::map_handler(map)),
     }
 }
 
@@ -2268,6 +2271,7 @@ pub fn talk_handler(address: u32) -> Option<&'static [Op]> {
         0x0800_9108 => Some(ARCANA_LAB),
         _ => chapter2::talk_handler(address)
             .or_else(|| chapter3::talk_handler(address))
-            .or_else(|| chapter4::talk_handler(address)),
+            .or_else(|| chapter4::talk_handler(address))
+            .or_else(|| chapter5::talk_handler(address)),
     }
 }

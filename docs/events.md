@@ -552,10 +552,81 @@ continuing a patched save on the spot, the hook takes the control from the party
 first field frame, as the original's does, before the roaming enemy beside the spot can
 step in.
 
+## Chapter 5
+
+Source of knowledge: own reading of the area's map handlers, the tasks and field hooks
+they install, the objects' code, the match task at `0x0801A3DC` and the routines named
+below; checked against a reference emulator with saves patched to each scene's flags,
+as the earlier chapters'. Implemented in `crates/game-core/src/story/chapter5.rs` and,
+for the colosseum's data, `crates/extraction/src/saga_arena.rs`.
+
+Area 5 is maps 133 to 175: the colosseum's district (133), a Zoid map with the portal,
+Dr. Tros's rooms (134 to 136), the South, East and Main domes' halls (143, 146, 149) and
+desks (144, 147, 150), the arena (152), and the Emperor's castle and the kingdom's base
+again (165 to 175). The chapter's story:
+
+| Where | Handler | Condition | What happens | Sets |
+|---|---|---|---|---|
+| 165 | `0x08019B04` | not `0x178` | The characters of group 4 are met (`0x080099E4`); the throne room loads with the Emperor and Blood (ROM `0x08668558`) and the opening runs (task `0x08019BEC`): Blood hears of Zoid battles (`0x123`); the soldiers sense the device (168, `0x124`); Jack brings the news (174, `0x125`) | `0x178` |
+| 133 | `0x08018EEC` | `0x178`, not `0x179` | Into the battle field (task `0x08019DE4`): the portal brings the Gustav (`0x126`); shells fall three times around it (`0x08016CA8`, sound `0x5B`) and three more as it drives on (`0x127`); the judge calls the battle off (`0x128`); Blood's team (`0x129`, `0x12A`) and Team Blitz (`0x12B`) drive up; at Dr. Tros's (135, 136) the party hears of the colosseum and of the missing rankers, and Team Blitz joins (`0x12C`, `0x12D`, lists 13 to 15) | `0x179` |
+| 133 | | `0x179`, not `0x17A` | Team Blitz tells how to reach the champion's final (task `0x0801A2DC`, `0x12F`); a beaten party is taken to Dr. Tros's from then on (return point 12) | `0x17A` |
+| 133 | `0x08018FCC` (object 1) | | The Zoid Federation's Ultrasaurus orders the party away (`0x16C`); any answer but the first starts story battle 25 from the hook `0x08018FFC` | |
+| 144, 147 | `0x080191E4`, `0x08019518` (the desks) | | Before entering, the desk offers its dome's tournament (`0x130`, `0x14D`); entered, the dome keeps the party in and is the return point (13, 14); then it starts the next match, or explains its regulation; once the dome is won it sends the party elsewhere (`0x131`, `0x14E`) | `0x17B`, `0x183` |
+| 143, 146, 149 | `0x0801907C`, `0x080193B4`, `0x080196E8` | entered, dome not won | The hooks `0x080190B0`, `0x080193E8`, `0x080197B0` watch the hall's doorway (x `0x158` to `0x178`, `0x148` to `0x188` in the Main hall, y `0x1B0`): the desk's warning (`0x132`, `0x14F`, `0x170`); leaving clears the tournament's flags and takes the party outside, staying brings it back in | |
+| 150 | `0x080198E0` (the desk) | | Once the South and East domes are won, the Main dome's tournament (`0x16D`), the first time with Bit and Ballad (task `0x0801AEDC`, `0x16F`: Bit joins, list 20, and Ballad if taken, list 21, flag `0x190`); return point 15; otherwise `0x16E` | `0x193`, `0x189` |
+| 149 | `0x0801973C` (object 1) | entered, `0x190` not set | Ballad offers his services (`0x171`); taken, he joins and the hall reloads without him (hook `0x0801977C`) | `0x190` |
+
+The matches (task `0x0801A3DC` with `n`, table at ROM `0x08668E7C`): the desk asks
+(`question`); the South dome's last match brings Naomi first (`0x144` to `0x146`), the
+East dome's Harry's team (`0x161` to `0x164`), the final Leena's thanks (`0x184`; the
+original sets flag `0x190` there where it means to test it, so Ballad has joined from
+then on); the arena (map 152) loads with the match's enemies and judge and a Zoid for
+each member of the formation (see `saga_arena`); the judge opens; story battle 10 + `n`
+follows from the hook `0x0801AE30`. Lost, the party goes back to the desk; won, the
+match's flag is set (`0x17D`–`0x181`, `0x184`–`0x188`, `0x18A`–`0x18E`) and the judge
+closes (ROM `0x086690AC`). The South dome's last win brings Naomi's team (`0x149`): she
+joins (`0x14C`, list 16) unless the East dome was won first, when Harry shows up
+(`0x14A`, `0x14B`); the East dome's brings Harry's team (`0x167`, `0x168`): they join
+(`0x16B`, lists 17 to 19) unless the South dome was won first, when his friends take him
+away (`0x169`, `0x16A`). Flags `0x182` and `0x17C` keep which dome was won first, and
+`0x191`, `0x192` that each scene has run.
+
+The desks check the matches' regulations (`0x08038654`, routines at ROM `0x0867E404`):
+the formation's filled slots at most 4 (matches 2 and 7), 3 (12 and 14) or 2 (13); at
+most 3, all flying (3), all small (4), all medium (8), one large (9), or all of the
+Liger, Tiger and Wolf types listed at ROM `0x0867E440` (11); anything for the rest.
+The size class and the flying flag are the Zoid record's `+4` and `+0` bit 2.
+
+The final won (`0x0801AD18`): to the duel's song Blood gives up the fight but not the
+Trinity Liger (`0x187` to `0x189`); the hooks stage battle scenes 2 and 3 to the
+Liger's song (`0x08012040`, see [battle.md](battle.md)) between the broken Liger and
+Blood's escape (`0x18A`); the farewells follow (task `0x0801B108`: `0x18B`, `0x18C`,
+Dr. Tros's Zoid core `0x14` announced as a chest's, `0x080379B4`), lists 13 to 21
+leave, and the hook `0x0801B224` warps to map 205, chapter 6's first.
+
+The teachers use `0x08012090`: deck commands 18, 5 and 30 (`0x08006B50` on), and 20
+(`0x08009570` through `0x08009430`). The keepers (`0x080091F8` on): item shops 8 and 20,
+armaments shops 9 to 16, and the labs 6 to 10.
+
+What the chapter needed of the engine: the regulation check and the arena's load
+(`Op::IfRegulation`, `Op::LoadArena`), a warp that keeps the player's cell and facing,
+and staged battle scenes played as attacks.
+
+Checked against the original, scene by scene from patched saves: the opening, the
+arrival with its shelling, Team Blitz's talk, a desk's offer and a match to its battle
+(the arena's load and the judge's lines on the original's frames), the regulations'
+refusals, the South and East domes' last matches and their scenes, the leaving hook,
+the Ultrasaurus, Ballad, and the final to chapter 6's first map, with the enemies'
+hit points kept at 1 in the original and the protagonist overpowered in the port, the
+formation cut to three and its units given 9999 hit points on both sides. Every
+interval that no key bounds is equal but for the loads and the staged scenes' first
+shots (see [battle.md](battle.md)).
+
 ## The end of the demo (a port feature)
 
-Source of knowledge: this project's own design. The port's story stops where chapter 4
-does, in chapter 5's first map (165) once Gale is beaten (flag `0x177`). When
+Source of knowledge: this project's own design. The port's story stops where chapter 5
+does, in chapter 6's first map (205) once the colosseum's final is won (flag `0x18E`).
+When
 the player walks freely there in full light (after the scene's fade in, or after
 continuing a save made there), the game waits a second and ends the demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the
 player (`port/demo/thanks`) and waits for A with the prompt blinking; it then asks
@@ -622,10 +693,10 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
   takes it away. The chapter's way into map 23 does not need it: the corridor (17)
   leads through maps 18, 19 and 21 to map 23's left entrance, (0, 3), where its
   handler stands the player; map 20 is the factory's other door, from the world map.
-- Chapters 2 to 4: the time the original's loader takes for each map (the cutscene
-  loads and warps of Sand Colony, the deserts, the ruins and chapters 3 and 4's Zoid maps
-  take 10 to 30 frames longer than the port's estimate, see "Chapter 2" to "Chapter 4"
-  above), and the page turns of a message under keys pressed every other frame, which
+- Chapters 2 to 5: the time the original's loader takes for each map (the cutscene
+  loads and warps of Sand Colony, the deserts, the ruins and the later chapters' Zoid
+  maps take 10 to 30 frames longer than the port's estimate, see "Chapter 2" to
+  "Chapter 5" above), and the page turns of a message under keys pressed every other frame, which
   the original takes two frames longer to accept.
 - A portal's wait for the cell below it to clear before it brings someone out (see
   [field.md](field.md), Portals).

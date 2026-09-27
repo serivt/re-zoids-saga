@@ -48,8 +48,9 @@ const LOAD_FRAMES: u32 = 6;
 /// A walking animation's number past its standing one.
 const WALKING: usize = 4;
 
-/// A [`Op::LoadMap`] player cell that keeps the player where it stands
-/// (the handlers that pass the player entity's own cell).
+/// A [`Op::LoadMap`] or [`Op::Warp`] player cell that keeps the player
+/// where it stands (the handlers that pass the player entity's own cell),
+/// a warp keeping its facing too.
 pub const HERE: (usize, usize) = (usize::MAX, usize::MAX);
 /// The repeat count of a program that runs until its task ends.
 const FOREVER: u16 = 0;
@@ -315,6 +316,16 @@ pub enum Op {
         /// Program run otherwise.
         otherwise: &'static [Op],
     },
+    /// Runs `then` when the formation meets the regulation of the
+    /// colosseum's match `game` (`0x08038654`), `otherwise` else.
+    IfRegulation {
+        /// The match, 0 to 14.
+        game: u8,
+        /// Program run when it does.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
     /// Runs `then` when byte `at` of the game-state block is not 0,
     /// `otherwise` else.
     IfStateSet {
@@ -458,6 +469,12 @@ pub enum Op {
         /// Objects in the list.
         count: usize,
     },
+    /// Loads the colosseum's arena for match `n` (`0x0801A70C`): its list
+    /// with the formation's members after it (see
+    /// [`extraction::saga_arena::arena_objects`]) and the player on
+    /// [`extraction::saga_arena::ARENA_CELL`], holding the game as
+    /// [`Op::LoadMap`] does.
+    LoadArena(u8),
 }
 
 /// What an event asks of the game it runs in.
@@ -489,6 +506,11 @@ pub trait EventHost {
     fn play_sound(&mut self, sound: u16);
     /// Loads a map for a cutscene (`0x080076C0`).
     fn load_map(&mut self, map: usize, player: (usize, usize), objects: u32, count: usize);
+    /// Loads the arena for match `game` and returns how many objects it
+    /// has.
+    fn load_arena(&mut self, game: u8) -> usize;
+    /// Whether the formation meets match `game`'s regulation.
+    fn meets_regulation(&self, game: u8) -> bool;
     /// Starts map `map`'s song unless it plays already, as the cutscene
     /// loader does last.
     fn start_map_music(&mut self, map: usize);
@@ -1107,6 +1129,7 @@ impl Events {
             | Op::FadeOutHolding
             | Op::FadeOutHoldingAfter(_)
             | Op::LoadMap { .. }
+            | Op::LoadArena(_)
             | Op::TakeExit
             | Op::Warp { .. } => self.wait(slot, op, host),
             Op::IfFlags { .. }
@@ -1117,6 +1140,7 @@ impl Events {
             | Op::IfChest { .. }
             | Op::IfZiDataHeld { .. }
             | Op::IfZoidOwned { .. }
+            | Op::IfRegulation { .. }
             | Op::IfStateSet { .. }
             | Op::IfPlayerSprite { .. }
             | Op::IfPlayerOn { .. }
@@ -1233,6 +1257,11 @@ impl Events {
                 } else {
                     self.loading_map = Some(map);
                 }
+                return self.hold_loading(slot, count);
+            }
+            Op::LoadArena(game) => {
+                let count = host.load_arena(game);
+                self.loading_map = Some(extraction::saga_arena::ARENA_MAP);
                 return self.hold_loading(slot, count);
             }
             Op::Warp { map, cell, facing } => {
@@ -1448,6 +1477,11 @@ impl Events {
                 then,
                 otherwise,
             } => taken(host.zoid_owned(zoid), then, otherwise),
+            Op::IfRegulation {
+                game,
+                then,
+                otherwise,
+            } => taken(host.meets_regulation(game), then, otherwise),
             Op::IfStateSet {
                 at,
                 then,
@@ -1831,6 +1865,15 @@ mod tests {
 
         fn load_map(&mut self, map: usize, _: (usize, usize), _: u32, _: usize) {
             self.log.push(format!("map {map}"));
+        }
+
+        fn load_arena(&mut self, game: u8) -> usize {
+            self.log.push(format!("arena {game}"));
+            1
+        }
+
+        fn meets_regulation(&self, game: u8) -> bool {
+            game < 2
         }
 
         fn meet(&mut self, group: u8) {

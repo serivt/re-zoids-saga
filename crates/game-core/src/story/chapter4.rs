@@ -1209,10 +1209,6 @@ const TO_CHAPTER_5: &[Op] = &[
     Op::End,
 ];
 
-/// Where the port's story stops: chapter 5's first map once chapter 4 is
-/// over.
-pub(super) const STORY_END: (usize, u16) = (CHAPTER_5_START, GALE_BEATEN);
-
 /// The Deme base's yard watches (the hooks `0x08017208` and `0x08017264`):
 /// once the player's sprite stands on the spot, the first time Hiltz's
 /// scene starts; after it, until Gale is beaten, Gale's.

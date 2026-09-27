@@ -21,9 +21,9 @@ use extraction::saga::{
     BootError, CHEST_FLAG_BASE, FIRST_ROOM_MAP, OPENING_SEEN_FLAG, ObjectScript, PLAYER_START,
     Reward, SpriteSheetError,
 };
-use extraction::saga_party;
 use extraction::saga_save::SaveDataError;
 use extraction::saga_shop::{self, ITEM_LIMIT, Item, ItemKind, MONEY_LIMIT, PART_LIMIT};
+use extraction::{saga_arena, saga_party};
 use formats::Progress;
 use formats::m4a::M4aError;
 use formats::progress::{FLAG_WORDS, encode_name};
@@ -2024,6 +2024,34 @@ impl EventHost for Host<'_, '_> {
         }
     }
 
+    fn load_arena(&mut self, game: u8) -> usize {
+        let map = saga_arena::ARENA_MAP;
+        self.objects.enter(&self.data, self.state, map, self.frame);
+        let loaded = saga_arena::arena_objects(self.data.bytes(), self.state, usize::from(game))
+            .map_err(FieldError::from)
+            .and_then(|objects| {
+                let count = objects.len();
+                let mut field =
+                    Field::load_with(&self.data, map, saga_arena::ARENA_CELL, &objects)?;
+                field.show_party_zoids(&self.data, self.state)?;
+                Ok((field, count))
+            });
+        match loaded {
+            Ok((field, count)) => {
+                *self.field = Some(field);
+                count
+            }
+            Err(error) => {
+                self.fail(error);
+                0
+            }
+        }
+    }
+
+    fn meets_regulation(&self, game: u8) -> bool {
+        saga_arena::meets_regulation(self.data.bytes(), self.state, usize::from(game))
+    }
+
     fn start_map_music(&mut self, map: usize) {
         let song = self
             .extensions
@@ -2302,6 +2330,14 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn warp(&mut self, map: usize, cell: (usize, usize), facing: Option<Direction>) -> usize {
+        let standing = self.field.as_ref().map(|field| {
+            let player = field.player();
+            ((player.column, player.row), player.facing)
+        });
+        let (cell, facing) = match standing {
+            Some((here, faced)) if cell == crate::event::HERE => (here, facing.or(Some(faced))),
+            _ => (cell, facing),
+        };
         self.objects.enter(&self.data, self.state, map, self.frame);
         let loaded = Field::load(&self.data, map, cell).and_then(|mut field| {
             AreaObjects::place(&self.data, self.state, map, &mut field)?;
