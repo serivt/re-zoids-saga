@@ -35,6 +35,7 @@ mod items;
 mod parts;
 mod save_slots;
 mod shop;
+mod zi_data;
 
 pub use shop::Shop;
 
@@ -364,6 +365,8 @@ enum MenuState {
     Arms(usize),
     /// The stocked weapons and support parts.
     Stock,
+    /// The Zi data or the Zi-data items.
+    ZiList,
     /// The party's items.
     Items,
     /// The member whose Zoid gets the item.
@@ -419,6 +422,10 @@ pub struct PauseMenu {
     stock: Vec<u16>,
     stock_page: usize,
     stock_shown: Option<usize>,
+    zi_list: Vec<u8>,
+    zi_page: usize,
+    zi_shown: Option<usize>,
+    zi_kind: zi_data::ZiList,
     item_menu: items::ItemMenu,
     /// The port's save slots.
     save: save_slots::SaveSlots,
@@ -509,6 +516,10 @@ impl PauseMenu {
             stock: Vec::new(),
             stock_page: 0,
             stock_shown: None,
+            zi_list: Vec::new(),
+            zi_page: 0,
+            zi_shown: None,
+            zi_kind: zi_data::ZiList::default(),
             item_menu: items::ItemMenu::default(),
             save: save_slots::SaveSlots::default(),
             equipment: equipment::Equipment::default(),
@@ -769,6 +780,7 @@ impl PauseMenu {
                 self.return_to(rom, Return::Character, windows)?;
             }
             MenuState::Stock => self.stock_choice(rom, code, choice, windows)?,
+            MenuState::ZiList => self.zi_choice(rom, code, choice, windows)?,
             MenuState::Items => self.item_choice(rom, code, choice, windows)?,
             MenuState::ItemTarget => self.target_choice(rom, code, choice, windows)?,
             MenuState::Notice(back) => self.return_to(rom, back, windows)?,
@@ -1335,8 +1347,8 @@ impl PauseMenu {
             STATUS_UNIT => self.open_units(rom, windows),
             STATUS_CHARACTER => self.open_character(rom, windows),
             STATUS_WEAPONS => self.open_stock(rom, windows),
-            STATUS_ZI_DATA => self.empty_list(SCRIPT_NO_ZI_DATA, windows),
-            STATUS_ZI_ITEMS => self.empty_list(SCRIPT_NO_ZI_ITEMS, windows),
+            STATUS_ZI_DATA => self.open_zi_data(rom, windows),
+            STATUS_ZI_ITEMS => self.open_zi_items(rom, windows),
             STATUS_BOOK => {
                 self.run_now(rom, SCRIPT_BOOK_WINDOW, windows)?;
                 windows.clear_window(HELP_WINDOW);

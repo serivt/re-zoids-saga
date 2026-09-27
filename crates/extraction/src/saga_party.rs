@@ -42,6 +42,14 @@ const SPECIAL_UNIT: u16 = 4;
 pub(crate) const ZOID_RECORDS: usize = 0x0067_0210;
 pub(crate) const ZOID_RECORD_LEN: usize = 0x4C;
 const ZOID_PARTS: usize = 8;
+const DEVELOPMENT_MONEY: usize = 0x24;
+const DEVELOPMENT_ZOID: usize = 0x2C;
+const DEVELOPMENT_ITEMS: usize = 0x2D;
+/// The Zoid pictures whose Zi data the party can hold: the bytes at
+/// `+0x33E2` the Zi data list reads (`0x0804E3A0`).
+pub const ZI_DATA_ZOIDS: u8 = 0x99;
+/// A development's Zoid or item that is not needed.
+pub const NOT_NEEDED: u8 = 0xFF;
 const ZOID_STATS: usize = 0x40;
 const PARTS_LEN: usize = 24;
 const STATS_LEN: usize = 12;
@@ -1097,6 +1105,36 @@ fn add_character(rom: &[u8], state: &mut [u8], character: u8, bits: u16, zoid: u
     Some(())
 }
 
+/// What developing a Zoid from its Zi data asks for, as the Zi data list
+/// shows it: its record's money, Zoid and two Zi-data items.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Development {
+    /// Money needed.
+    pub money: u32,
+    /// The Zoid needed: 0 none, below `0xFA` a Zoid, from `0xFA` one of
+    /// the special kinds the pause menu names from its script 219.
+    pub zoid: u8,
+    /// The Zi-data items needed, [`NOT_NEEDED`] for none.
+    pub items: [u8; 2],
+}
+
+/// What developing Zoid `zoid` asks for (its record at ROM `0x670210`,
+/// from `+0x24`), `None` outside `rom`.
+#[must_use]
+pub fn development(rom: &[u8], zoid: u8) -> Option<Development> {
+    let at = ZOID_RECORDS + usize::from(zoid) * ZOID_RECORD_LEN;
+    let record = rom.get(at..at + ZOID_RECORD_LEN)?;
+    let money = record.get(DEVELOPMENT_MONEY..DEVELOPMENT_MONEY + 4)?;
+    Some(Development {
+        money: u32::from_le_bytes(money.try_into().ok()?),
+        zoid: *record.get(DEVELOPMENT_ZOID)?,
+        items: [
+            *record.get(DEVELOPMENT_ITEMS)?,
+            *record.get(DEVELOPMENT_ITEMS + 1)?,
+        ],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -1426,5 +1464,25 @@ mod tests {
         leave_formation(&mut state, 5);
         assert_eq!(half(&state, stray), 0x21);
         assert_eq!(slots(&state), [None; FORMATION_SLOTS]);
+    }
+
+    #[test]
+    fn a_development_reads_its_zoids_record() {
+        let mut rom = vec![0u8; ZOID_RECORDS + 3 * ZOID_RECORD_LEN];
+        let at = ZOID_RECORDS + 2 * ZOID_RECORD_LEN;
+        rom[at + DEVELOPMENT_MONEY..at + DEVELOPMENT_MONEY + 4]
+            .copy_from_slice(&12_000u32.to_le_bytes());
+        rom[at + DEVELOPMENT_ZOID] = 0xFA;
+        rom[at + DEVELOPMENT_ITEMS] = 5;
+        rom[at + DEVELOPMENT_ITEMS + 1] = NOT_NEEDED;
+        assert_eq!(
+            development(&rom, 2),
+            Some(Development {
+                money: 12_000,
+                zoid: 0xFA,
+                items: [5, NOT_NEEDED],
+            })
+        );
+        assert_eq!(development(&rom, 3), None);
     }
 }

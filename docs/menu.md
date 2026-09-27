@@ -19,7 +19,10 @@ L unit; VRAM, OAM and palette dumps, and screenshots of every frame compared wit
 port's. For アイテム: a read of the menu task's states `0x2000`–`0x2100`
 (`0x08050374`–`0x08050EA4`) and of the routines named below, breakpoints on the script
 runner and the sound call while items set by hand in a save were listed, refused and used,
-and screenshots of every frame compared with the port's. Saving is described in
+and screenshots of every frame compared with the port's. For the Zi data lists: a read
+of the menu task's states `0x1400` and `0x1500` (`0x0804FB48`, `0x0804FE28`) and of the
+list builders named below, and screenshots of every frame compared with the port's while
+Zi data and Zi-data items set by hand in a save were listed and paged. Saving is described in
 [formats/save.md](formats/save.md). Implemented in
 `crates/game-core/src/menu/` (`formation.rs` for the formation screen); data in
 `crates/extraction/src/saga.rs` (`PAUSE_MENU_SCRIPTS`, `PART_NAME_SCRIPTS`,
@@ -57,6 +60,9 @@ after another, printing the numbers itself between them. The ones this port uses
 | 56, 57, 58, 60 | The notices for no items, weapons, Zi data or Zi-data items: clear the help line, print, present it, wait for a key, clear |
 | 103–107, 206 | The weapons list: window 1 at (0, 0) 17×14 and window 2 at (16, 0) 14×14, the labels 　攻撃：／　命中：／　消費：／　射程： and 特殊効果： |
 | 422 + n | Part `n`'s description, which the weapons list shows in the help line |
+| 108–112 | The Zi data list: its help line and windows, 必要金額：, Ｇ with 必要ゾイド： on the next line, Ｚｉデータ用アイテム： and なし |
+| 219 + n | The special Zoids a development may ask for (Zoid byte `0xFA + n`) |
+| 55, 635 + n | The Zi-data items list's help line and windows, and item `n`'s text |
 | 128–132 | The equipment screen: windows 1 and 3 as on the character screen, 搭乗ゾイドなし, and the indented ウエポンラック lines under the Zoid's name |
 | 133–135 | 誰が搭乗しているゾイドの武装を変更しますか？, the notice that the character is not aboard, and 「…は装備を変更されたくないようです」 after the character's name |
 | 136–139 | The rack list: window 4 at (1, 4) 18×8 and the numbers １–３ |
@@ -246,6 +252,34 @@ The part under the cursor is described twice:
 - **Window 1:** its name, then its record's values with no pilot's bonus (the power's
   whole part, not rounded) and 特殊効果： over its effects, or the narrow form of a
   support part's description.
+
+## Zi data lists
+
+ステータス → Ｚｉデータ lists the Zoids whose Zi data the party holds: every Zoid 0–0x98
+whose byte at game state `+0x33E2 + id` is not 0, in id order (`0x0804E3A0`).
+ステータス → Ｚｉデータ用アイテム lists the Zi-data items the party carries: every item
+0–63 whose count at `+0x330C + id` is not 0 (`0x0804E308`). With none, the lists play
+sound `0x4F` and show notice 58 or 60, as the weapons list does.
+
+Otherwise the status windows close, script 108 (or 55) opens the help line
+(Ａボタン・Ｂボタン：抜ける) and the two windows, and the list shows six entries a page in
+window 2, as the weapons list does:
+
+- a Zi data line is the Zoid's name; an item line is the item's name padded to eight
+  cells, × and the count in two digits, zero-padded;
+- L and R turn the page (sound `0x40`) and keep the cursor's line; the arrows show more
+  before or after;
+- A or B return to the status list, B with sound `0x3F`.
+
+Window 1 describes the entry under the cursor, cleared (script 1) and drawn again when it
+changes:
+
+- **Zi data:** the Zoid's development record (ROM `0x670210 + id × 0x4C`): 必要金額： and
+  the money at `+0x24`, left-aligned, with Ｇ; 必要ゾイド： and on the next line the Zoid
+  at `+0x2C` (0 is なし, below `0xFA` a Zoid's name, from `0xFA` script 219 + (z − `0xFA`));
+  Ｚｉデータ用アイテム： and the items at `+0x2D` and `+0x2E` (`0xFF` is none), one a line,
+  or なし when neither is set.
+- **Zi-data items:** the item's name, then its text (script 635 + id).
 
 ## Items
 
@@ -491,7 +525,7 @@ the screen does not run the entities' animations.
 START on the field opens the menu; B on the main list closes it (see above). アイテム shows
 the items (see above). ステータス opens the
 status list: 部隊 shows the unit list, which A or B leaves; キャラクター the character
-screen; 武器 the weapons list; Ｚｉデータ and Ｚｉデータ用アイテム print their notices;
+screen; 武器 the weapons list; Ｚｉデータ and Ｚｉデータ用アイテム their lists (see above);
 図鑑 asks ゾイド or キャラ and opens that guide (see [guide.md](guide.md)). 武装 shows the
 equipment screen. 部隊編成 shows the formation screen (see above). コンフィグ shows the message speed (3 on a new game) with the
 cursor on it; picking a number stores it in the party and returns to the main list
@@ -528,6 +562,11 @@ factory (map 21): the screens, the cursor, the pages, the refusals and the uses 
 the transitions show their last picture at once (see below), the key wait after an
 item's message starts up to three frames early (the original's printing runs past its
 frames), and the wallpaper drifts after the way back to the main menu.
+
+The Zi data lists were compared on every frame with ten Zoids' Zi data and four items set
+by hand in a save: the lists, the pages, the cursor and the descriptions match; the
+description's window shows its last picture at once where the original shows it cleared
+for three frames, and the way back shows the status list at once.
 
 The ボタン page of the config ends in the まだできてません notice.
 
