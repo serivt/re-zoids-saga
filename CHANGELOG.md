@@ -24,15 +24,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The story of chapter 4, with its events, conversations, story battles, shops,
   teachers and Dr. T's lines outside the first area.
+- The story of chapter 5: the colosseum's three tournaments with their regulations and
+  arena, and the final's staged battle scenes.
 
 ### Changed
 
-- The demo ends at the start of chapter 5.
+- The demo ends at the start of chapter 6.
 
 ### Fixed
 
 - Characters sharing a palette slot with another object show the colors the original
   shows.
+- Weapons whose effects have large frames show their shots.
 
 ## [0.1.0] - 2026-09-27
 
