@@ -1149,7 +1149,8 @@ impl Field {
     /// The Zoid actor `index`, stepping toward `direction`, runs into, when
     /// the two meet in battle (`0x0800AE7C`): the player's carrier and an
     /// enemy Zoid, roaming or standing guard, on the same level, the player
-    /// in control; an enemy does not reach a player on an exit's cell.
+    /// in control; an enemy does not reach a player on an exit's cell, and
+    /// one beaten and exploding meets no one.
     fn meeting(&self, index: usize, direction: Direction) -> Option<usize> {
         if self.intangible {
             return None;
@@ -1182,6 +1183,7 @@ impl Field {
         };
         let meets = carrier.behavior == ZOID_BEHAVIOR
             && zoid.behavior == ZOID_BEHAVIOR
+            && !matches!(zoid.command, Command::Wrecked { .. })
             && level(carrier) == level(zoid)
             && (index == 0 || !exit_cell);
         meets.then_some(enemy)
