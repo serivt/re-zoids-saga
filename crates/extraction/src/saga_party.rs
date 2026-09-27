@@ -1335,6 +1335,58 @@ pub fn strip_racks(state: &mut [u8], unit: u8) {
     }
 }
 
+/// Takes unit `unit` apart, as the lab does to one it builds from or
+/// buys: its pilot leaves it (`0x08036C2C`) and its 56 bytes are cleared,
+/// with the unit count less one (`0x08055314`).
+pub fn take_apart(rom: &[u8], state: &mut [u8], unit: u8) -> Option<()> {
+    if state.len() != STATE_LEN {
+        return None;
+    }
+    if let Some(pilot) = pilot_of(state, unit) {
+        unassign(rom, state, pilot)?;
+    }
+    let at = unit_at(unit);
+    state[at..at + UNIT_LEN].fill(0);
+    state[UNIT_COUNT] = state[UNIT_COUNT].wrapping_sub(1);
+    Some(())
+}
+
+/// The units the lab's sale lists (`0x08055120` with `0xFF`): every unit
+/// slot 0–`0xAC` whose Zoid is not 0, as stored.
+#[must_use]
+pub fn zoid_units(state: &[u8]) -> Vec<u8> {
+    (0..ALL_UNITS)
+        .filter_map(|slot| u8::try_from(slot).ok())
+        .filter(|&unit| {
+            let at = unit_at(unit) + UNIT_ZOID_INDEX;
+            state.get(at..at + 2).is_some_and(|zoid| half(zoid, 0) != 0)
+        })
+        .collect()
+}
+
+/// How many of those units the party could part with (`0x08058458`):
+/// the ones with no pilot or whose pilot does not keep them (flag
+/// `0x08`). The lab buys nothing when fewer than five are.
+#[must_use]
+pub fn sellable_count(state: &[u8]) -> usize {
+    zoid_units(state)
+        .into_iter()
+        .filter(|&unit| pilot_of(state, unit).is_none_or(|pilot| !keeps_equipment(state, pilot)))
+        .count()
+}
+
+/// What the lab pays for unit `unit` (`0x08058458`): its Zoid record's
+/// price (`+0x28`) raised by the unit's training in percent; 0 when the
+/// record has no price.
+#[must_use]
+pub fn sale_price(rom: &[u8], state: &[u8], unit: u8) -> Option<u32> {
+    let record = state.get(unit_at(unit)..unit_at(unit) + UNIT_LEN)?;
+    let zoid = zoid_record(rom, half(record, UNIT_ZOID_INDEX))?;
+    let value = i32::from_ne_bytes(word(zoid, ZOID_PRICE).to_ne_bytes());
+    let raised = value.wrapping_add(percent(value, i32::from(record[UNIT_TRAINING])));
+    u32::try_from(raised).ok()
+}
+
 /// Develops Zoid `zoid` (`0x08056C94`, past the questions): when it is
 /// built from unit `base`, the unit's pilot leaves it (`0x08036C2C`) and
 /// the unit is cleared (`0x08055314`); each Zi-data item the record asks
@@ -1349,12 +1401,7 @@ pub fn develop(rom: &[u8], state: &mut [u8], zoid: u8, base: Option<u8>) -> Opti
     if needed.zoid != 0
         && let Some(base) = base
     {
-        if let Some(pilot) = pilot_of(state, base) {
-            unassign(rom, state, pilot)?;
-        }
-        let at = unit_at(base);
-        state[at..at + UNIT_LEN].fill(0);
-        state[UNIT_COUNT] = state[UNIT_COUNT].wrapping_sub(1);
+        take_apart(rom, state, base)?;
     }
     for item in needed.items {
         if item != NOT_NEEDED {
@@ -1753,6 +1800,34 @@ mod tests {
         assert_eq!(development_bases(&rom, &state, 5), [2]);
         assert_eq!(development_bases(&rom, &state, 6), [2, 9]);
         assert!(development_bases(&rom, &state, 3).is_empty());
+    }
+
+    #[test]
+    fn the_lab_buys_units_at_their_trained_price_while_five_are_left() {
+        let mut rom = development_rom();
+        let three = ZOID_RECORDS + 3 * ZOID_RECORD_LEN;
+        rom[three + ZOID_PRICE..three + ZOID_PRICE + 4].copy_from_slice(&5000u32.to_le_bytes());
+        let mut state = vec![0u8; STATE_LEN];
+        for unit in [1u8, 4, 7, 8, 9] {
+            set_half(&mut state, unit_at(unit) + 2, IN_USE);
+            set_half(&mut state, unit_at(unit) + UNIT_ZOID_INDEX, 3);
+        }
+        state[unit_at(4) + UNIT_TRAINING] = 10;
+        state[UNIT_COUNT] = 5;
+        assert_eq!(zoid_units(&state), [1, 4, 7, 8, 9]);
+        assert_eq!(sellable_count(&state), 5);
+        assert_eq!(sale_price(&rom, &state, 4), Some(5500));
+        assert_eq!(sale_price(&rom, &state, 2), Some(0));
+
+        mark_member(&mut state, 1);
+        state[CHARACTERS + CHARACTER_LEN + CHARACTER_UNIT] = 8;
+        let flags = half(&state, CHARACTERS + CHARACTER_LEN) | KEEPS_EQUIPMENT;
+        set_half(&mut state, CHARACTERS + CHARACTER_LEN, flags);
+        assert_eq!(sellable_count(&state), 4);
+
+        take_apart(&rom, &mut state, 7).expect("sold");
+        assert_eq!(zoid_units(&state), [1, 4, 8, 9]);
+        assert_eq!(state[UNIT_COUNT], 4);
     }
 
     #[test]

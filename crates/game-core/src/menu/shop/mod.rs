@@ -26,6 +26,8 @@ use platform::{Button, Input};
 
 mod develop;
 mod lab;
+mod sell;
+mod units;
 mod wares;
 
 /// A shop a keeper opens (`0x08008F58`'s kind and number).
@@ -79,6 +81,14 @@ pub(super) enum ShopStep {
     LabRevivalEnd,
     /// A step of ゾイド開発.
     Develop(develop::Step),
+    /// A step of ゾイドを売る.
+    Sell(sell::Step),
+    /// A lab list's unit in full, or page `n` of its parts.
+    LabUnit(Option<usize>),
+    /// Whether to take the weapons off a unit's racks.
+    LabStrip(units::Taking),
+    /// Whether to throw away the `n`-th rack weapon the stock is full of.
+    LabStockFull(units::Taking, usize),
 }
 
 /// A shop's scripts, by the index its task passes: the item shops' start
@@ -479,7 +489,11 @@ impl PauseMenu {
             | ShopStep::ReviveNotice
             | ShopStep::Revived
             | ShopStep::LabRevivalEnd
-            | ShopStep::Develop(_) => Ok(()),
+            | ShopStep::Develop(_)
+            | ShopStep::Sell(_)
+            | ShopStep::LabUnit(_)
+            | ShopStep::LabStrip(_)
+            | ShopStep::LabStockFull(..) => Ok(()),
         }
     }
 

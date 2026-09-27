@@ -10,18 +10,18 @@
 //! script runner and the sound call, RAM dumps before and after a
 //! development, screenshots); see `docs/shop.md`.
 
-use extraction::saga_party::{self, PART_SLOTS, PartSlot, Shortfall};
+use extraction::saga_party::{self, PART_SLOTS, Shortfall};
 
 use super::super::parts::put_value;
 use super::super::{
-    CONFIRMED, EMPTY_BACK_SOUND, EMPTY_SOUND, EP_CELLS, HP_CELLS, LAST_ARMS_PAGE, LEAVE_SOUND,
-    MENU_MOVE_SOUND, MOVED_DOWN, MOVED_UP, MenuState, PAGE_LEFT, PAGE_RIGHT, PauseMenu, RACKS,
-    SCRIPT_CLEAR_HELP, SCRIPT_CLOSE, SCRIPT_DF_LABEL, SCRIPT_DRAW_CHARACTER, SCRIPT_DRAW_MEMBERS,
-    SCRIPT_EP_LABEL, SCRIPT_FIXED_PAGES, SCRIPT_HP_LABEL, SCRIPT_MEMBER_MENU, SCRIPT_MONEY_WINDOW,
-    SCRIPT_PERCENT, SCRIPT_PRESENT, SCRIPT_PRESENT_ALL, SCRIPT_RACK_PAGES, SCRIPT_SIZES,
-    SCRIPT_SP_LABEL, SCRIPT_TRAINING_LABEL, SCRIPT_WAIT_KEY, SCRIPT_YES_NO, ZOID_WINDOW,
+    CONFIRMED, EMPTY_BACK_SOUND, EMPTY_SOUND, EP_CELLS, HP_CELLS, LEAVE_SOUND, MENU_MOVE_SOUND,
+    MOVED_DOWN, MOVED_UP, MenuState, PAGE_LEFT, PAGE_RIGHT, PauseMenu, SCRIPT_CLEAR_HELP,
+    SCRIPT_CLOSE, SCRIPT_DF_LABEL, SCRIPT_DRAW_CHARACTER, SCRIPT_DRAW_MEMBERS, SCRIPT_EP_LABEL,
+    SCRIPT_HP_LABEL, SCRIPT_MEMBER_MENU, SCRIPT_MONEY_WINDOW, SCRIPT_PERCENT, SCRIPT_PRESENT_ALL,
+    SCRIPT_SIZES, SCRIPT_SP_LABEL, SCRIPT_YES_NO, ZOID_WINDOW,
 };
 use super::lab::{LIST_WINDOW, SCRIPT_REVIVAL_MENU};
+use super::units::{LabList, SCRIPT_ARMS_HELP, Taking};
 use super::{HELP_WINDOW, SCRIPT_DRAW_HELP, ShopStep};
 use crate::ScriptHost;
 use crate::script::ScriptError;
@@ -50,13 +50,6 @@ const SCRIPT_WONT_LEAVE: usize = 291;
 const SCRIPT_BASE_WINDOWS: usize = 293;
 const SCRIPT_ON_BOARD: usize = 295;
 const SCRIPT_PILOTED: usize = 296;
-const SCRIPT_DETAIL_WINDOWS: usize = 268;
-const SCRIPT_ARMS_HELP: usize = 269;
-const SCRIPT_ARMS_LAST_HELP: usize = 270;
-/// The stock-full question the equipment screen asks too: 外そうとしている,
-/// the part, then 「…は」「これ以上ストックできません。捨てますか？」.
-const SCRIPT_TAKING_OFF: usize = 149;
-const SCRIPT_STOCK_FULL: usize = 150;
 const SCRIPT_TOO_MANY: usize = 261;
 /// Waits for A, B or START (`0x80`).
 const SCRIPT_STATS_WAIT: usize = 38;
@@ -73,8 +66,6 @@ const BASE_PAGE_LINES: usize = 6;
 const STARTED: u16 = 0x80;
 /// The units the party can hold.
 const MOST_UNITS: u8 = 0x98;
-/// The most of one part the stock takes: past it, the lab asks.
-const STOCK_ROOM: u8 = 8;
 
 /// Where the development stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,20 +80,12 @@ pub(in crate::menu) enum Step {
     Lacking,
     /// The units it can be built from (state `0x212`).
     Bases,
-    /// A unit of that list in full (state `0x500`).
-    UnitDetail,
-    /// Page `n` of its parts (states `0x510`–`0x560`).
-    UnitArms(usize),
     /// Whether to take the chosen unit from its pilot.
     BaseQuestion,
     /// The notice that the pilot will not leave the unit.
     BaseRefused,
     /// Whether to develop (state `0x220`).
     Question,
-    /// Whether to take the base's weapons off.
-    Strip,
-    /// Whether to throw away the `n`-th rack weapon the stock is full of.
-    StockFull(usize),
     /// The keeper's answer: done, given up or refused.
     Answer,
     /// The notice that the party cannot hold another unit.
@@ -293,16 +276,12 @@ impl PauseMenu {
                 self.after_development(rom, windows)
             }
             Step::Bases => self.base_choice(rom, code, line, windows),
-            Step::UnitDetail => self.unit_detail_choice(rom, code, windows),
-            Step::UnitArms(page) => self.unit_arms_choice(rom, page, code, windows),
             Step::BaseQuestion => self.base_answer(rom, code, line, windows),
             Step::BaseRefused => {
                 windows.play_sound(EMPTY_BACK_SOUND);
                 self.show_bases(rom, true, windows)
             }
             Step::Question => self.development_answer(rom, code, line, windows),
-            Step::Strip => self.strip_answer(rom, code, line, windows),
-            Step::StockFull(rack) => self.stock_full_answer(rom, rack, code, line, windows),
             Step::TooMany => {
                 windows.play_sound(EMPTY_BACK_SOUND);
                 self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
@@ -463,61 +442,6 @@ impl PauseMenu {
         Ok(())
     }
 
-    /// Page `page` of a Zoid's parts (`0x08055024`): each rack, then each
-    /// fixed weapon, in a window of its own that covers the page before, as
-    /// the Zoid status screen's pages show them; the last page's help says
-    /// both keys go back.
-    fn show_lab_arms(
-        &mut self,
-        rom: &[u8],
-        slots: &[PartSlot; PART_SLOTS],
-        page: usize,
-        windows: &mut ScriptWindows<'_>,
-    ) -> Result<(), ScriptError> {
-        if page == LAST_ARMS_PAGE {
-            self.run_now(rom, SCRIPT_ARMS_LAST_HELP, windows)?;
-        }
-        let (title, window) = if page < RACKS {
-            (SCRIPT_RACK_PAGES + page, page + 1)
-        } else {
-            (SCRIPT_FIXED_PAGES + page - RACKS, page - RACKS + 1)
-        };
-        let window = u8::try_from(window).unwrap_or(ZOID_WINDOW);
-        self.run_now(rom, title, windows)?;
-        let slot = slots[page];
-        if page < RACKS {
-            self.print_rack(rom, window, slot, windows)?;
-        } else {
-            self.print_part(rom, window, slot.part, windows)?;
-        }
-        if page == 0 {
-            self.run_now(rom, SCRIPT_PRESENT_ALL, windows)?;
-        } else {
-            self.run_now(rom, SCRIPT_PRESENT + usize::from(window), windows)?;
-        }
-        self.runner.select_window(window);
-        self.runner.start(SCRIPT_WAIT_KEY)
-    }
-
-    /// Closes the windows the parts' pages up to `page` opened, and the
-    /// help; B plays `0x3F` first.
-    fn close_lab_arms(
-        &mut self,
-        rom: &[u8],
-        page: usize,
-        code: u16,
-        windows: &mut ScriptWindows<'_>,
-    ) -> Result<(), ScriptError> {
-        if code != CONFIRMED {
-            windows.play_sound(LEAVE_SOUND);
-        }
-        let opened = (page + 1).min(RACKS);
-        for window in (1..=opened).rev() {
-            self.run_now(rom, SCRIPT_CLOSE + window, windows)?;
-        }
-        self.run_now(rom, SCRIPT_CLEAR_HELP, windows)
-    }
-
     /// A turns the page, and past the last shows the Zoid again; B shows
     /// it at once (sound `0x3F`).
     fn arms_choice(
@@ -539,120 +463,8 @@ impl PauseMenu {
         Ok(())
     }
 
-    /// START on a unit (state `0x500`): the list and the unit's window
-    /// close, and window 1 shows its Zoid's name and size, the full hit
-    /// and energy points, SP, DF and training it has, and its picture; A
-    /// shows its parts, B goes back to the list.
-    fn show_unit_detail(
-        &mut self,
-        rom: &[u8],
-        windows: &mut ScriptWindows<'_>,
-    ) -> Result<(), ScriptError> {
-        let Some(unit) = self.development().chosen_base() else {
-            return self.show_bases(rom, false, windows);
-        };
-        let Some(status) = saga_party::unit_status(&self.game_state, unit) else {
-            return self.show_bases(rom, false, windows);
-        };
-        self.shown_zoid = None;
-        self.run_now(rom, SCRIPT_CLOSE + usize::from(LIST_WINDOW), windows)?;
-        self.run_now(rom, SCRIPT_CLOSE + usize::from(ZOID_WINDOW), windows)?;
-        self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
-        self.run_now(rom, SCRIPT_DETAIL_WINDOWS, windows)?;
-        self.run_now(rom, SCRIPT_DRAW_CHARACTER, windows)?;
-        self.print_zoid_name(rom, status.zoid, ZOID_WINDOW, windows)?;
-        self.run_in(
-            rom,
-            ZOID_WINDOW,
-            SCRIPT_SIZES + usize::from(status.size),
-            windows,
-        )?;
-        let signed = |value: u32| i32::from_ne_bytes(value.to_ne_bytes());
-        let rows = [
-            (SCRIPT_HP_LABEL, signed(status.hp.1), HP_CELLS),
-            (SCRIPT_EP_LABEL, signed(status.ep.1), HP_CELLS),
-            (SCRIPT_SP_LABEL, i32::from(status.sp), HP_CELLS),
-            (SCRIPT_DF_LABEL, i32::from(status.df), EP_CELLS),
-        ];
-        for (label, value, cells) in rows {
-            windows.line_break(ZOID_WINDOW);
-            self.run_in(rom, ZOID_WINDOW, label, windows)?;
-            put_value(windows, ZOID_WINDOW, value, cells, 0);
-        }
-        self.run_in(rom, ZOID_WINDOW, SCRIPT_PERCENT, windows)?;
-        windows.line_break(ZOID_WINDOW);
-        self.run_in(rom, ZOID_WINDOW, SCRIPT_TRAINING_LABEL, windows)?;
-        put_value(
-            windows,
-            ZOID_WINDOW,
-            i32::from(status.training),
-            EP_CELLS,
-            0,
-        );
-        self.shown_zoid = Some(status.zoid);
-        self.run_now(rom, SCRIPT_PRESENT_ALL, windows)?;
-        self.runner.start(SCRIPT_WAIT_KEY)?;
-        self.develop_step(Step::UnitDetail);
-        Ok(())
-    }
-
-    /// A shows the unit's parts; B goes back to the list (sound `0x3F`).
-    fn unit_detail_choice(
-        &mut self,
-        rom: &[u8],
-        code: u16,
-        windows: &mut ScriptWindows<'_>,
-    ) -> Result<(), ScriptError> {
-        if code != CONFIRMED {
-            windows.play_sound(LEAVE_SOUND);
-        }
-        self.shown_zoid = None;
-        self.run_now(rom, SCRIPT_CLOSE + usize::from(ZOID_WINDOW), windows)?;
-        self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
-        if code != CONFIRMED {
-            return self.reopen_bases(rom, windows);
-        }
-        self.run_now(rom, SCRIPT_ARMS_HELP, windows)?;
-        self.show_unit_arms(rom, 0, windows)
-    }
-
-    /// Page `page` of the unit's parts, with its pilot's bonuses.
-    fn show_unit_arms(
-        &mut self,
-        rom: &[u8],
-        page: usize,
-        windows: &mut ScriptWindows<'_>,
-    ) -> Result<(), ScriptError> {
-        let slots = self
-            .development()
-            .chosen_base()
-            .and_then(|unit| saga_party::parts_of(rom, &self.game_state, unit));
-        let Some(slots) = slots else {
-            return self.reopen_bases(rom, windows);
-        };
-        self.show_lab_arms(rom, &slots, page, windows)?;
-        self.develop_step(Step::UnitArms(page));
-        Ok(())
-    }
-
-    /// A turns the page, and past the last goes back to the list, as B
-    /// does at once (sound `0x3F`).
-    fn unit_arms_choice(
-        &mut self,
-        rom: &[u8],
-        page: usize,
-        code: u16,
-        windows: &mut ScriptWindows<'_>,
-    ) -> Result<(), ScriptError> {
-        if code == CONFIRMED && page + 1 < PART_SLOTS {
-            return self.show_unit_arms(rom, page + 1, windows);
-        }
-        self.close_lab_arms(rom, page, code, windows)?;
-        self.reopen_bases(rom, windows)
-    }
-
     /// The base list again (script 293), printed anew with its cursor.
-    fn reopen_bases(
+    pub(super) fn reopen_bases(
         &mut self,
         rom: &[u8],
         windows: &mut ScriptWindows<'_>,
@@ -827,7 +639,10 @@ impl PauseMenu {
                 self.show_bases(rom, false, windows)
             }
             CONFIRMED => self.take_base(rom, windows),
-            STARTED => self.show_unit_detail(rom, windows),
+            STARTED => match self.development().chosen_base() {
+                Some(unit) => self.show_lab_unit(rom, unit, LabList::Bases, windows),
+                None => self.show_bases(rom, false, windows),
+            },
             0 => {
                 windows.play_sound(LEAVE_SOUND);
                 self.shown_zoid = None;
@@ -961,88 +776,14 @@ impl PauseMenu {
         if let Some(base) = base
             && !saga_party::rack_weapons(&self.game_state, base).is_empty()
         {
-            self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
-            self.run_now(rom, SCRIPT_STRIP_QUESTION, windows)?;
-            self.runner.start(SCRIPT_YES_NO)?;
-            self.develop_step(Step::Strip);
-            return Ok(());
+            return self.ask_strip(rom, Taking::Development, SCRIPT_STRIP_QUESTION, windows);
         }
         self.complete_development(rom)
     }
 
-    /// はい takes the weapons off, asking about each the stock has no room
-    /// for; いいえ or B: それでは開発できませんね・・・
-    fn strip_answer(
-        &mut self,
-        rom: &[u8],
-        code: u16,
-        line: u16,
-        windows: &mut ScriptWindows<'_>,
-    ) -> Result<(), ScriptError> {
-        if code != CONFIRMED || line != 0 {
-            if code != CONFIRMED {
-                windows.play_sound(LEAVE_SOUND);
-            }
-            return self.answer(SCRIPT_NOT_STRIPPED);
-        }
-        self.ask_stock_full(rom, 0, windows)
-    }
-
-    /// The `rack`-th rack weapon on, the first the stock is full of:
-    /// 外そうとしている…は これ以上ストックできません。捨てますか？; past the
-    /// last, the weapons come off and the development goes on.
-    fn ask_stock_full(
-        &mut self,
-        rom: &[u8],
-        rack: usize,
-        windows: &mut ScriptWindows<'_>,
-    ) -> Result<(), ScriptError> {
-        let Some(base) = self.development().base else {
-            return self.complete_development(rom);
-        };
-        let weapons = saga_party::rack_weapons(&self.game_state, base);
-        let full = weapons
-            .iter()
-            .enumerate()
-            .skip(rack)
-            .find(|(_, part)| saga_party::stock(&self.game_state, **part) > STOCK_ROOM);
-        let Some((index, part)) = full else {
-            saga_party::strip_racks(&mut self.game_state, base);
-            return self.complete_development(rom);
-        };
-        let part = *part;
-        self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
-        self.run_now(rom, SCRIPT_DRAW_HELP, windows)?;
-        self.run_in(rom, HELP_WINDOW, SCRIPT_TAKING_OFF, windows)?;
-        self.print_part_name(rom, HELP_WINDOW, part, windows)?;
-        self.run_in(rom, HELP_WINDOW, SCRIPT_STOCK_FULL, windows)?;
-        self.runner.start(SCRIPT_YES_NO)?;
-        self.develop_step(Step::StockFull(index));
-        Ok(())
-    }
-
-    /// はい throws the weapon away and asks about the next; いいえ or B
-    /// refuse the development.
-    fn stock_full_answer(
-        &mut self,
-        rom: &[u8],
-        rack: usize,
-        code: u16,
-        line: u16,
-        windows: &mut ScriptWindows<'_>,
-    ) -> Result<(), ScriptError> {
-        if code != CONFIRMED || line != 0 {
-            if code != CONFIRMED {
-                windows.play_sound(LEAVE_SOUND);
-            }
-            return self.answer(SCRIPT_NOT_STRIPPED);
-        }
-        self.ask_stock_full(rom, rack + 1, windows)
-    }
-
     /// The development (`0x08057020`): the money is taken, the base taken
     /// apart, the items used and the new unit made; はい。すぐにできますからね.
-    fn complete_development(&mut self, rom: &[u8]) -> Result<(), ScriptError> {
+    pub(super) fn complete_development(&mut self, rom: &[u8]) -> Result<(), ScriptError> {
         let development = self.development();
         let Some(zoid) = development.zoid() else {
             return Ok(());
@@ -1051,6 +792,16 @@ impl PauseMenu {
         self.party.money = self.party.money.saturating_sub(price);
         saga_party::develop(rom, &mut self.game_state, zoid, development.base);
         self.answer(SCRIPT_DONE)
+    }
+
+    /// The unit a development is built from.
+    pub(super) fn development_base(&self) -> Option<u8> {
+        self.development().base
+    }
+
+    /// それでは開発できませんね・・・, when the base's weapons stay on.
+    pub(super) fn development_refused(&mut self) -> Result<(), ScriptError> {
+        self.answer(SCRIPT_NOT_STRIPPED)
     }
 
     /// The keeper's answer in the help line, then a key.

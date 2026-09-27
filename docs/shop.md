@@ -12,7 +12,8 @@ rebuild and its return. For the lab's development: a read of its states named be
 breakpoints on the script runner and the sound call, RAM dumps before and after, and
 screenshots of every frame compared with the port's. Implemented in
 `crates/game-core/src/menu/shop/` (the screens, as a mode of the pause menu;
-`develop.rs` for the development), `crates/extraction/src/saga_shop.rs` (goods,
+`develop.rs` for the development, `sell.rs` for the sale and `units.rs` for what
+their lists share), `crates/extraction/src/saga_shop.rs` (goods,
 prices and counts), `crates/extraction/src/saga_party.rs` (what a development needs
 and does) and `crates/game-core/src/story.rs` (the keepers).
 
@@ -276,6 +277,40 @@ script 272 opens the Zi data's window (2) and the list's (3); 273 asks
   keeper's `0x41`, window 1 closes and the list comes back as after B, or, with more than
   0x98 units, 261 and the lab's menu (not seen in the original).
 
+### Sale
+
+The lab task's states `0x400`–`0x402` (`0x08058458` on). Windows 3, 2 and 1 close (the
+money too) and script 293 opens the unit's window (1) and the list's (3).
+
+- **The list** (`0x08055120` with `0xFF`) is taken again at each pass: every unit slot
+  0–`0xAC` whose Zoid is not 0, as stored, six a page by their Zoids' names; when the
+  cursor's page has emptied, the list steps back a page with the cursor on its last
+  line. 25, 318 どのゾイドを売りたいのですか？ スタートボタン：ゾイド詳細表示 and 28 open
+  the pass; window 1 shows the unit under the cursor as the development's base list
+  does. The menu is script 36. START shows the unit in full, as there. B: `0x3F`,
+  windows 3 and 1 close, script 257 builds the lab again and 44 and the money print it,
+  and the menu comes back with its cursor on ゾイドを売る.
+- **A on a unit**: when fewer than five units could be sold (the listed ones with no
+  pilot or whose pilot's flag `0x08` is clear), sound `0x4F`, 323 ゾイドが, the list's
+  length in three cells left-aligned and 324 体以上いないとバトルがつらくなるのではないですか？;
+  when the Zoid record's price (`+0x28`) is 0, `0x4F` and 327 そのゾイドはちょっと値がつけ
+  られませんね…; with a pilot, the help is cleared and drawn, and the pilot will not leave
+  (flag `0x08`: `0x4F`, 289 and 291 as in the development) or the lab asks 295/296 with
+  はい／いいえ, whose いいえ or B go back to the list. Then the price: the record's
+  `+0x28` raised by the unit's training in percent (`0x080346C0`, rounded), shown as the
+  Zoid's name, 319 は, the price left-aligned in seven cells and 320 Ｇですね 本当に
+  よろしいのですね？ with はい／いいえ. B (`0x3F`) goes back to the list; いいえ gives 322
+  そうですか・・・.
+- **はい**: with weapons on the unit's racks, 325 (武器を装備したままだと買い取りできません
+  装備をすべて外しますか？) and the stock-full questions of the development, where いいえ
+  or B give 326 (それでは買い取りはできませんね・・・) and the list; then the unit is taken
+  apart as a development's base is (its pilot leaves it, its 56 bytes are cleared, the
+  unit count goes down), the price is added to the money, at most 9,999,999, and 321
+  わかりました。買い取りましょう; after its key the list and the unit are cleared (scripts 3
+  and 1) and printed again.
+- Each notice ends with `0x41` from the key wait and a second from the lab's code, but
+  326, which goes straight back to the list.
+
 ## Checked against the original
 
 - Sand Colony's lab (map 33) with Zi data, cores, units and money set by hand in a save:
@@ -287,6 +322,11 @@ script 272 opens the Zi data's window (2) and the list's (3); 273 asks
   the transitions and the wallpaper. The original's state after a development was read
   from RAM: the unit built from is replaced by the new one in its slot, its weapon in the
   stock and its pilot without a unit.
+- Its sale, with two more units set by hand: a Sabre Tiger with a weapon on its rack
+  sold, the refusal with four units, a piloted Command Wolf kept and its price refused,
+  START on a piloted unit and its parts' pages, and the ways back: the same scripts and
+  sounds (B and the refusal's sound a frame later in the port) and the same screens
+  but for the transitions and the wallpaper.
 - Dr. T's lab: every frame from the talk to the welcome, through a revival refused for
   money, one paid for, the keeper's word on the repair and the way out, matches once
   aligned, but for the transitions and the wallpaper visible between the windows.
@@ -314,6 +354,5 @@ script 272 opens the Zi data's window (2) and the list's (3); 273 asks
 - The original drops a frame here and there while it prints (one to three when a list
   or a question opens), which stands the wallpaper still. The port models only the
   welcome's, so after the first list its wallpaper runs a few pixels ahead.
-- The Zoid lab's ゾイド乗せ換え and ゾイドを売る, and START on the revival's list (the
-  Zoid's details), are not implemented: the port answers with the pause menu's
-  まだできてません.
+- The Zoid lab's ゾイド乗せ換え and START on the revival's list (the Zoid's details) are
+  not implemented: the port answers with the pause menu's まだできてません.

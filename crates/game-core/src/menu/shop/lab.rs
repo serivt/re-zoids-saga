@@ -1,6 +1,7 @@
 //! The Zoid lab (kind 2 of the shops, task `0x08055418`): its menu, the
 //! revival of broken Zoids and the way out; the development is in
-//! `develop.rs`. 乗せ換え and 売る are not ported yet (see `docs/shop.md`).
+//! `develop.rs`, the sale in `sell.rs`. 乗せ換え is not ported yet (see
+//! `docs/shop.md`).
 //!
 //! Source of knowledge: own reading of Zoids Saga (Japan, Rev 1): the lab's
 //! task at `0x08055418` (its menu at `0x08055730`, the way out at
@@ -57,6 +58,7 @@ const SCRIPT_CLEAR_ZOID: usize = 2;
 const SCRIPT_PRESENT_MONEY: usize = 17;
 const REVIVAL: u16 = 0;
 const DEVELOPMENT: u16 = 1;
+const SALE: u16 = 3;
 const ZOID_WINDOW: u8 = 2;
 pub(super) const LIST_WINDOW: u8 = 3;
 const PAGE_LINES: usize = 4;
@@ -81,6 +83,10 @@ pub(super) struct Lab {
     menu_line: usize,
     /// ゾイド開発.
     pub(super) development: super::develop::Development,
+    /// ゾイドを売る.
+    pub(super) sale: super::sell::Sale,
+    /// The unit shown in full, and the list it goes back to.
+    pub(super) unit_view: Option<(u8, super::units::LabList)>,
 }
 
 impl PauseMenu {
@@ -133,6 +139,12 @@ impl PauseMenu {
                 self.show_broken(rom, true, windows)
             }
             ShopStep::Develop(step) => self.development_step(rom, step, code, line, windows),
+            ShopStep::Sell(step) => self.sale_step(rom, step, code, line, windows),
+            ShopStep::LabUnit(page) => self.lab_unit_step(rom, page, code, windows),
+            ShopStep::LabStrip(taking) => self.strip_answer(rom, taking, code, line, windows),
+            ShopStep::LabStockFull(taking, rack) => {
+                self.stock_full_answer(rom, taking, rack, code, line, windows)
+            }
             ShopStep::LabRevivalEnd => {
                 windows.play_sound(EMPTY_BACK_SOUND);
                 self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
@@ -150,10 +162,15 @@ impl PauseMenu {
         windows: &mut ScriptWindows<'_>,
     ) -> Result<(), ScriptError> {
         self.run_now(rom, SCRIPT_LAB_WINDOWS, windows)?;
+        self.reopen_lab_cursor(windows);
+        self.lab_menu()
+    }
+
+    /// Puts the lab menu's cursor back on the line last chosen.
+    pub(super) fn reopen_lab_cursor(&self, windows: &mut ScriptWindows<'_>) {
         let line = self.lab().map_or(0, |lab| lab.menu_line);
         windows.set_cursor(LIST_WINDOW, Some(line));
         windows.set_cursor(LIST_WINDOW, None);
-        self.lab_menu()
     }
 
     /// The lab's question and menu (script 259).
@@ -202,6 +219,7 @@ impl PauseMenu {
                 self.lab_notice(SCRIPT_TOO_MANY, windows)
             }
             DEVELOPMENT => self.open_development(rom, windows),
+            SALE => self.open_sale(rom, windows),
             _ => {
                 self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
                 self.run_now(rom, SCRIPT_NOT_DONE, windows)?;
