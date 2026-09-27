@@ -1196,6 +1196,7 @@ impl Combat {
                 targets,
                 roll: self.fight.rolls[0],
                 aim,
+                staged: None,
             },
         ));
     }

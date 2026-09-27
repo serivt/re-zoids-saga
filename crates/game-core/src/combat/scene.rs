@@ -22,7 +22,8 @@
 
 use std::collections::VecDeque;
 
-use extraction::saga_battle::{self, BattleImage, FirePart};
+use extraction::saga_battle::{self, BattleImage, FirePart, StagedSide};
+use extraction::saga_party;
 use formats::tile::TILE_PIXELS;
 use gba_runtime::ppu::{FullPalette, Palette, darken};
 use platform::{Button, Frame, Input, Rgb};
@@ -68,12 +69,14 @@ const EFFECT_ALPHA: (u8, u8) = (15, 8);
 /// Frames the attacker waits before speaking (`0x08042810`; 90 in the
 /// staged scenes, `0x0200EB84` bit 0, which [`crate::battle`] plays).
 const PAUSE_FRAMES: u32 = 30;
+const STAGED_PAUSE_FRAMES: u32 = 90;
 /// Frames a view holds once its shots are over (`[sp]`), and the frames A
 /// must be held to skip ahead (`[sp + 4]`).
 const HOLD_FRAMES: u16 = 30;
 const SKIP_HOLD: u16 = 60;
 const HITS_SKIP_HOLD: u16 = 35;
 const REACTION_HOLD: u16 = 50;
+const STAGED_REACTION_HOLD: u16 = 180;
 const SKIPPED_REACTION_HOLD: u16 = 10;
 // Scripts of the `system` table (`0x0803E4E8`).
 const VIEW_WINDOWS: usize = 0xB;
@@ -170,6 +173,33 @@ impl SceneUnit {
         }
     }
 
+    /// A staged scene's unit (`0x0803DD54`): its first three racks from
+    /// the scene, the rest of its Zoid's own, in slot `slot` of its side.
+    #[must_use]
+    pub fn staged(rom: &[u8], side: &StagedSide, enemy: bool, slot: usize) -> Self {
+        let zoid = u16::from(side.zoid);
+        let own = saga_party::record_parts(rom, zoid);
+        let parts = std::array::from_fn(|rack| {
+            let part = if rack < side.racks.len() {
+                side.racks[rack]
+            } else {
+                own.and_then(|own| own[rack].part.map(|part| part.id))
+            };
+            let placed = saga_battle::weapon_mount_raw(rom, zoid, rack).is_some_and(|y| y != 0);
+            part.filter(|_| placed).unwrap_or(0)
+        });
+        let (flags, class) = saga_party::zoid_class(rom, zoid).unwrap_or((0, 0));
+        Self {
+            zoid,
+            size: if class > 2 { 0 } else { class },
+            kind: scenery_kind(side.terrain, flags & FLYING != 0),
+            parts,
+            pilot: side.pilot,
+            enemy,
+            slot,
+        }
+    }
+
     fn scenery(&self) -> u8 {
         self.kind * 3 + self.size
     }
@@ -230,6 +260,9 @@ pub struct Attack {
     /// For the party's attack, what the player's aim chooses from; the
     /// weapon and the targets come from it.
     pub aim: Option<AimSetup>,
+    /// For a staged scene (`0x0200EB84` bit 0), the `battle` string the
+    /// attacker speaks: the pauses are longer and A skips nothing.
+    pub staged: Option<usize>,
 }
 
 /// What a scene asks of the battle as it runs.
@@ -616,7 +649,15 @@ impl AttackScene {
     }
 
     fn held_a(&self) -> bool {
-        self.input.is_held(Button::A)
+        self.attack.staged.is_none() && self.input.is_held(Button::A)
+    }
+
+    fn pause_frames(&self) -> u32 {
+        if self.attack.staged.is_some() {
+            STAGED_PAUSE_FRAMES
+        } else {
+            PAUSE_FRAMES
+        }
     }
 
     /// One step of the scene's task; `false` when the frame belongs to a
@@ -971,7 +1012,8 @@ impl AttackScene {
         Ok(())
     }
 
-    /// The attacker's line (`0x08042884`): for a weapon for its own side
+    /// The attacker's line (`0x08042884`): in a staged scene the scene's
+    /// own (`0x08042916`); for a weapon for its own side
     /// its pilot's fourth; for a weapon with a line of its own that line;
     /// otherwise one of its pilot's three, picked by the turn's first roll.
     /// (A special pilot's lines, ROM `0x755FE0`, belong to the staged
@@ -984,7 +1026,9 @@ impl AttackScene {
         let pilot = self.attack.attacker.pilot;
         let part = self.weapon_part(&self.attack.attacker);
         let own_line = WEAPON_LINES.iter().find(|(weapon, _)| *weapon == part);
-        let (string, variant) = if self.own_side(rom) {
+        let (string, variant) = if let Some(quote) = self.attack.staged {
+            (quote, 0)
+        } else if self.own_side(rom) {
             (usize::from(pilot), QUOTE_OWN_SIDE)
         } else if let Some(&(_, line)) = own_line {
             (WEAPON_LINE_STRINGS + usize::from(line), line)
@@ -1017,7 +1061,9 @@ impl AttackScene {
     fn after_reaction(&mut self) {
         self.entities.pause_shots(false);
         self.update_shots();
-        self.hold = if self.skip == 0 {
+        self.hold = if self.attack.staged.is_some() {
+            STAGED_REACTION_HOLD
+        } else if self.skip == 0 {
             SKIPPED_REACTION_HOLD
         } else {
             REACTION_HOLD
@@ -1132,7 +1178,7 @@ impl AttackScene {
                 self.step = Step::AimStart;
             }
             View::Attacker => {
-                self.step = Step::Pause(PAUSE_FRAMES);
+                self.step = Step::Pause(self.pause_frames());
             }
             View::Target => {
                 self.skip = HITS_SKIP_HOLD;

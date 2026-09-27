@@ -32,7 +32,7 @@ use gba_runtime::ppu::{FADE_STEPS, SCREEN_HEIGHT, SCREEN_WIDTH, darken};
 use platform::{Button, Frame, Input, Rgb, SaveStorage};
 use thiserror::Error;
 
-use crate::battle::BattleStage;
+use crate::battle::Staged;
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::combat::{Combat, Outcome};
 use crate::data::GameData;
@@ -257,7 +257,7 @@ pub struct Game<'rom> {
     scripts: Vec<ScriptRunner>,
     active_script: Option<usize>,
     last_runner: Option<usize>,
-    battle: Option<Box<BattleStage>>,
+    battle: Option<Box<Staged>>,
     /// The shop a keeper opened, while it is open.
     shop: Option<Box<PauseMenu>>,
     /// The battle against a roaming enemy, while it runs.
@@ -517,6 +517,9 @@ impl<'rom> Game<'rom> {
         }
         if let Some(combat) = self.combat.as_mut() {
             combat.latch();
+        }
+        if let Some(stage) = self.battle.as_mut() {
+            stage.latch();
         }
         self.windows.latch();
         self.shown_brightness = self.events.brightness();
@@ -1191,7 +1194,11 @@ impl<'rom> Game<'rom> {
     fn update_battle(&mut self, input: Input) -> Result<(), GameError> {
         let done = match self.battle.as_mut() {
             Some(stage) => {
-                stage.update(self.data.bytes(), input, &mut self.windows)?;
+                stage.update(&self.data, input, &mut self.windows)?;
+                for sound in stage.take_sounds() {
+                    Self::emit(&self.extensions, &Event::SoundRequested(usize::from(sound)));
+                    self.sound.play(usize::from(sound))?;
+                }
                 stage.is_done()
             }
             None => true,
@@ -1783,7 +1790,7 @@ struct Host<'a, 'rom> {
     scripts: &'a mut Vec<ScriptRunner>,
     active_script: &'a mut Option<usize>,
     last_runner: &'a mut Option<usize>,
-    battle: &'a mut Option<Box<BattleStage>>,
+    battle: &'a mut Option<Box<Staged>>,
     shop: &'a mut Option<Box<PauseMenu>>,
     combat: &'a mut Option<Box<Combat>>,
     encounter: Option<usize>,
@@ -1862,7 +1869,7 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn start_battle(&mut self, scene: u8) {
-        match BattleStage::new(&self.data, scene) {
+        match Staged::new(&self.data, scene) {
             Ok(stage) => *self.battle = Some(Box::new(stage)),
             Err(missing) => self.fail(GameError::Text(format!("no battle scene {}", missing.0))),
         }

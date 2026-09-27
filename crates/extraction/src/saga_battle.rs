@@ -432,6 +432,68 @@ pub fn battle_scene(rom: &[u8], index: usize) -> Option<BattleScene> {
     })
 }
 
+/// One side of a staged scene's record, as the scene builder
+/// (`0x0803DD54`) reads it: 20 bytes, the party's at `+0` and the enemy's
+/// at `+0x14`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StagedSide {
+    /// The Zoid, 0 for none.
+    pub zoid: u8,
+    /// The pilot.
+    pub pilot: u8,
+    /// The line it speaks: string `172 + n` of the `battle` table.
+    pub quote: Option<usize>,
+    /// The parts of its first three racks (four-byte entries at `+4`, the
+    /// part at `+2`), `None` for an empty one.
+    pub racks: [Option<u16>; 3],
+    /// The part slot it fires (`+0x10`), `None` for a side that does not.
+    pub weapon: Option<usize>,
+    /// Its terrain (`+0x11`), which picks the scenery.
+    pub terrain: u8,
+}
+
+/// A staged scene played as an attack: the side that fires and the other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StagedAttack {
+    /// The party's side.
+    pub party: StagedSide,
+    /// The enemy's side.
+    pub enemy: StagedSide,
+    /// Whether the other side stands to be shot at (`+0x29` is 0).
+    pub target_stands: bool,
+}
+
+const STAGED_SIDE_LEN: usize = 0x14;
+const STAGED_ALONE: usize = 0x29;
+const NONE: u8 = 0xFF;
+
+fn staged_side(bytes: &[u8]) -> StagedSide {
+    let half = |at: usize| u16::from_le_bytes([bytes[at], bytes[at + 1]]);
+    StagedSide {
+        zoid: bytes[0],
+        pilot: bytes[1],
+        quote: (bytes[2] != NONE).then(|| QUOTE_BASE + usize::from(bytes[2])),
+        racks: std::array::from_fn(|rack| {
+            let part = half(4 + rack * 4 + 2);
+            (part != 0xFFFF).then_some(part)
+        }),
+        weapon: (bytes[0x10] != NONE).then_some(usize::from(bytes[0x10])),
+        terrain: bytes[0x11],
+    }
+}
+
+/// Staged scene `index` read as an attack (`0x0803DD54`).
+#[must_use]
+pub fn staged_attack(rom: &[u8], index: usize) -> Option<StagedAttack> {
+    let at = SCENES + index * SCENE_LEN;
+    let record = rom.get(at..at + SCENE_LEN)?;
+    Some(StagedAttack {
+        party: staged_side(&record[..STAGED_SIDE_LEN]),
+        enemy: staged_side(&record[STAGED_SIDE_LEN..2 * STAGED_SIDE_LEN]),
+        target_stands: record[STAGED_ALONE] == 0,
+    })
+}
+
 /// The scenery image `scenery`: kind × 3 + the Zoid's size class
 /// (`0x08043D6C`).
 #[must_use]

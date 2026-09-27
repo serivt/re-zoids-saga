@@ -27,11 +27,12 @@
 //! module's calls to `0x080019EC` do.
 
 use extraction::saga::Portrait;
-use extraction::saga_battle::{BattleImage, BattleScene, EffectPiece, EffectSprite};
+use extraction::saga_battle::{self, BattleImage, BattleScene, EffectPiece, EffectSprite};
 use formats::tile::TILE_PIXELS;
 use gba_runtime::ppu::{FullPalette, Palette, darken};
 use platform::{Frame, Input, Rgb};
 
+use crate::combat::scene::{Attack, AttackScene, Hit, SceneEvent, SceneUnit};
 use crate::data::GameData;
 use crate::script::{ScriptError, ScriptRunner};
 use crate::translation::BATTLE_TABLE;
@@ -712,6 +713,207 @@ fn image_pixel(tiles: &[[u8; TILE_PIXELS]], x: usize, y: usize, repeats: bool) -
     tiles
         .get(tile)
         .map_or(0, |pixels| pixels[(y % TILE) * TILE + pixel_x])
+}
+
+/// Both units of a staged attack stand in the middle slot of their side
+/// (the scene records at EWRAM `0x0200D920` in a traced run).
+const STAGED_SLOT: usize = 1;
+
+/// A staged scene past the opening's (`0x0803DC54`): the battle module sets
+/// the scene's two units up from its record (`0x0803DD54`), marks the scene
+/// staged (`0x0803DF08`) and runs the attack scene of the battles on them
+/// (task `0x0802BC99`); the map's reload follows.
+pub struct StagedAttack {
+    scene: AttackScene,
+    targets: usize,
+    reload: Option<u32>,
+}
+
+impl StagedAttack {
+    /// Staged scene `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MissingScene`] when the ROM has no such scene or its
+    /// attacking side fires nothing.
+    pub fn new(data: &GameData<'_>, index: u8) -> Result<Self, MissingScene> {
+        let missing = MissingScene(index);
+        let rom = data.bytes();
+        let record = saga_battle::staged_attack(rom, usize::from(index)).ok_or(missing)?;
+        let (attacker, other, enemy) = if record.enemy.weapon.is_some() {
+            (record.enemy, record.party, true)
+        } else {
+            (record.party, record.enemy, false)
+        };
+        let weapon = attacker.weapon.ok_or(missing)?;
+        let quote = attacker.quote.ok_or(missing)?;
+        let targets: Vec<SceneUnit> = if record.target_stands && other.zoid != 0 {
+            vec![SceneUnit::staged(rom, &other, !enemy, STAGED_SLOT)]
+        } else {
+            Vec::new()
+        };
+        let count = targets.len();
+        let scene = AttackScene::new(
+            data,
+            Attack {
+                attacker: SceneUnit::staged(rom, &attacker, enemy, STAGED_SLOT),
+                weapon,
+                targets,
+                roll: 0,
+                aim: None,
+                staged: Some(quote),
+            },
+        );
+        Ok(Self {
+            scene,
+            targets: count,
+            reload: None,
+        })
+    }
+
+    /// Advances one frame; once the scene has handed back, the reload's
+    /// black frames count down. The attack lands on every target: the
+    /// scenes' do, and none destroys.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScriptError`] when a line cannot run.
+    pub fn update(
+        &mut self,
+        data: &GameData<'_>,
+        input: Input,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        if let Some(left) = self.reload.as_mut() {
+            *left = left.saturating_sub(1);
+            return Ok(());
+        }
+        self.scene.update(data, input, windows)?;
+        for event in self.scene.take_events() {
+            match event {
+                SceneEvent::Apply => self.scene.set_hits(vec![
+                    Hit {
+                        landed: true,
+                        ..Hit::default()
+                    };
+                    self.targets
+                ]),
+                SceneEvent::Done => self.reload = Some(RELOAD_FRAMES),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Whether the scene and the reload after it are over.
+    #[must_use]
+    pub fn is_done(&self) -> bool {
+        self.reload.is_some_and(|left| left <= 1)
+    }
+
+    /// The sound effects requested since the last call.
+    pub fn take_sounds(&mut self) -> Vec<u16> {
+        self.scene.take_sounds()
+    }
+
+    /// Keeps what the vertical blank copies.
+    pub fn latch(&mut self) {
+        self.scene.latch();
+    }
+
+    /// Draws the scene; black during the reload.
+    pub fn draw(
+        &self,
+        frame: &mut Frame,
+        windows: &ScriptWindows<'_>,
+        skin: &WindowPainter,
+        painter: &TextPainter,
+    ) {
+        if self.reload.is_some() {
+            frame.fill(Rgb::default());
+        } else {
+            self.scene.draw(frame, windows, skin, painter);
+        }
+    }
+}
+
+/// A scene an event stages: one of the opening's, transcribed, or an
+/// attack.
+pub enum Staged {
+    /// The opening's scenes (see [`BattleStage`]).
+    Timeline(Box<BattleStage>),
+    /// The scenes played as attacks (see [`StagedAttack`]).
+    Attack(Box<StagedAttack>),
+}
+
+impl Staged {
+    /// Staged scene `index`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MissingScene`] when the ROM has no such scene.
+    pub fn new(data: &GameData<'_>, index: u8) -> Result<Self, MissingScene> {
+        if usize::from(index) < TIMELINES.len() {
+            BattleStage::new(data, index).map(|stage| Self::Timeline(Box::new(stage)))
+        } else {
+            StagedAttack::new(data, index).map(|attack| Self::Attack(Box::new(attack)))
+        }
+    }
+
+    /// Advances one frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScriptError`] when a line cannot run.
+    pub fn update(
+        &mut self,
+        data: &GameData<'_>,
+        input: Input,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        match self {
+            Self::Timeline(stage) => stage.update(data.bytes(), input, windows),
+            Self::Attack(attack) => attack.update(data, input, windows),
+        }
+    }
+
+    /// Whether the scene and the reload after it are over.
+    #[must_use]
+    pub fn is_done(&self) -> bool {
+        match self {
+            Self::Timeline(stage) => stage.is_done(),
+            Self::Attack(attack) => attack.is_done(),
+        }
+    }
+
+    /// The sound effects requested since the last call.
+    pub fn take_sounds(&mut self) -> Vec<u16> {
+        match self {
+            Self::Timeline(_) => Vec::new(),
+            Self::Attack(attack) => attack.take_sounds(),
+        }
+    }
+
+    /// Keeps what the vertical blank copies.
+    pub fn latch(&mut self) {
+        if let Self::Attack(attack) = self {
+            attack.latch();
+        }
+    }
+
+    /// Draws the scene.
+    pub fn draw(
+        &self,
+        frame: &mut Frame,
+        windows: &ScriptWindows<'_>,
+        skin: &WindowPainter,
+        painter: &TextPainter,
+    ) {
+        match self {
+            Self::Timeline(stage) => stage.draw(frame, windows, skin, painter),
+            Self::Attack(attack) => attack.draw(frame, windows, skin, painter),
+        }
+    }
 }
 
 #[cfg(test)]

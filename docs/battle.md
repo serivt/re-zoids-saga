@@ -178,6 +178,40 @@ The port requests the shots' sounds in the same frames as the original: 3076, 30
 and 3123 of the traced run for scene 0, and the ten of scene 1 at the same frames from
 its start.
 
+## Scenes played as attacks
+
+The later scenes (2 and 3, chapter 5's final) run the battles' attack scene
+([combat.md](combat.md#attack-scenes)). The module's task (`0x0803DC54`) builds the
+scene's two units from the record (`0x0803DD54`), marks the scene staged (`0x0803DF08`,
+bit 0 of `0x0200EB84`) and starts the attack scene's task (`0x0802BC99`) on them. The
+44-byte record holds a side for the party at `+0` and one for the enemy at `+0x14`:
+
+| Offset | Content |
+|---|---|
+| `+0` | The Zoid, 0 for none |
+| `+1` | The pilot |
+| `+2` | The line it speaks, string `172 + n` of the `battle` table, `0xFF` for none |
+| `+4` | The first three racks: four-byte entries, the part at `+2`, `0xFFFF` for none |
+| `+0x10` | The part slot it fires, `0xFF` for a side that does not |
+| `+0x11` | Its terrain, which picks the scenery as a battle's does |
+
+and `+0x29` is 0 when the other side stands to be shot at. Each unit stands in slot 1
+of its side, with its Zoid's own parts in the other slots (the scene records at EWRAM
+`0x0200D920` in a traced run). The scene then runs as in a story battle's attack: 90
+frames before the line, 180 after the target's reaction, the shots unskippable, no aim,
+and the line the record names; the attack lands. Scene 2 is Blood's Zoid (`0x95`)
+firing its part `0x250` at the Trinity Liger (`0x8F`, pilot `0x55`, whose reaction is
+ガオォォォ！); scene 3 is the same Zoid firing its smoke, part `0x6C`, on its own side.
+
+The port plays these through its attack scene (`crates/game-core/src/battle.rs`,
+`StagedAttack`), followed by the map's reload. Checked against the original on the
+chapter's final: both scenes last as many frames as the original's, and every sound
+after the attacker's first shot falls on the original's frame; that first shot comes 2
+frames late in scene 2 and 3 in scene 3, which the hold after it makes up.
+
+The effects' frames can have more pieces than the opening's: up to 42 in the effects of
+this ROM, all of which the drawer reads until the end marker.
+
 ## Not modeled yet
 
 - The rewrite line of the scroll table under CPU load.

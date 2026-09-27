@@ -789,6 +789,14 @@ fn unit_at(unit: u8) -> usize {
     UNITS + usize::from(unit) * UNIT_LEN
 }
 
+/// Zoid `zoid`'s class: its record's flags (`+0`, 2 for a flying one) and
+/// size class (`+4`: 0 S, 1 M, 2 L).
+#[must_use]
+pub fn zoid_class(rom: &[u8], zoid: u16) -> Option<(u16, u8)> {
+    let record = zoid_record(rom, zoid)?;
+    Some((half(record, 0), record[4]))
+}
+
 fn zoid_record(rom: &[u8], zoid: u16) -> Option<&[u8]> {
     let at = ZOID_RECORDS + usize::from(zoid) * ZOID_RECORD_LEN;
     rom.get(at..at + ZOID_RECORD_LEN)
