@@ -481,10 +481,12 @@ loads of the desert and the other Zoid maps take the
 original 10 to 30 frames longer than the port's (see Not modeled yet); the songs the
 loads start come earlier within the black in the port.
 
-A driver in the research notes plays the chapter in the port in three stretches: from
-chapter 2's end to the measurements, and from saves patched to the flags reached (the
-amplifiers, and the Kronos fort on) to chapter 4's first map, setting every flag of the
-table on the way.
+A driver in the research notes plays the game in the port alone from a new game to
+chapter 4's first map in one run (438885 frames, the protagonist's attacks overpowered
+in battle, six fights lost and retried after the lab's repair), setting every flag of
+chapters 1 to 3 but the choices not taken and the zone's turning back, which it
+avoids. On the way it found the tunnel's guard of chapter 2 (see
+[field.md](field.md), Roaming enemies).
 
 ## The end of the demo (a port feature)
 
