@@ -62,6 +62,13 @@ frame by frame in the first room, in Arcana and above its bar.
   chair at his desk covers him. A sprite whose top-left is more than 56 pixels left of
   the screen or 32 above it, or beyond 320 and 192 from there, is left out of OAM
   (`0x080005CA`). That flag only takes effect in the next frame's sort.
+- **Palettes.** Each object reserves an OBJ palette bank (its list entry's `+2`), and
+  the entity draws with whatever that bank holds. The spawn routine (`0x08008690`)
+  copies the sprite's palette into the bank for every object in the list's order, a
+  gone object of a map with object states included (the loader, `0x080075E0`), and
+  setting a sprite (`0x080089A0`) copies it again. Objects sharing a bank all show the
+  last palette copied: in chapter 4's Ark base (ROM `0x08668058`) Regina and Fiene share
+  bank 1, so Regina wears Fiene's colors.
 - **One frame late.** The game copies its sprite table, the scroll registers, the
   text layers and the brightness at the vertical blank. A frame therefore shows
   positions, order, flips, camera, windows and fade level as the frame before left

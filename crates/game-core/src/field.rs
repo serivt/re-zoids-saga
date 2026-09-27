@@ -43,6 +43,8 @@ const TILE_SIZE: usize = 8;
 /// Side of a room's cell in pixels; Zoid maps use cells twice as large.
 pub const ROOM_CELL: i32 = 16;
 const SPRITE_SIDE: i32 = 32;
+/// The OBJ palette banks sprites choose from.
+const OBJECT_PALETTES: usize = 16;
 const FRACTION_BITS: u32 = 16;
 /// One pixel in the actors' fixed-point positions.
 pub const PIXEL: i32 = 1 << FRACTION_BITS;
@@ -309,6 +311,9 @@ pub struct Actor {
     /// The sprite it shows (entity `+0x5A`), as its object or state lists
     /// it.
     pub sprite: u16,
+    /// The OBJ palette bank it is drawn with (entity `+6` bits 12–15), the
+    /// slot its object reserves.
+    palette_slot: usize,
     /// The sheet a wrecked actor explodes with.
     explosion: Option<Box<SpriteSheet>>,
     /// For an object showing a party member's Zoid, its sprite as listed
@@ -356,6 +361,7 @@ impl Actor {
             group: 0,
             pause: 0,
             sprite: 0,
+            palette_slot: 0,
             explosion: None,
             party_sprite: None,
             start_shift: None,
@@ -372,6 +378,7 @@ impl Actor {
         actor.command = command_for(object.kind);
         actor.party_sprite = (object.sprite_sheet_id().is_none()).then_some(object.sprite);
         actor.sprite = object.sprite;
+        actor.palette_slot = object.palette_slot % OBJECT_PALETTES;
         actor
     }
 
@@ -759,6 +766,9 @@ pub struct Field {
     /// A debugging aid the original has not: the roaming enemies neither
     /// block the player nor meet it.
     intangible: bool,
+    /// The OBJ palette banks: the palette last copied into each, which
+    /// every actor reserving that slot is drawn with.
+    object_palettes: [Option<[u16; 16]>; OBJECT_PALETTES],
 }
 
 impl Field {
@@ -784,6 +794,7 @@ impl Field {
             shown: None,
             sounds: Vec::new(),
             intangible: false,
+            object_palettes: [None; OBJECT_PALETTES],
         }
     }
 
@@ -835,8 +846,10 @@ impl Field {
             shown: None,
             sounds: Vec::new(),
             intangible: false,
+            object_palettes: [None; OBJECT_PALETTES],
         };
         field.player_mut().place((column, row));
+        field.load_object_palettes();
         field.sort_actors();
         Ok(field)
     }
@@ -879,6 +892,7 @@ impl Field {
             actor.set_cell_size(size);
             actor.place((usize::from(state.column), usize::from(state.row)));
         }
+        self.load_object_palettes();
         self.sort_actors();
         Ok(())
     }
@@ -1076,6 +1090,7 @@ impl Field {
             return Some(FieldEvent::Wrecked { actor: index });
         }
         if let Some(explosion) = actor.explosion.take() {
+            self.object_palettes[actor.palette_slot] = Some(explosion.palette);
             actor.sheet = Some(*explosion);
         }
         actor.facing = Direction::Up;
@@ -1404,6 +1419,7 @@ impl Field {
         self.culled.clear();
         self.shown = None;
         self.enter(scene, warp.map, &warp);
+        self.load_object_palettes();
         self.sort_actors();
         Ok(warp)
     }
@@ -1460,7 +1476,32 @@ impl Field {
                 actor.sheet = Some(data.sprite_sheet(usize::from(sprite))?);
             }
         }
+        self.load_object_palettes();
         Ok(())
+    }
+
+    /// Copies each actor's palette into the bank its object reserves, in
+    /// the list's order, as the map loader does: an object sharing a slot
+    /// with an earlier one shows its palette on both (Regina wears Fiene's
+    /// in chapter 4's Ark base).
+    fn load_object_palettes(&mut self) {
+        self.object_palettes = [None; OBJECT_PALETTES];
+        for actor in &self.actors {
+            if let Some(sheet) = &actor.sheet {
+                self.object_palettes[actor.palette_slot] = Some(sheet.palette);
+            }
+        }
+    }
+
+    /// Gives actor `index` the sprite `sheet` (`0x080089A0`), copying its
+    /// palette into the actor's bank.
+    pub fn set_sheet(&mut self, index: usize, sheet: SpriteSheet) {
+        let Some(actor) = self.actors.get_mut(index) else {
+            return;
+        };
+        self.object_palettes[actor.palette_slot] = Some(sheet.palette);
+        actor.sheet = Some(sheet);
+        actor.play(actor.animation_id & 3);
     }
 
     /// Whether the map is one of the Zoid's, whose cells are twice a room's.
@@ -1600,12 +1641,15 @@ impl Field {
                     .unwrap_or(i32::MAX)
                     - i32::try_from(scroll).unwrap_or(0)
             };
+            let palette = self.object_palettes[actor.palette_slot]
+                .as_ref()
+                .unwrap_or(&sheet.palette);
             draw_sprite(
                 frame,
                 screen(x, record.x, anchor_x, scroll.0),
                 screen(y, record.y, anchor_y, scroll.1),
                 &image,
-                &sheet.palette,
+                palette,
                 record.mirrored,
             );
         }
@@ -1799,6 +1843,27 @@ mod tests {
     /// The player standing on `(3, 1)` of a `columns`×`rows` scene.
     fn field(columns: usize, rows: usize) -> Field {
         Field::new(scene(columns, rows), sheet(), (3, 1))
+    }
+
+    fn tinted(color: u16) -> SpriteSheet {
+        let mut sheet = sheet();
+        sheet.palette = [color; 16];
+        sheet
+    }
+
+    #[test]
+    fn objects_sharing_a_palette_slot_show_the_last_ones_palette() {
+        let mut field = field(8, 8);
+        let mut first = Actor::new(Some(tinted(1)), (4, 4), Direction::Down);
+        first.palette_slot = 1;
+        let mut second = Actor::new(Some(tinted(2)), (5, 4), Direction::Down);
+        second.palette_slot = 1;
+        field.actors.extend([first, second]);
+        field.load_object_palettes();
+        assert_eq!(field.object_palettes[1], Some([2; 16]));
+        field.set_sheet(1, tinted(3));
+        assert_eq!(field.object_palettes[1], Some([3; 16]));
+        assert_eq!(field.object_palettes[0], Some([0; 16]));
     }
 
     fn held(direction: Direction) -> Input {

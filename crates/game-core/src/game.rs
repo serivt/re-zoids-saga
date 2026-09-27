@@ -2262,9 +2262,8 @@ impl EventHost for Host<'_, '_> {
             Ok(sheet) => sheet,
             Err(error) => return self.fail(error),
         };
-        if let Some(actor) = self.field.as_mut().and_then(|field| field.actor_mut(actor)) {
-            actor.sheet = Some(sheet);
-            actor.play(actor.animation_id & 3);
+        if let Some(field) = self.field.as_mut() {
+            field.set_sheet(actor, sheet);
         }
     }
 

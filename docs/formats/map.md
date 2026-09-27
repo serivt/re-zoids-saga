@@ -51,7 +51,7 @@ and a pointer to the list. Each object is 20 bytes:
 | Offset | Field |
 |---|---|
 | 0 | Sprite id (see [sprite.md](sprite.md)); 0 is the carrier `mz10` (the player on Zoid maps, the Gustav in the hangar), bit 15 set to show a party member's Zoid: character `(sprite + 0x68) & 0xFF`, whose unit's Zoid index (unit record `+6`) is the sprite, or when it has no unit `0x39` for `0x8098` and `0x46` for `0x8099`–`0x809B` (`0x080086E0`, `0x08037484`) |
-| 2 | OBJ palette slot the game reserves |
+| 2 | OBJ palette bank the object draws with; its sprite's palette is copied there in list order (see [../field.md](../field.md), Drawing) |
 | 4 | Metatile column the object stands on |
 | 6 | Metatile row |
 | 8 | Script reference: `0x80000000` for none, bit 31 set with a low half-word = index into the `dialogue` string table (what the character says), otherwise a pointer to code |
