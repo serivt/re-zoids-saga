@@ -402,6 +402,18 @@ pub fn parts_of(rom: &[u8], state: &[u8], unit: u8) -> Option<[PartSlot; PART_SL
     slots_of(rom, state, unit, pilot_of(state, unit))
 }
 
+/// The part slots of unit `unit` as `character` would use them, as the
+/// lab's pilot change shows the unit a character is to board.
+#[must_use]
+pub fn parts_for(
+    rom: &[u8],
+    state: &[u8],
+    unit: u8,
+    character: u8,
+) -> Option<[PartSlot; PART_SLOTS]> {
+    slots_of(rom, state, unit, Some(character))
+}
+
 fn slots_of(
     rom: &[u8],
     state: &[u8],
@@ -1387,6 +1399,99 @@ pub fn sale_price(rom: &[u8], state: &[u8], unit: u8) -> Option<u32> {
     u32::try_from(raised).ok()
 }
 
+/// Makes `character` the pilot of `unit` and works out the unit's values
+/// (`0x08036BE0`), as the lab's pilot change does.
+pub fn board(rom: &[u8], state: &mut [u8], character: u8, unit: u8) -> Option<()> {
+    if state.len() != STATE_LEN {
+        return None;
+    }
+    assign(rom, state, character, unit)
+}
+
+/// Leaves `character`'s unit without a pilot (`0x08036C2C`), as the lab's
+/// pilot change does to the unit a character leaves and to the one they
+/// take from another.
+pub fn leave_unit(rom: &[u8], state: &mut [u8], character: u8) -> Option<()> {
+    if state.len() != STATE_LEN {
+        return None;
+    }
+    unassign(rom, state, character)
+}
+
+/// Unit `unit`'s values with no pilot (`0x08036CB0` with `0xFF`): its
+/// full hit and energy points, SP and DF, as the pilot change's
+/// comparison starts from.
+#[must_use]
+pub fn pilotless_values(rom: &[u8], state: &[u8], unit: u8) -> Option<ZoidValues> {
+    let mut copy = state.to_vec();
+    if copy.len() != STATE_LEN {
+        return None;
+    }
+    compute_stats(rom, &mut copy, NO_UNIT, unit)?;
+    let status = unit_status(&copy, unit)?;
+    Some(ZoidValues {
+        hp: status.hp.1,
+        ep: status.ep.1,
+        sp: status.sp,
+        df: status.df,
+        size: status.size,
+    })
+}
+
+/// The units the lab's pilot change offers `character` (`0x08055120`):
+/// every unit slot 0–`0xAC` whose Zoid is not 0, but the one they pilot.
+#[must_use]
+pub fn units_for(state: &[u8], character: u8) -> Vec<u8> {
+    let own = character_unit(state, character);
+    zoid_units(state)
+        .into_iter()
+        .filter(|&unit| Some(unit) != own)
+        .collect()
+}
+
+/// What boarding an L unit does to `character`'s place in the formation
+/// (`0x08057726`), when they stand in it: nothing in the middle of a
+/// column whose other slots are empty; otherwise the column is put right
+/// ([`FormationChange::Fix`]) when the other two are empty, or the
+/// character leaves the formation ([`FormationChange::Leave`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FormationChange {
+    /// The character moves to the middle of their column's slot `n`.
+    Fix(usize),
+    /// The character leaves slot `n`.
+    Leave(usize),
+}
+
+/// See [`FormationChange`]; `None` when the unit is not L, the character
+/// is not in the formation, or they already stand alone in a middle slot.
+#[must_use]
+pub fn formation_change(state: &[u8], character: u8, unit: u8) -> Option<FormationChange> {
+    let entry = CHARACTERS + usize::from(character) * CHARACTER_LEN;
+    let in_formation = state
+        .get(entry..entry + 2)
+        .is_some_and(|flags| half(flags, 0) & CHARACTER_IN_FORMATION != 0);
+    if !in_formation || state.get(unit_at(unit) + UNIT_VARIANT) != Some(&LARGE) {
+        return None;
+    }
+    let slot = formation_slot(state, character).unwrap_or(FORMATION_SLOTS);
+    let column = if slot < COLUMN {
+        0..COLUMN
+    } else {
+        COLUMN..FORMATION_SLOTS
+    };
+    let middle = column.start + 1;
+    let crowded = column
+        .filter(|&other| other != slot)
+        .any(|other| state.get(FORMATION + other * 4) != Some(&NO_UNIT));
+    if crowded {
+        Some(FormationChange::Leave(slot))
+    } else if slot == middle {
+        None
+    } else {
+        Some(FormationChange::Fix(slot))
+    }
+}
+
 /// Develops Zoid `zoid` (`0x08056C94`, past the questions): when it is
 /// built from unit `base`, the unit's pilot leaves it (`0x08036C2C`) and
 /// the unit is cleared (`0x08055314`); each Zi-data item the record asks
@@ -1828,6 +1933,34 @@ mod tests {
         take_apart(&rom, &mut state, 7).expect("sold");
         assert_eq!(zoid_units(&state), [1, 4, 8, 9]);
         assert_eq!(state[UNIT_COUNT], 4);
+    }
+
+    #[test]
+    fn boarding_an_l_unit_asks_for_room_in_the_formation() {
+        let mut state = crew();
+        let seat = |state: &mut Vec<u8>, slot: usize, character: u8| {
+            state[FORMATION + slot * 4] = character;
+            state[FORMATION + slot * 4 + 1] = character;
+            let entry = CHARACTERS + usize::from(character) * CHARACTER_LEN;
+            let flags = half(state, entry) | CHARACTER_IN_FORMATION;
+            set_half(state, entry, flags);
+        };
+        seat(&mut state, 0, 0);
+        seat(&mut state, 1, 1);
+        seat(&mut state, 5, 3);
+        assert_eq!(
+            formation_change(&state, 0, 2),
+            Some(FormationChange::Leave(0))
+        );
+        assert_eq!(formation_change(&state, 0, 1), None);
+        assert_eq!(
+            formation_change(&state, 3, 2),
+            Some(FormationChange::Fix(5))
+        );
+        seat(&mut state, 4, 3);
+        state[FORMATION + 5 * 4..FORMATION + 5 * 4 + 2].fill(NO_UNIT);
+        assert_eq!(formation_change(&state, 3, 2), None);
+        assert_eq!(formation_change(&state, 2, 2), None);
     }
 
     #[test]

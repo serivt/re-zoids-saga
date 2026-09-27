@@ -26,6 +26,7 @@ use platform::{Button, Input};
 
 mod develop;
 mod lab;
+mod pilot;
 mod sell;
 mod units;
 mod wares;
@@ -83,6 +84,8 @@ pub(super) enum ShopStep {
     Develop(develop::Step),
     /// A step of ゾイドを売る.
     Sell(sell::Step),
+    /// A step of ゾイド乗せ換え.
+    Pilot(pilot::Step),
     /// A lab list's unit in full, or page `n` of its parts.
     LabUnit(Option<usize>),
     /// Whether to take the weapons off a unit's racks.
@@ -491,6 +494,7 @@ impl PauseMenu {
             | ShopStep::LabRevivalEnd
             | ShopStep::Develop(_)
             | ShopStep::Sell(_)
+            | ShopStep::Pilot(_)
             | ShopStep::LabUnit(_)
             | ShopStep::LabStrip(_)
             | ShopStep::LabStockFull(..) => Ok(()),

@@ -12,7 +12,7 @@ rebuild and its return. For the lab's development: a read of its states named be
 breakpoints on the script runner and the sound call, RAM dumps before and after, and
 screenshots of every frame compared with the port's. Implemented in
 `crates/game-core/src/menu/shop/` (the screens, as a mode of the pause menu;
-`develop.rs` for the development, `sell.rs` for the sale and `units.rs` for what
+`develop.rs` for the development, `pilot.rs` for the pilot change, `sell.rs` for the sale and `units.rs` for what
 their lists share), `crates/extraction/src/saga_shop.rs` (goods,
 prices and counts), `crates/extraction/src/saga_party.rs` (what a development needs
 and does) and `crates/game-core/src/story.rs` (the keepers).
@@ -280,6 +280,56 @@ script 272 opens the Zi data's window (2) and the list's (3); 273 asks
   keeper's `0x41`, window 1 closes and the list comes back as after B, or, with more than
   0x98 units, 261 and the lab's menu (not seen in the original).
 
+### Pilot change
+
+The lab task's states `0x300`–`0x320` (`0x080571BC` on). Windows 3, 2 and 1 close (the
+money too) and script 70 opens the member's window (1, 18×14), the portrait's (2) and
+the list's (3).
+
+- **The members** (the characters whose flag has bit 2), six a page by name. When the
+  cursor's member changes, and at each return to the list, the help is cleared and
+  drawn with 288 誰を乗せ換えたいのですか？ 搭乗ゾイド： and their Zoid's name (or 292
+  なし); window 1 (and the portrait's, cleared with scripts 1 and 2 when a member was
+  shown) shows the name and the five bonuses of the character screen (71–75, signed in
+  three cells, and ％) and the portrait (335 + the character). The menu is script 35. B:
+  `0x3F`, windows 3, 2 and 1 close, and the lab comes back as after the sale.
+- **A on a member with a unit**: a member whose flag `0x08` is set will not leave it
+  (sound `0x4F`, the name, 289 は, the Zoid, 291, and after the key `0x41` and the list);
+  otherwise the name, 289, the Zoid and 290 に搭乗してるみたいですけど、よろしいのですか？
+  with はい／いいえ, whose いいえ or B go back to the list.
+- **The units** (`0x08055120` with the member): every unit slot with a Zoid but the
+  member's own, six a page, shown as the sale's list; windows 3, 2 and 1 close and
+  script 293 opens them; 25, the member's name, 294 をどのゾイドに搭乗させたいのですか？
+  スタートボタン：ゾイド詳細表示 and 28 open each pass. START shows the unit in full; B
+  (`0x3F`) goes back to the members, printed anew with the cursor kept. A on a unit with
+  a pilot: one who keeps it will not leave it (as above); otherwise 295/296 with はい／
+  いいえ.
+- **The formation**, when the member stands in it (character flag `0x10`) and the unit
+  is L (its `+0x35` is 2): in a column whose other two slots are empty and in its middle
+  nothing is asked; with them empty elsewhere, 297 このゾイドは大きすぎるので隊列に影響が
+  でるようです and 299 隊列が修正されますが、よろしいのですか？ (the member will move to the
+  middle); with one of them taken, 297, the member's name and 298 を隊列から外しますか？
+  (the member will leave the formation); はい／いいえ, whose いいえ or B go back to the
+  list.
+- **The comparison** (state `0x320`): windows 3 and 1 close and script 306 opens window
+  1 with the Zoid's name and size, 307 (ゾイド基本 キャラ修正 合計 and ＨＰ：), then for the
+  hit points the unit's value with no pilot (`0x08036CB0`, or its own values when it has
+  none) in five cells, the member's 耐久 bonus in five and ％, 148 → and the sum
+  (`0x080346C0`) in five; 308 ＥＰ： with the value, six spaces, → and the value again; 309
+  ＳＰ： with 反応; 310 ＤＦ： with 防御, the value and the sum in four cells with ％; the
+  picture, and 311 ゾイドの性能はこのように変化します スタートボタン：装備武器表示. Script
+  38 waits in mode 6: START shows the unit's parts as the member would use them, and
+  after them the comparison again; A or B play `0x41` and ask 312 これでよろしいのですか？.
+  いいえ or B go back to the members.
+- **はい**: when the unit the member leaves has weapons on its racks, window 1 closes and
+  314 asks whether it keeps them (script 62, はい／いいえ that B does not end); はい gives
+  315, いいえ the stock-full questions (いいえ on one keeps them all, 315) and, once they
+  come off, 316; otherwise 313 乗せ換えは完了しましたよ. After the key the change is made:
+  the member leaves the formation when asked to (`0x08037258`), and their unit
+  (`0x08036C2C`); the unit's pilot leaves it; the member boards it (`0x08036BE0`) and,
+  when the column was to be put right, stands in its middle (`0x080371AC`). The members
+  come back.
+
 ### Sale
 
 The lab task's states `0x400`–`0x402` (`0x08058458` on). Windows 3, 2 and 1 close (the
@@ -330,6 +380,11 @@ money too) and script 293 opens the unit's window (1) and the list's (3).
   START on a piloted unit and its parts' pages, and the ways back: the same scripts and
   sounds (B and the refusal's sound a frame later in the port) and the same screens
   but for the transitions and the wallpaper.
+- Its pilot change: a member to a free unit (the comparison, the unit's parts from it,
+  the weapons of the unit left taken off or kept), to a piloted one, an L unit that puts
+  the column right, one refused by a pilot who keeps his Zoid, いいえ and B on each
+  question and list: the same scripts and sounds (B a frame apart), the same screens
+  but for the wallpaper, and, once the lab has closed, the same game-state block.
 - START on its revival list with a unit broken by hand, the unit's parts and the way
   back: the same scripts and sounds, and the same screens but for the wallpaper.
 - Dr. T's lab: every frame from the talk to the welcome, through a revival refused for
@@ -359,5 +414,4 @@ money too) and script 293 opens the unit's window (1) and the list's (3).
 - The original drops a frame here and there while it prints (one to three when a list
   or a question opens), which stands the wallpaper still. The port models only the
   welcome's, so after the first list its wallpaper runs a few pixels ahead.
-- The Zoid lab's ゾイド乗せ換え is not implemented: the port answers with the pause
-  menu's まだできてません.
+

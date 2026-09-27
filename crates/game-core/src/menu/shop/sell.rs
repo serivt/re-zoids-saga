@@ -15,10 +15,9 @@ use super::super::parts::put_value;
 use super::super::{
     CONFIRMED, EMPTY_BACK_SOUND, EMPTY_SOUND, LEAVE_SOUND, LEFT_ALIGNED, MENU_MOVE_SOUND,
     MOVED_DOWN, MOVED_UP, MenuState, PAGE_LEFT, PAGE_RIGHT, PauseMenu, SCRIPT_CLEAR_HELP,
-    SCRIPT_CLOSE, SCRIPT_DRAW_MEMBERS, SCRIPT_MONEY_WINDOW, SCRIPT_PRESENT_ALL, SCRIPT_YES_NO,
-    ZOID_WINDOW,
+    SCRIPT_CLOSE, SCRIPT_DRAW_MEMBERS, SCRIPT_PRESENT_ALL, SCRIPT_YES_NO, ZOID_WINDOW,
 };
-use super::lab::{LIST_WINDOW, SCRIPT_LAB_WINDOWS, SCRIPT_REVIVAL_MENU};
+use super::lab::{LIST_WINDOW, SCRIPT_REVIVAL_MENU};
 use super::units::{LabList, Taking};
 use super::{HELP_WINDOW, PRICE_CELLS, SCRIPT_DRAW_HELP, ShopStep, price_shown};
 use crate::ScriptHost;
@@ -42,8 +41,6 @@ const SCRIPT_ON_BOARD: usize = 295;
 const SCRIPT_PILOTED: usize = 296;
 const SCRIPT_CLEAR_UNIT: usize = 1;
 const SCRIPT_CLEAR_LIST: usize = 3;
-const SCRIPT_MONEY_UNIT: usize = super::super::SCRIPT_MONEY_UNIT;
-const SCRIPT_SPACE: usize = super::super::SCRIPT_SPACE;
 const PAGE_LINES: usize = 6;
 const STARTED: u16 = 0x80;
 /// The lab buys nothing unless the party could part with this many.
@@ -286,19 +283,7 @@ impl PauseMenu {
                 self.run_now(rom, SCRIPT_CLOSE + usize::from(LIST_WINDOW), windows)?;
                 self.run_now(rom, SCRIPT_CLOSE + usize::from(ZOID_WINDOW), windows)?;
                 self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
-                self.run_now(rom, SCRIPT_LAB_WINDOWS, windows)?;
-                self.run_now(rom, SCRIPT_MONEY_WINDOW, windows)?;
-                self.run_in(rom, super::MONEY_WINDOW, SCRIPT_SPACE, windows)?;
-                put_value(
-                    windows,
-                    super::MONEY_WINDOW,
-                    price_shown(self.party.money),
-                    PRICE_CELLS,
-                    0,
-                );
-                self.run_in(rom, super::MONEY_WINDOW, SCRIPT_MONEY_UNIT, windows)?;
-                self.reopen_lab_cursor(windows);
-                self.lab_menu()
+                self.reopen_lab_with_money(rom, windows)
             }
         }
     }
