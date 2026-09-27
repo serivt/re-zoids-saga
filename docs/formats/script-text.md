@@ -66,7 +66,7 @@ with the variables it saved, which is how the chest and deck-command messages pr
 | `0x02` | 1 | Reset the text system; mode 1 also zeroes the half-words at RAM `0x02007588` and `0x0200758A` (the handler at `0x0803E73C`), which leaves the name buffer after them as it is; modes below `0x10` zero the variables |
 | `0x03` | 1 | Close window `a0` (`0xFF` = all) and redraw the others |
 | `0x04` | 1 | Present window `a0`, which becomes the current window; `0xFF` presents every open window in id order and leaves the highest current |
-| `0x05` | 1 | Wait for a key, prompting in the current window, which it shows even when the script did not present it: low nibble 0 accepts A (sets var0 = 1, plays sound `0x41`), `0x10` in the high nibble lets B end it with var0 = 0; the prompt turns on and off every 20 polls (`0x0803EA58`), and each turn flushes the display a frame, so it blinks 21 frames off, 21 on |
+| `0x05` | 1 | Wait for a key, prompting in the current window, which it shows even when the script did not present it: the low nibble is the mode (below), `0x10` in the high nibble lets B end it with var0 = 0; the prompt turns on and off every 20 polls (`0x0803EA58`), and each turn flushes the display a frame, so it blinks 21 frames off, 21 on |
 | `0x06` | 1 | Menu on the current window, starting on the line its last menu ended on: up/down move the cursor (sound `0x40`); A sets var0 = 1 and var1 = the line (sound `0x47`); with `0x10` in the high nibble B ends it with var0 = 0; the cursor stays drawn until the window is presented again |
 | `0x07` | table | Switch: `a0 & 7` selects entry `n` of a table of signed 16-bit offsets; the table has no length field and ends where its nearest target begins |
 | `0x08` | 2 | Jump |
@@ -96,6 +96,13 @@ with the variables it saved, which is how the chest and deck-command messages pr
 | `0x3A` | 1 | Play sound effect `0x3C + a0` |
 | `0x3B` | 1 | Set bit 4 of window `a0`'s flags (not modeled) |
 | `0x3D` | 1 | Wait `a0` frames |
+
+The key wait's (`0x05`) modes end it with a code in var0, tested in this order so the
+last key down wins: mode 0 takes A (1, sound `0x41`); mode 1 START (1); modes 2–6 take
+A (1), and L (2) in modes 2, 3, 5 and 6, R (4) in modes 2, 4, 5 and 6, left (8) in
+modes 5 and 6, and mode 6 also right (`0x10`), START (`0x80`) and SELECT (0). A and
+START play `0x47` outside mode 0. The Zoid lab's development waits in mode 6 on the Zoid
+it gives, for A or START.
 
 Presenting, clearing or opening a window and showing a portrait flush the display,
 which costs one frame each; closing costs one frame, or two when another window stays

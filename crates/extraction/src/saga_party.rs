@@ -45,6 +45,14 @@ const ZOID_PARTS: usize = 8;
 const DEVELOPMENT_MONEY: usize = 0x24;
 const DEVELOPMENT_ZOID: usize = 0x2C;
 const DEVELOPMENT_ITEMS: usize = 0x2D;
+/// The Zi-data items' counts in the game-state block.
+const ZI_ITEMS: usize = 0x330C;
+/// The lists of Zoids a development's special kinds take, from `0xFA`.
+const SPECIAL_KINDS: usize = 0x0075_C018;
+const SPECIAL_KINDS_FROM: u8 = 0xFA;
+const SPECIAL_KIND_LEN: usize = 8;
+/// The part slots that are racks.
+const RACKS: usize = 3;
 /// The Zoid pictures whose Zi data the party can hold: the bytes at
 /// `+0x33E2` the Zi data list reads (`0x0804E3A0`).
 pub const ZI_DATA_ZOIDS: u8 = 0x99;
@@ -378,7 +386,29 @@ pub fn part(rom: &[u8], state: &[u8], character: u8, id: u16) -> Option<Part> {
 /// character has no unit.
 #[must_use]
 pub fn unit_parts(rom: &[u8], state: &[u8], character: u8) -> Option<[PartSlot; PART_SLOTS]> {
-    let at = unit_at(character_unit(state, character)?);
+    slots_of(
+        rom,
+        state,
+        character_unit(state, character)?,
+        Some(character),
+    )
+}
+
+/// The part slots of unit `unit`, its parts gaining the bonuses of its
+/// pilot when it has one, as the lab's unit pages show them
+/// (`0x08055024`).
+#[must_use]
+pub fn parts_of(rom: &[u8], state: &[u8], unit: u8) -> Option<[PartSlot; PART_SLOTS]> {
+    slots_of(rom, state, unit, pilot_of(state, unit))
+}
+
+fn slots_of(
+    rom: &[u8],
+    state: &[u8],
+    unit: u8,
+    pilot: Option<u8>,
+) -> Option<[PartSlot; PART_SLOTS]> {
+    let at = unit_at(unit);
     let unit = state.get(at..at + UNIT_LEN)?;
     let record = zoid_record(rom, half(unit, 6))?;
     let mut slots = [PartSlot {
@@ -394,10 +424,66 @@ pub fn unit_parts(rom: &[u8], state: &[u8], character: u8) -> Option<[PartSlot; 
         slot.fitted = half(record, entry + 2) != NO_PART;
         let id = half(unit, UNIT_PARTS + index * 4 + 2);
         if id != NO_PART {
-            slot.part = Some(part(rom, state, character, id)?);
+            slot.part = Some(match pilot {
+                Some(character) => part(rom, state, character, id)?,
+                None => part_record(rom, id)?,
+            });
         }
     }
     Some(slots)
+}
+
+/// The part slots Zoid `zoid`'s record gives a new unit, with the parts
+/// as their records give them, as the lab's development shows them.
+#[must_use]
+pub fn record_parts(rom: &[u8], zoid: u16) -> Option<[PartSlot; PART_SLOTS]> {
+    let record = zoid_record(rom, zoid)?;
+    let mut slots = [PartSlot {
+        flags: 0,
+        rack: 0,
+        fitted: false,
+        part: None,
+    }; PART_SLOTS];
+    for (index, slot) in slots.iter_mut().enumerate() {
+        let entry = ZOID_PARTS + index * 4;
+        slot.flags = half(record, entry);
+        slot.rack = u8::try_from(slot.flags & RACK_KIND).unwrap_or(0);
+        let id = half(record, entry + 2);
+        slot.fitted = id != NO_PART;
+        if id != NO_PART {
+            slot.part = Some(part_record(rom, id)?);
+        }
+    }
+    Some(slots)
+}
+
+/// A Zoid's values as its record gives them to a new unit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZoidValues {
+    /// Hit points.
+    pub hp: u32,
+    /// Energy points.
+    pub ep: u32,
+    /// SP.
+    pub sp: i16,
+    /// DF, in percent.
+    pub df: i16,
+    /// Size class: 0 S, 1 M, 2 L.
+    pub size: u8,
+}
+
+/// Zoid `zoid`'s record values (`+0x40` on, and its size at `+4`).
+#[must_use]
+pub fn zoid_values(rom: &[u8], zoid: u16) -> Option<ZoidValues> {
+    let record = zoid_record(rom, zoid)?;
+    let signed = |at: usize| i16::from_ne_bytes(half(record, at).to_ne_bytes());
+    Some(ZoidValues {
+        hp: word(record, ZOID_STATS),
+        ep: word(record, ZOID_STATS + 4),
+        sp: signed(ZOID_STATS + 8),
+        df: signed(ZOID_STATS + 10),
+        size: record[4],
+    })
 }
 
 /// How many of part `id` the party keeps in stock, 0 for a part that
@@ -1135,6 +1221,152 @@ pub fn development(rom: &[u8], zoid: u8) -> Option<Development> {
     })
 }
 
+/// A development's shortfall: what `0x0805534C` finds missing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Shortfall {
+    /// The money the record asks for is more than `money`.
+    pub money: bool,
+    /// No unit can serve as the Zoid the record asks for.
+    pub zoid: bool,
+    /// One of the Zi-data items the record asks for is not carried.
+    pub items: bool,
+}
+
+impl Shortfall {
+    /// Whether nothing is missing.
+    #[must_use]
+    pub const fn is_met(self) -> bool {
+        !self.money && !self.zoid && !self.items
+    }
+}
+
+/// What developing Zoid `zoid` lacks with `money` in hand (`0x0805534C`):
+/// the money, a unit to build it from (see [`development_bases`]) and
+/// each Zi-data item it asks for, whose count at `+0x330C` must not be 0.
+#[must_use]
+pub fn development_shortfall(rom: &[u8], state: &[u8], money: u32, zoid: u8) -> Shortfall {
+    let Some(needed) = development(rom, zoid) else {
+        return Shortfall::default();
+    };
+    let carried = |item: u8| {
+        item == NOT_NEEDED
+            || state
+                .get(ZI_ITEMS + usize::from(item))
+                .is_some_and(|&n| n != 0)
+    };
+    Shortfall {
+        money: money < needed.money,
+        zoid: needed.zoid != 0 && development_bases(rom, state, zoid).is_empty(),
+        items: !needed.items.iter().all(|&item| carried(item)),
+    }
+}
+
+/// The units developing Zoid `zoid` can be built from (`0x08055198`),
+/// every unit slot 0–`0xAC` in order: whose Zoid is the one the record
+/// asks for, or, from `0xFA`, one of the Zoids of that kind's list (ROM
+/// `0x75C018`, eight bytes a kind, `0xFF` after the last) other than
+/// `zoid` itself. The slots are read as stored, in use or not.
+#[must_use]
+pub fn development_bases(rom: &[u8], state: &[u8], zoid: u8) -> Vec<u8> {
+    let Some(needed) = development(rom, zoid) else {
+        return Vec::new();
+    };
+    if needed.zoid == 0 {
+        return Vec::new();
+    }
+    let kinds: Vec<u16> = if needed.zoid < SPECIAL_KINDS_FROM {
+        vec![u16::from(needed.zoid)]
+    } else {
+        let at = SPECIAL_KINDS + usize::from(needed.zoid - SPECIAL_KINDS_FROM) * SPECIAL_KIND_LEN;
+        rom.get(at..)
+            .unwrap_or_default()
+            .iter()
+            .take_while(|&&kind| kind != LIST_END)
+            .filter(|&&kind| kind != zoid)
+            .map(|&kind| u16::from(kind))
+            .collect()
+    };
+    (0..ALL_UNITS)
+        .filter_map(|slot| u8::try_from(slot).ok())
+        .filter(|&unit| {
+            let at = unit_at(unit) + UNIT_ZOID_INDEX;
+            state
+                .get(at..at + 2)
+                .is_some_and(|zoid| kinds.contains(&half(zoid, 0)))
+        })
+        .collect()
+}
+
+/// The weapons on `unit`'s racks: each of its first three part slots that
+/// holds a part and whose kind has bit 1 or 2, as the lab looks for them
+/// before a unit is taken apart (`0x08056C94`, `0x08057F7C`).
+#[must_use]
+pub fn rack_weapons(state: &[u8], unit: u8) -> Vec<u16> {
+    let at = unit_at(unit) + UNIT_PARTS;
+    (0..RACKS)
+        .filter_map(|rack| {
+            let entry = state.get(at + rack * 4..at + rack * 4 + 4)?;
+            let part = half(entry, 2);
+            (part != NO_PART && half(entry, 0) & RACK_KIND != 0).then_some(part)
+        })
+        .collect()
+}
+
+/// Takes the weapons off `unit`'s racks (see [`rack_weapons`]) into the
+/// stock, each while its count is below 9; a weapon the stock has no
+/// room for is thrown away.
+pub fn strip_racks(state: &mut [u8], unit: u8) {
+    let at = unit_at(unit) + UNIT_PARTS;
+    for rack in 0..RACKS {
+        let entry = at + rack * 4;
+        if state.len() < entry + 4 {
+            return;
+        }
+        let part = half(state, entry + 2);
+        if part == NO_PART || half(state, entry) & RACK_KIND == 0 {
+            continue;
+        }
+        if let Some(count) = state.get_mut(STOCK + usize::from(part))
+            && *count < STOCK_LIMIT
+        {
+            *count += 1;
+        }
+        set_half(state, entry + 2, NO_PART);
+    }
+}
+
+/// Develops Zoid `zoid` (`0x08056C94`, past the questions): when it is
+/// built from unit `base`, the unit's pilot leaves it (`0x08036C2C`) and
+/// the unit is cleared (`0x08055314`); each Zi-data item the record asks
+/// for is used up; a unit of the Zoid is allocated (`0x08036A30`) and its
+/// values worked out with no pilot. The money is the caller's. Returns
+/// the new unit, `None` when no slot is free or `rom` lacks the record.
+pub fn develop(rom: &[u8], state: &mut [u8], zoid: u8, base: Option<u8>) -> Option<u8> {
+    let needed = development(rom, zoid)?;
+    if state.len() != STATE_LEN {
+        return None;
+    }
+    if needed.zoid != 0
+        && let Some(base) = base
+    {
+        if let Some(pilot) = pilot_of(state, base) {
+            unassign(rom, state, pilot)?;
+        }
+        let at = unit_at(base);
+        state[at..at + UNIT_LEN].fill(0);
+        state[UNIT_COUNT] = state[UNIT_COUNT].wrapping_sub(1);
+    }
+    for item in needed.items {
+        if item != NOT_NEEDED {
+            let count = &mut state[ZI_ITEMS + usize::from(item)];
+            *count = count.wrapping_sub(1);
+        }
+    }
+    let unit = add_unit(rom, state, u16::from(zoid), false)?;
+    compute_stats(rom, state, NO_UNIT, unit)?;
+    Some(unit)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -1484,5 +1716,71 @@ mod tests {
             })
         );
         assert_eq!(development(&rom, 3), None);
+    }
+
+    /// Zoid 5 is developed from a unit of Zoid 3 with 1000 G and item 7;
+    /// Zoid 6 from any Zoid of special kind `0xFA`'s list.
+    fn development_rom() -> Vec<u8> {
+        let mut rom = vec![0u8; SPECIAL_KINDS + 16];
+        for zoid in [3usize, 5, 6] {
+            let at = ZOID_RECORDS + zoid * ZOID_RECORD_LEN;
+            rom[at + ZOID_STATS..at + ZOID_STATS + 4].copy_from_slice(&50u32.to_le_bytes());
+            rom[at + ZOID_PARTS..at + ZOID_PARTS + 4].copy_from_slice(&[3, 0, 0xFF, 0xFF]);
+            rom[at + DEVELOPMENT_ITEMS..at + DEVELOPMENT_ITEMS + 2].fill(NOT_NEEDED);
+        }
+        let five = ZOID_RECORDS + 5 * ZOID_RECORD_LEN;
+        rom[five + DEVELOPMENT_MONEY..five + DEVELOPMENT_MONEY + 4]
+            .copy_from_slice(&1000u32.to_le_bytes());
+        rom[five + DEVELOPMENT_ZOID] = 3;
+        rom[five + DEVELOPMENT_ITEMS] = 7;
+        let six = ZOID_RECORDS + 6 * ZOID_RECORD_LEN;
+        rom[six + DEVELOPMENT_ZOID] = SPECIAL_KINDS_FROM;
+        rom[SPECIAL_KINDS..SPECIAL_KINDS + 4].copy_from_slice(&[6, 3, 5, LIST_END]);
+        rom
+    }
+
+    #[test]
+    fn a_development_needs_its_money_base_and_items() {
+        let rom = development_rom();
+        let mut state = vec![0u8; STATE_LEN];
+        let lacking = development_shortfall(&rom, &state, 999, 5);
+        assert!(lacking.money && lacking.zoid && lacking.items);
+        set_half(&mut state, unit_at(2) + 2, IN_USE);
+        set_half(&mut state, unit_at(2) + UNIT_ZOID_INDEX, 3);
+        set_half(&mut state, unit_at(9) + UNIT_ZOID_INDEX, 5);
+        state[ZI_ITEMS + 7] = 1;
+        assert!(development_shortfall(&rom, &state, 1000, 5).is_met());
+        assert_eq!(development_bases(&rom, &state, 5), [2]);
+        assert_eq!(development_bases(&rom, &state, 6), [2, 9]);
+        assert!(development_bases(&rom, &state, 3).is_empty());
+    }
+
+    #[test]
+    fn developing_takes_the_base_apart_and_uses_the_items() {
+        let rom = development_rom();
+        let mut state = vec![0u8; STATE_LEN];
+        mark_member(&mut state, 1);
+        let base = unit_at(0);
+        set_half(&mut state, base + 2, IN_USE | PILOTED);
+        set_half(&mut state, base + UNIT_ZOID_INDEX, 3);
+        set_half(&mut state, base + UNIT_PARTS, 3);
+        set_half(&mut state, base + UNIT_PARTS + 2, 12);
+        set_half(&mut state, base + UNIT_PARTS + 6, NO_PART);
+        set_half(&mut state, base + UNIT_PARTS + 10, NO_PART);
+        state[CHARACTERS + CHARACTER_LEN + CHARACTER_UNIT] = 0;
+        state[UNIT_COUNT] = 1;
+        state[ZI_ITEMS + 7] = 2;
+        state[STOCK + 12] = 3;
+        assert_eq!(rack_weapons(&state, 0), [12]);
+        strip_racks(&mut state, 0);
+        assert!(rack_weapons(&state, 0).is_empty());
+        assert_eq!(stock(&state, 12), 4);
+
+        assert_eq!(develop(&rom, &mut state, 5, Some(0)), Some(0));
+        assert_eq!(character_unit(&state, 1), None);
+        let unit = unit_status(&state, 0).expect("developed");
+        assert_eq!((unit.zoid, unit.hp), (5, (50, 50)));
+        assert_eq!(half(&state, base + 2), IN_USE);
+        assert_eq!((state[UNIT_COUNT], state[ZI_ITEMS + 7]), (1, 1));
     }
 }

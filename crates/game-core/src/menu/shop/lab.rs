@@ -1,6 +1,6 @@
 //! The Zoid lab (kind 2 of the shops, task `0x08055418`): its menu, the
-//! revival of broken Zoids and the way out. 開発, 乗せ換え and 売る are not
-//! ported yet (see `docs/shop.md`).
+//! revival of broken Zoids and the way out; the development is in
+//! `develop.rs`. 乗せ換え and 売る are not ported yet (see `docs/shop.md`).
 //!
 //! Source of knowledge: own reading of Zoids Saga (Japan, Rev 1): the lab's
 //! task at `0x08055418` (its menu at `0x08055730`, the way out at
@@ -52,14 +52,13 @@ const SCRIPT_REVIVED: usize = 332;
 const SCRIPT_KEPT: usize = 333;
 const SCRIPT_NO_MONEY: usize = 334;
 /// The lab list's menu (a `MoveMenu` of mode 6).
-const SCRIPT_REVIVAL_MENU: usize = 36;
+pub(super) const SCRIPT_REVIVAL_MENU: usize = 36;
 const SCRIPT_CLEAR_ZOID: usize = 2;
-const SCRIPT_DRAW_ZOID: usize = 27;
 const SCRIPT_PRESENT_MONEY: usize = 17;
 const REVIVAL: u16 = 0;
 const DEVELOPMENT: u16 = 1;
 const ZOID_WINDOW: u8 = 2;
-const LIST_WINDOW: u8 = 3;
+pub(super) const LIST_WINDOW: u8 = 3;
 const PAGE_LINES: usize = 4;
 const HP_CELLS: usize = 4;
 const EP_CELLS: usize = 3;
@@ -78,6 +77,10 @@ pub(super) struct Lab {
     line: usize,
     page_shown: Option<usize>,
     shown: Option<usize>,
+    /// The lab menu's line last chosen, where its cursor comes back.
+    menu_line: usize,
+    /// ゾイド開発.
+    pub(super) development: super::develop::Development,
 }
 
 impl PauseMenu {
@@ -129,18 +132,32 @@ impl PauseMenu {
                 }
                 self.show_broken(rom, true, windows)
             }
+            ShopStep::Develop(step) => self.development_step(rom, step, code, line, windows),
             ShopStep::LabRevivalEnd => {
                 windows.play_sound(EMPTY_BACK_SOUND);
                 self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
-                self.run_now(rom, SCRIPT_LAB_WINDOWS, windows)?;
-                self.lab_menu()
+                self.reopen_lab_menu(rom, windows)
             }
             _ => Ok(()),
         }
     }
 
+    /// The lab's title and menu again (script 257), with the cursor on
+    /// the line last chosen, then the question and the menu.
+    pub(super) fn reopen_lab_menu(
+        &mut self,
+        rom: &[u8],
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        self.run_now(rom, SCRIPT_LAB_WINDOWS, windows)?;
+        let line = self.lab().map_or(0, |lab| lab.menu_line);
+        windows.set_cursor(LIST_WINDOW, Some(line));
+        windows.set_cursor(LIST_WINDOW, None);
+        self.lab_menu()
+    }
+
     /// The lab's question and menu (script 259).
-    fn lab_menu(&mut self) -> Result<(), ScriptError> {
+    pub(super) fn lab_menu(&mut self) -> Result<(), ScriptError> {
         self.runner.start(SCRIPT_LAB_CHOICE)?;
         self.state = MenuState::Shop(ShopStep::Choice);
         Ok(())
@@ -167,6 +184,9 @@ impl PauseMenu {
         line: u16,
         windows: &mut ScriptWindows<'_>,
     ) -> Result<(), ScriptError> {
+        if let Some(lab) = self.lab_mut() {
+            lab.menu_line = usize::from(line);
+        }
         match line {
             REVIVAL => {
                 let broken = saga_party::broken_units(&self.game_state);
@@ -181,6 +201,7 @@ impl PauseMenu {
             DEVELOPMENT if saga_party::unit_count(&self.game_state) > MOST_UNITS => {
                 self.lab_notice(SCRIPT_TOO_MANY, windows)
             }
+            DEVELOPMENT => self.open_development(rom, windows),
             _ => {
                 self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
                 self.run_now(rom, SCRIPT_NOT_DONE, windows)?;
@@ -307,7 +328,7 @@ impl PauseMenu {
                 self.shown_zoid = None;
                 self.run_now(rom, SCRIPT_CLEAR_ZOID, windows)?;
             }
-            self.draw_broken(rom, unit, windows)?;
+            self.draw_unit(rom, unit, ZOID_WINDOW, windows)?;
         }
         if let Some(lab) = self.lab_mut() {
             lab.line = line;
@@ -320,31 +341,33 @@ impl PauseMenu {
         Ok(())
     }
 
-    /// Window 2 for a broken unit: the Zoid's name, its full hit and
-    /// energy points, its pilot (or なし) and its picture.
-    fn draw_broken(
+    /// A unit in `window`, as the lab's lists show the one under the
+    /// cursor: the Zoid's name, its full hit and energy points, its pilot
+    /// (or なし) and its picture.
+    pub(super) fn draw_unit(
         &mut self,
         rom: &[u8],
         unit: u8,
+        window: u8,
         windows: &mut ScriptWindows<'_>,
     ) -> Result<(), ScriptError> {
         let Some(status) = saga_party::unit_status(&self.game_state, unit) else {
             return Ok(());
         };
         let signed = |value: u32| i32::from_ne_bytes(value.to_ne_bytes());
-        self.run_now(rom, SCRIPT_DRAW_ZOID, windows)?;
-        self.print_zoid_name(rom, status.zoid, ZOID_WINDOW, windows)?;
-        windows.line_break(ZOID_WINDOW);
-        self.run_in(rom, ZOID_WINDOW, SCRIPT_HP, windows)?;
-        put_value(windows, ZOID_WINDOW, signed(status.hp.1), HP_CELLS, 0);
-        windows.line_break(ZOID_WINDOW);
-        self.run_in(rom, ZOID_WINDOW, SCRIPT_EP, windows)?;
-        put_value(windows, ZOID_WINDOW, signed(status.ep.1), EP_CELLS, 0);
-        windows.line_break(ZOID_WINDOW);
-        self.run_in(rom, ZOID_WINDOW, SCRIPT_PILOT, windows)?;
+        self.run_now(rom, SCRIPT_DRAW_HELP + usize::from(window), windows)?;
+        self.print_zoid_name(rom, status.zoid, window, windows)?;
+        windows.line_break(window);
+        self.run_in(rom, window, SCRIPT_HP, windows)?;
+        put_value(windows, window, signed(status.hp.1), HP_CELLS, 0);
+        windows.line_break(window);
+        self.run_in(rom, window, SCRIPT_EP, windows)?;
+        put_value(windows, window, signed(status.ep.1), EP_CELLS, 0);
+        windows.line_break(window);
+        self.run_in(rom, window, SCRIPT_PILOT, windows)?;
         match saga_party::pilot_of(&self.game_state, unit) {
-            Some(character) => self.print_character_name(rom, character, ZOID_WINDOW, windows)?,
-            None => self.run_in(rom, ZOID_WINDOW, SCRIPT_NO_PILOT, windows)?,
+            Some(character) => self.print_character_name(rom, character, window, windows)?,
+            None => self.run_in(rom, window, SCRIPT_NO_PILOT, windows)?,
         }
         self.shown_zoid = Some(status.zoid);
         Ok(())
@@ -391,8 +414,7 @@ impl PauseMenu {
                 self.run_now(rom, SCRIPT_CLOSE + usize::from(LIST_WINDOW), windows)?;
                 self.run_now(rom, SCRIPT_CLOSE + usize::from(ZOID_WINDOW), windows)?;
                 self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
-                self.run_now(rom, SCRIPT_LAB_WINDOWS, windows)?;
-                self.lab_menu()
+                self.reopen_lab_menu(rom, windows)
             }
             _ => self.show_broken(rom, false, windows),
         }

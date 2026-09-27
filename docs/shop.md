@@ -8,9 +8,13 @@ of every frame in a reference emulator while buying and selling in Arcana's item
 changed by hand (a broken unit, damaged units, money). The port's frames were compared
 with the original's on the same inputs; for the shops of areas 2 and 3 too, from saves
 changed by hand, with the reference emulator's cycle counter read at the lab keeper's
-rebuild and its return. Implemented in `crates/game-core/src/menu/shop.rs` (the
-screens, as a mode of the pause menu), `crates/extraction/src/saga_shop.rs` (goods,
-prices and counts), and `crates/game-core/src/story.rs` (the keepers).
+rebuild and its return. For the lab's development: a read of its states named below,
+breakpoints on the script runner and the sound call, RAM dumps before and after, and
+screenshots of every frame compared with the port's. Implemented in
+`crates/game-core/src/menu/shop/` (the screens, as a mode of the pause menu;
+`develop.rs` for the development), `crates/extraction/src/saga_shop.rs` (goods,
+prices and counts), `crates/extraction/src/saga_party.rs` (what a development needs
+and does) and `crates/game-core/src/story.rs` (the keepers).
 
 ## Keepers
 
@@ -199,7 +203,8 @@ shops', the welcome 258 and the question 259, whose menu offers ゾイドの復�
   close and script 257 builds the lab's screen again.
 - **ゾイド開発** with no Zi data (`0x0804E3A0`: the bytes `+0x33E2` for the Zoids 0–0x98)
   gives notice 260 (Ｚｉデータを持ってないと開発できませんよ), and with more than 0x98 units
-  261 (これ以上ゾイドを持てないみたいですね), each with `0x4F` and `0x41`.
+  261 (これ以上ゾイドを持てないみたいですね), each with `0x4F` and `0x41`. Otherwise it
+  develops (see below).
 - **B** on the menu: when the player or one of the three warriors (characters 0–3) has no
   unit, sound `0x4F` and おっと。 (263) followed by あなたは (264) when only the player has
   none, あなたと三獣士たちは (265, 266) when the player and a warrior have none, or
@@ -209,8 +214,79 @@ shops', the welcome 258 and the question 259, whose menu offers ゾイドの復�
   of its full hit or energy points the keeper says 271 (あ、ゾイドの回復はサービスでやって
   おきましたよ); and the lab closes as a shop does, black three frames longer.
 
+### Development
+
+The lab task's states `0x200`–`0x221` (`0x08056090` on). Windows 3 and 2 close and
+script 272 opens the Zi data's window (2) and the list's (3); 273 asks
+どれを開発したいのですか？.
+
+- **The list** holds the Zoids whose Zi data the party has, in id order, four a page in
+  window 3 (their names), with the arrows and L and R (sound `0x40`) as the other lists.
+  Window 2 shows the Zi data of the Zoid under the cursor as the status list's Ｚｉデータ
+  does (see [menu.md](menu.md)), cleared (script 2) and drawn again (27) when it changes.
+  The menu is script 35. B: `0x3F`, windows 3 and 2 close, and script 257 builds the lab
+  again with the cursor on ゾイド開発, the line last chosen.
+- **The Zoid.** A closes windows 3, 2 and 1 and script 274 shows, in window 1, what the
+  development gives: the Zoid's name and size (88 + the record's `+4`), then 81 ＨＰ：
+  and 82 ＥＰ： with the record's `+0x40` and `+0x44` in four cells, 83 ＳＰ： with `+0x48`
+  in four and 84 ＤＦ： with `+0x4A` in three and ％, and its picture at (40, 88); 275
+  このようなゾイドが開発されます スタートボタン：装備武器表示. Script 38 waits in mode 6 (see
+  [formats/script-text.md](formats/script-text.md)): B (`0x3F`) goes back to the list,
+  which script 44 and the money, 272, 28 and 273 print anew with the cursor kept; START
+  shows the Zoid's parts as its record gives them, on the pages the Zoid status screen
+  uses (see [menu.md](menu.md)) with helps 269 (Ａボタン：次へ Ｂボタン：戻る) and 270 on
+  the last, and past the last page or with B the Zoid again.
+- **What it needs** (`0x0805534C`), on A (sound `0x41`): the record's money (`+0x24`,
+  compared with the party's), a unit to build it from when `+0x2C` is not 0, and each
+  Zi-data item of `+0x2D` and `+0x2E` that is not `0xFF`, whose count at `+0x330C` must
+  not be 0. A unit serves (`0x08055198`, the unit slots 0–`0xAC` in order, read as stored)
+  when its Zoid is `+0x2C`, or, from `0xFA`, one of that kind's list at ROM `0x75C018`
+  (eight bytes a kind, `0xFF` after the last) other than the Zoid developed. With
+  something lacking: sound `0x4F`, the help cleared and drawn, 281 お金と or 282 お金が
+  for the money, 283 ゾイドと or 284 ゾイドが for the unit, 285 アイテムが for the items,
+  each with と when more follows, and 286 足りないみたいですね; the list after the key.
+- **The unit to build from**, when the record asks for one: window 1 closes and script
+  293 opens the list (3) and the unit's window (1); 287 asks どのゾイドを使って開発するの
+  ですか？ スタートボタン：ゾイド詳細表示. Six units a page by their Zoids' names; window 1
+  shows the one under the cursor as the revival's list does (cleared with script 1). The
+  menu is script 36. B (`0x3F`) goes back to the Zi data list. START shows the unit in full
+  (state `0x500`): windows 3 and 1 close and 268 (Ａボタン：装備武器表示 Ｂボタン：戻る)
+  opens window 1 with the Zoid's name and size, its full hit and energy points, SP, DF
+  and 85 訓練度： in three cells, and its picture; A shows its parts with its pilot's
+  bonuses (`0x08055024`) on the same pages, and B, or A past the last page, goes back to
+  the list. A on a unit: with no pilot the development's question follows; a pilot whose
+  flag `0x08` is set will not leave (sound `0x4F`, the pilot's name, 289 は, the Zoid's,
+  291 から降りたくないみたいですね, and after the key `0x41` and the list); otherwise the
+  Zoid's name, 295 には, the pilot's, 296 が搭乗してるみたいですけど、よろしいのですか？ and
+  はい／いいえ, whose いいえ or B go back to the list.
+- **The question**: with a unit taken, windows 3 and 1 close and the Zoid is shown again.
+  25 and 276 開発しますが、よろしいのですか？ and はい／いいえ. B (`0x3F`) goes back to the list
+  it came from, the money printed again. いいえ gives 278 (あれ？やめてしまうのですか？).
+  はい, when the unit has weapons on its racks (its first three slots with a part and
+  kind bit 1 or 2), asks 279 (元になったゾイドが武器を装備したままだと開発できません
+  装備をすべて外しますか？); いいえ or B give 280 (それでは開発できませんね・・・); はい asks, for
+  each of those weapons whose stock is already over 8, 149 外そうとしている, its name and
+  150 (…これ以上ストックできません。捨てますか？), where いいえ or B give 280 too; then each
+  weapon goes to the stock while it holds fewer than 9, and its slot is emptied.
+- **The development** (`0x08057020`): the money is taken; the unit built from loses its
+  pilot (`0x08036C2C`, which works its values out again) and is cleared, 56 zero bytes,
+  with the unit count less one (`0x08055314`); each item used goes down by one; a unit of
+  the new Zoid is made in the first free slot (`0x08036A30`) and its values worked out
+  with no pilot (`0x08036CB0`); 277 はい。すぐにできますからね. After the answer's key the
+  keeper's `0x41`, window 1 closes and the list comes back as after B, or, with more than
+  0x98 units, 261 and the lab's menu (not seen in the original).
+
 ## Checked against the original
 
+- Sand Colony's lab (map 33) with Zi data, cores, units and money set by hand in a save:
+  a development with nothing lacking, one built from a piloted Command Wolf with a
+  weapon on its rack (and with that weapon's stock full), one refused by a pilot who
+  keeps his Zoid, the money lacking, いいえ on the question, the parts' pages of the Zoid
+  and of a unit, and every way back: the same scripts in the same order, the sounds on
+  the same frames but for B and a page turn a frame apart, and the same screens but for
+  the transitions and the wallpaper. The original's state after a development was read
+  from RAM: the unit built from is replaced by the new one in its slot, its weapon in the
+  stock and its pilot without a unit.
 - Dr. T's lab: every frame from the talk to the welcome, through a revival refused for
   money, one paid for, the keeper's word on the repair and the way out, matches once
   aligned, but for the transitions and the wallpaper visible between the windows.
@@ -238,6 +314,6 @@ shops', the welcome 258 and the question 259, whose menu offers ゾイドの復�
 - The original drops a frame here and there while it prints (one to three when a list
   or a question opens), which stands the wallpaper still. The port models only the
   welcome's, so after the first list its wallpaper runs a few pixels ahead.
-- The Zoid lab's ゾイド開発 (with Zi data), ゾイド乗せ換え and ゾイドを売る, and START on the
-  revival's list (the Zoid's details), are not implemented: the port answers with the
-  pause menu's まだできてません.
+- The Zoid lab's ゾイド乗せ換え and ゾイドを売る, and START on the revival's list (the
+  Zoid's details), are not implemented: the port answers with the pause menu's
+  まだできてません.

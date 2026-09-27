@@ -24,6 +24,7 @@ use crate::script::ScriptError;
 use crate::windows::ScriptWindows;
 use platform::{Button, Input};
 
+mod develop;
 mod lab;
 mod wares;
 
@@ -76,6 +77,8 @@ pub(super) enum ShopStep {
     Revived,
     /// The notice that no broken Zoid is left.
     LabRevivalEnd,
+    /// A step of ゾイド開発.
+    Develop(develop::Step),
 }
 
 /// A shop's scripts, by the index its task passes: the item shops' start
@@ -475,7 +478,8 @@ impl PauseMenu {
             | ShopStep::ReviveQuestion
             | ShopStep::ReviveNotice
             | ShopStep::Revived
-            | ShopStep::LabRevivalEnd => Ok(()),
+            | ShopStep::LabRevivalEnd
+            | ShopStep::Develop(_) => Ok(()),
         }
     }
 

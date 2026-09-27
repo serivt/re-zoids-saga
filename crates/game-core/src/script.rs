@@ -520,9 +520,9 @@ impl ScriptRunner {
         keys: u16,
         host: &mut impl ScriptHost,
     ) -> bool {
-        let accepted = mode == 0 && keys & KEY_A != 0;
+        let accepted = waited_key(mode, keys, host);
         let canceled = cancelable && keys & KEY_B != 0;
-        if !accepted && !canceled {
+        if accepted.is_none() && !canceled {
             let elapsed = elapsed + 1;
             host.prompt(self.window, elapsed / PROMPT_HALF_PERIOD % 2 == 1);
             self.wait = Wait::Key {
@@ -532,12 +532,7 @@ impl ScriptRunner {
             };
             return false;
         }
-        if accepted {
-            self.vars[0] = 1;
-            host.play_sound(CONFIRM_SOUND);
-        } else {
-            self.vars[0] = 0;
-        }
+        self.vars[0] = accepted.unwrap_or(0);
         host.prompt(self.window, false);
         self.wait = Wait::Frames(KEY_ACCEPT_FRAMES);
         true
@@ -910,6 +905,45 @@ impl ScriptRunner {
     }
 }
 
+/// What a key wait of `mode` ends with, if a key it takes is down
+/// (`0x0803EA58`): mode 0 takes A (1, sound `0x41`); mode 1 START (1);
+/// modes 2–6 A (1), and in turn L (2) in modes 2, 3, 5 and 6, R (4) in
+/// modes 2, 4, 5 and 6, left (8) in modes 5 and 6, and in mode 6 right
+/// (`0x10`), START (`0x80`) and SELECT (0). A and START play `0x47`
+/// outside mode 0. The game tests the keys in turn, so the last one wins.
+fn waited_key(mode: u8, keys: u16, host: &mut impl ScriptHost) -> Option<u16> {
+    let takes = |key: u16, modes: &[u8]| keys & key != 0 && modes.contains(&mode);
+    let mut code = None;
+    if takes(KEY_A, &[0]) {
+        host.play_sound(CONFIRM_SOUND);
+        code = Some(1);
+    }
+    if takes(KEY_START, &[1]) || takes(KEY_A, &[2, 3, 4, 5, 6]) {
+        host.play_sound(MENU_CONFIRM_SOUND);
+        code = Some(1);
+    }
+    if takes(KEY_L, &[2, 3, 5, 6]) {
+        code = Some(PAGE_LEFT);
+    }
+    if takes(KEY_R, &[2, 4, 5, 6]) {
+        code = Some(PAGE_RIGHT);
+    }
+    if takes(KEY_LEFT, &[5, 6]) {
+        code = Some(MOVED_LEFT);
+    }
+    if takes(KEY_RIGHT, &[6]) {
+        code = Some(MOVED_RIGHT);
+    }
+    if takes(KEY_START, &[6]) {
+        host.play_sound(MENU_CONFIRM_SOUND);
+        code = Some(STARTED);
+    }
+    if takes(KEY_SELECT, &[6]) {
+        code = Some(SELECTED);
+    }
+    code
+}
+
 /// What a move-reporting menu of `mode` ends with for a key besides A, B
 /// and the cursor's (the handlers' mode tables at `0x0803FA20` and
 /// `0x0803F5B4`); the game tests them in turn, so the last one wins.
@@ -1230,6 +1264,17 @@ mod tests {
         );
         assert!(!runner.is_waiting_for_key());
         assert!(runner.update(&bytes, Input::default(), &mut host).unwrap());
+    }
+
+    #[test]
+    fn a_key_wait_of_mode_6_reports_start_and_the_shoulders() {
+        let mut host = Recorder::default();
+        assert_eq!(waited_key(6, KEY_START, &mut host), Some(STARTED));
+        assert_eq!(waited_key(6, KEY_A, &mut host), Some(1));
+        assert_eq!(waited_key(6, KEY_R, &mut host), Some(PAGE_RIGHT));
+        assert_eq!(waited_key(0, KEY_START, &mut host), None);
+        assert_eq!(waited_key(0, KEY_A, &mut host), Some(1));
+        assert_eq!(host.log, ["sound 0x47", "sound 0x47", "sound 0x41"]);
     }
 
     #[test]

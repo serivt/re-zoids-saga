@@ -141,7 +141,7 @@ impl PauseMenu {
             self.zi_shown = Some(selected);
             self.run_now(rom, SCRIPT_DRAW_CHARACTER, windows)?;
             match self.zi_kind {
-                ZiList::Data => self.describe_zi_data(rom, id, windows)?,
+                ZiList::Data => self.describe_zi_data(rom, id, STOCK_WINDOW, windows)?,
                 ZiList::Items => self.describe_zi_item(rom, id, windows)?,
             }
         }
@@ -177,19 +177,20 @@ impl PauseMenu {
         }
     }
 
-    /// What developing the Zoid under the cursor asks for: the money, the
+    /// What developing Zoid `zoid` asks for, in `window`: the money, the
     /// Zoid (none, one of the Zoids, or a special kind) and the two
-    /// Zi-data items (none, or the one or two needed).
-    fn describe_zi_data(
+    /// Zi-data items (none, or the one or two needed). The lab's
+    /// development list shows it too.
+    pub(super) fn describe_zi_data(
         &mut self,
         rom: &[u8],
         zoid: u8,
+        window: u8,
         windows: &mut ScriptWindows<'_>,
     ) -> Result<(), ScriptError> {
         let Some(development) = saga_party::development(rom, zoid) else {
             return Ok(());
         };
-        let window = STOCK_WINDOW;
         self.run_in(rom, window, SCRIPT_MONEY_NEEDED, windows)?;
         let money = i32::try_from(development.money).unwrap_or(i32::MAX);
         put_value(windows, window, money, MONEY_CELLS, LEFT_ALIGNED);
