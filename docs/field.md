@@ -140,7 +140,11 @@ toward the player within two metatiles along both axes and wander farther away. 
 an enemy steps into the player's carrier, or the carrier into an enemy, the two meet
 in battle: both must be map Zoids (behavior 1) on the same level (attribute bit
 `0x1000`), and the player must be in control. An enemy does not reach a player standing
-on an exit's cell. Meeting and the battle are described in [combat.md](combat.md).
+on an exit's cell. The check does not look at the enemy's command: a map Zoid that
+stands still (command 1), like the guard of the thieves' tunnel in map 39 (`mq0262`),
+which bars the way to the canyon's far side in chapter 2, meets the player the same way
+when the carrier walks into it. Meeting and the battle are described in
+[combat.md](combat.md).
 
 ## Random numbers
 

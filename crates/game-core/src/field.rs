@@ -1147,9 +1147,9 @@ impl Field {
     }
 
     /// The Zoid actor `index`, stepping toward `direction`, runs into, when
-    /// the two meet in battle (`0x0800AE7C`): the player's carrier and a
-    /// roaming enemy, on the same level, the player in control; an enemy
-    /// does not reach a player on an exit's cell.
+    /// the two meet in battle (`0x0800AE7C`): the player's carrier and an
+    /// enemy Zoid, roaming or standing guard, on the same level, the player
+    /// in control; an enemy does not reach a player on an exit's cell.
     fn meeting(&self, index: usize, direction: Direction) -> Option<usize> {
         if self.intangible {
             return None;
@@ -1182,7 +1182,6 @@ impl Field {
         };
         let meets = carrier.behavior == ZOID_BEHAVIOR
             && zoid.behavior == ZOID_BEHAVIOR
-            && zoid.command == Command::Chase
             && level(carrier) == level(zoid)
             && (index == 0 || !exit_cell);
         meets.then_some(enemy)
@@ -1330,10 +1329,10 @@ impl Field {
         })
     }
 
-    /// Whether `actor` is an enemy roaming a Zoid map, which meets the
-    /// player in battle.
+    /// Whether `actor` is an enemy on a Zoid map, which meets the player
+    /// in battle whether it roams or stands guard.
     fn roaming_enemy(actor: &Actor) -> bool {
-        actor.behavior == ZOID_BEHAVIOR && actor.command == Command::Chase
+        actor.behavior == ZOID_BEHAVIOR
     }
 
     /// Makes the roaming enemies intangible, or solid again: when
