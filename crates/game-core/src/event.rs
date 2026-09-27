@@ -57,6 +57,9 @@ const FOREVER: u16 = 0;
 /// An actor index that stands for the space-time portal of the map
 /// walked (see [`crate::field::Field::portal`]).
 pub const THE_PORTAL: usize = usize::MAX - 1;
+/// An actor index that stands for the guard that last saw the player
+/// (see [`Op::IfSeen`]).
+pub const SEEN_GUARD: usize = usize::MAX - 3;
 /// A cell that stands for the portal's own.
 pub const AT_THE_PORTAL: (usize, usize) = (usize::MAX - 1, usize::MAX - 1);
 /// A cell that stands for the one below the portal.
@@ -469,6 +472,43 @@ pub enum Op {
         /// Objects in the list.
         count: usize,
     },
+    /// Keeps the enemies from meeting the player (`0x02000008` bit 1 set),
+    /// or lets them again.
+    Calm(bool),
+    /// Brightens the field's layers and sprites toward white, the windows
+    /// left out (`BLDCNT` `0xBE` with `BLDY` at `level` of 16), or stops
+    /// (level 0).
+    Whiten(u8),
+    /// Runs `then` when one of `guards` sees the player (`0x0801BC2C`, see
+    /// [`crate::field::Field::seen_by`]): the guard stops, and
+    /// [`SEEN_GUARD`] stands for it from then on; `otherwise` else.
+    IfSeen {
+        /// The guards, by actor.
+        guards: &'static [usize],
+        /// Program run when one sees the player.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Turns the player toward the guard that saw it (`0x0801BD9C`).
+    FaceSeenGuard,
+    /// Places actor `actor` on the player's cell moved by `(dx, dy)`
+    /// cells, as the handlers that read the player's entity do.
+    PlaceNearPlayer(usize, (i32, i32)),
+    /// Glides actor `actor` to the player's cell moved by `by` cells.
+    GlideNearPlayer {
+        /// Actor index.
+        actor: usize,
+        /// Cells from the player's.
+        by: (i32, i32),
+        /// Pixels a frame.
+        speed: i32,
+        /// Whether the camera scrolls along with the player.
+        camera: bool,
+    },
+    /// Makes actor `actor`'s animation stop at its end (entity flag
+    /// `0x400`) without changing it.
+    Once(usize),
     /// Loads the colosseum's arena for match `n` (`0x0801A70C`): its list
     /// with the formation's members after it (see
     /// [`extraction::saga_arena::arena_objects`]) and the player on
@@ -509,6 +549,14 @@ pub trait EventHost {
     /// Loads the arena for match `game` and returns how many objects it
     /// has.
     fn load_arena(&mut self, game: u8) -> usize;
+    /// Keeps the enemies from meeting the player, or lets them.
+    fn set_calm(&mut self, calm: bool);
+    /// Brightens the field toward white by `level` of 16.
+    fn set_whiten(&mut self, level: u8);
+    /// The guard that last saw the player.
+    fn seen_guard(&self) -> Option<usize>;
+    /// Remembers `guard` as the one that saw the player.
+    fn set_seen_guard(&mut self, guard: usize);
     /// Whether the formation meets match `game`'s regulation.
     fn meets_regulation(&self, game: u8) -> bool;
     /// Starts map `map`'s song unless it plays already, as the cutscene
@@ -1141,6 +1189,7 @@ impl Events {
             | Op::IfZiDataHeld { .. }
             | Op::IfZoidOwned { .. }
             | Op::IfRegulation { .. }
+            | Op::IfSeen { .. }
             | Op::IfStateSet { .. }
             | Op::IfPlayerSprite { .. }
             | Op::IfPlayerOn { .. }
@@ -1190,6 +1239,7 @@ impl Events {
             | Op::Animate(..)
             | Op::Shift(..)
             | Op::StepBack { .. }
+            | Op::Once(_)
             | Op::Pan(..) => {
                 if let Some(field) = host.field() {
                     command_actor(field, op);
@@ -1482,6 +1532,11 @@ impl Events {
                 then,
                 otherwise,
             } => taken(host.meets_regulation(game), then, otherwise),
+            Op::IfSeen {
+                guards,
+                then,
+                otherwise,
+            } => taken(guard_sees(host, guards), then, otherwise),
             Op::IfStateSet {
                 at,
                 then,
@@ -1520,25 +1575,31 @@ impl Events {
                 otherwise,
             ),
             Op::Call(program) => program,
-            Op::Loop(program) => {
-                self.push(slot, program, FOREVER);
-                return Flow::Continue;
-            }
-            Op::Repeat(times, program) => {
-                if times == 0 {
-                    return Flow::Next;
-                }
-                self.push(slot, program, times);
-                return Flow::Continue;
-            }
-            Op::Spawn(target, program) => {
-                self.spawn(target, program);
-                return Flow::Next;
-            }
+            Op::Loop(_) | Op::Repeat(..) | Op::Spawn(..) => return self.start(slot, op),
             _ => return Flow::Stop,
         };
         self.push(slot, program, 1);
         Flow::Continue
+    }
+
+    /// Starts the program of a loop, a repeat or a spawn.
+    fn start(&mut self, slot: usize, op: Op) -> Flow {
+        match op {
+            Op::Loop(program) => {
+                self.push(slot, program, FOREVER);
+                Flow::Continue
+            }
+            Op::Repeat(0, _) => Flow::Next,
+            Op::Repeat(times, program) => {
+                self.push(slot, program, times);
+                Flow::Continue
+            }
+            Op::Spawn(target, program) => {
+                self.spawn(target, program);
+                Flow::Next
+            }
+            _ => Flow::Stop,
+        }
     }
 
     /// One call of the game's fade step (`0x08001650` toward black,
@@ -1584,6 +1645,7 @@ fn player_within(
 /// `op` with the stand-ins for the portal, its cells and the exit's
 /// arrival replaced by what they stand for now.
 fn resolve(op: Op, host: &mut impl EventHost) -> Op {
+    let op = resolve_near(op, host);
     let stand_in =
         |cell: (usize, usize)| [AT_THE_PORTAL, BELOW_THE_PORTAL, EXIT_ARRIVAL].contains(&cell);
     let needed = match op {
@@ -1632,6 +1694,79 @@ fn resolve(op: Op, host: &mut impl EventHost) -> Op {
     }
 }
 
+/// `op` with the guard that saw the player and the cells near the player
+/// replaced by what they stand for now.
+fn resolve_near(op: Op, host: &mut impl EventHost) -> Op {
+    let guard = host.seen_guard();
+    let seen = |actor: usize| match (actor, guard) {
+        (SEEN_GUARD, Some(guard)) => guard,
+        _ => actor,
+    };
+    let near = |field: &Field, (dx, dy): (i32, i32)| {
+        let player = field.player();
+        let size = if field.zoid_map() {
+            ZOID_CELL
+        } else {
+            ROOM_CELL
+        };
+        let cell = |at: usize, by: i32| i32::try_from(at).unwrap_or(0) + by;
+        (cell(player.column, dx), cell(player.row, dy), size)
+    };
+    match op {
+        Op::Face(actor, facing) => Op::Face(seen(actor), facing),
+        Op::AwaitArrival(actor) => Op::AwaitArrival(seen(actor)),
+        Op::FaceSeenGuard => {
+            let facing = guard.and_then(|guard| {
+                host.field()
+                    .and_then(|field| field.actor(guard))
+                    .map(|actor| actor.facing.opposite())
+            });
+            facing.map_or(Op::Wait(0), |facing| Op::Face(0, facing))
+        }
+        Op::PlaceNearPlayer(actor, by) => host.field().map_or(op, |field| {
+            let (column, row, _) = near(field, by);
+            let cell = |value: i32| usize::try_from(value).unwrap_or(usize::from(u8::MAX));
+            Op::Place(actor, (cell(column), cell(row)))
+        }),
+        Op::GlideNearPlayer {
+            actor,
+            by,
+            speed,
+            camera,
+        } => host.field().map_or(op, |field| {
+            let (column, row, size) = near(field, by);
+            Op::Glide {
+                actor,
+                to: (column * size, row * size),
+                speed,
+                frames: size.unsigned_abs() / speed.unsigned_abs().max(1),
+                camera,
+            }
+        }),
+        other => other,
+    }
+}
+
+/// The cell sizes of rooms and of Zoid maps, in pixels.
+const ROOM_CELL: i32 = 16;
+const ZOID_CELL: i32 = 32;
+
+/// Whether one of `guards` sees the player, that guard stopped and kept
+/// as the one that saw it.
+fn guard_sees(host: &mut impl EventHost, guards: &[usize]) -> bool {
+    let seen = host.field().and_then(|field| {
+        let guard = field.seen_by(guards)?;
+        if let Some(actor) = field.actor_mut(guard) {
+            actor.command = crate::field::Command::Idle;
+        }
+        Some(guard)
+    });
+    if let Some(guard) = seen {
+        host.set_seen_guard(guard);
+    }
+    seen.is_some()
+}
+
 /// Whether the attribute of the player's cell has any of `bits`.
 fn player_on(host: &mut impl EventHost, bits: u16) -> bool {
     host.field().is_some_and(|field| {
@@ -1667,6 +1802,8 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::MarkChest => host.mark_chest(),
         Op::TakeChest => host.take_chest(),
         Op::Gift(reward) => host.set_gift(reward),
+        Op::Calm(calm) => host.set_calm(calm),
+        Op::Whiten(level) => host.set_whiten(level),
         Op::AfterCombat => host.after_combat(),
         Op::RestartMapMusic => host.restart_map_music(),
         Op::ForgetBattlesWon => host.forget_battles_won(),
@@ -1679,6 +1816,11 @@ fn apply(op: Op, host: &mut impl EventHost) {
 /// Applies an op that commands an actor.
 fn command_actor(field: &mut Field, op: Op) {
     match op {
+        Op::Once(actor) => {
+            if let Some(actor) = field.actor_mut(actor) {
+                actor.once = true;
+            }
+        }
         Op::Walk {
             actor,
             to,
@@ -1875,6 +2017,20 @@ mod tests {
         fn meets_regulation(&self, game: u8) -> bool {
             game < 2
         }
+
+        fn set_calm(&mut self, calm: bool) {
+            self.log.push(format!("calm {calm}"));
+        }
+
+        fn set_whiten(&mut self, level: u8) {
+            self.log.push(format!("whiten {level}"));
+        }
+
+        fn seen_guard(&self) -> Option<usize> {
+            None
+        }
+
+        fn set_seen_guard(&mut self, _guard: usize) {}
 
         fn meet(&mut self, group: u8) {
             self.log.push(format!("meet {group}"));
@@ -2130,6 +2286,24 @@ mod tests {
         assert_eq!(host.log, ["music 1"]);
         events.update(&mut host);
         assert_eq!(host.log, ["music 1", "music 2"]);
+        assert!(!events.running());
+    }
+
+    const CALMING: &[Op] = &[
+        Op::Calm(true),
+        Op::Whiten(3),
+        Op::Repeat(0, &[Op::Sound(1)]),
+        Op::Calm(false),
+        Op::End,
+    ];
+
+    #[test]
+    fn calm_and_whitening_reach_the_host_and_an_empty_repeat_runs_nothing() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.spawn(MAP_TASK, CALMING);
+        events.update(&mut host);
+        assert_eq!(host.log, ["calm true", "whiten 3", "calm false"]);
         assert!(!events.running());
     }
 

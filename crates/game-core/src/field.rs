@@ -43,6 +43,8 @@ const TILE_SIZE: usize = 8;
 /// Side of a room's cell in pixels; Zoid maps use cells twice as large.
 pub const ROOM_CELL: i32 = 16;
 const SPRITE_SIDE: i32 = 32;
+/// The attribute bits that stop a guard's line of sight.
+const SIGHT_BLOCKERS: u16 = 0xE000;
 /// The OBJ palette banks sprites choose from.
 const OBJECT_PALETTES: usize = 16;
 const FRACTION_BITS: u32 = 16;
@@ -766,6 +768,9 @@ pub struct Field {
     /// A debugging aid the original has not: the roaming enemies neither
     /// block the player nor meet it.
     intangible: bool,
+    /// No enemy meets the player (`0x02000008` bit 1), which some events
+    /// set while they run.
+    calm: bool,
     /// The OBJ palette banks: the palette last copied into each, which
     /// every actor reserving that slot is drawn with.
     object_palettes: [Option<[u16; 16]>; OBJECT_PALETTES],
@@ -794,6 +799,7 @@ impl Field {
             shown: None,
             sounds: Vec::new(),
             intangible: false,
+            calm: false,
             object_palettes: [None; OBJECT_PALETTES],
         }
     }
@@ -846,6 +852,7 @@ impl Field {
             shown: None,
             sounds: Vec::new(),
             intangible: false,
+            calm: false,
             object_palettes: [None; OBJECT_PALETTES],
         };
         field.player_mut().place((column, row));
@@ -1167,7 +1174,7 @@ impl Field {
     /// in control; an enemy does not reach a player on an exit's cell, and
     /// one beaten and exploding meets no one.
     fn meeting(&self, index: usize, direction: Direction) -> Option<usize> {
-        if self.intangible {
+        if self.intangible || self.calm {
             return None;
         }
         let (dx, dy) = direction.delta();
@@ -1357,6 +1364,57 @@ impl Field {
     /// battle. A debugging aid; the original has no such thing.
     pub fn set_intangible(&mut self, intangible: bool) {
         self.intangible = intangible;
+    }
+
+    /// Keeps the enemies from meeting the player, or lets them again
+    /// (`0x02000008` bit 1): they still block its way.
+    pub fn set_calm(&mut self, calm: bool) {
+        self.calm = calm;
+    }
+
+    /// Whether actor `index` was left out of the last frame's sprites as
+    /// off the screen (entity flag `0x10`).
+    #[must_use]
+    pub fn culled(&self, index: usize) -> bool {
+        self.culled.get(index).copied().unwrap_or(false)
+    }
+
+    /// The first of `guards` that sees the player (`0x0801BC2C`): an actor
+    /// on the screen, standing (the routine reads its animation, and a
+    /// walking one is none of the four standing ones), whose line of sight
+    /// from its cell, the way it faces, reaches the player's cell before a cell whose attribute has any of
+    /// bits `0xE000` (read at the footing, as `0x08008498` does): five
+    /// cells up or down, seven across.
+    #[must_use]
+    pub fn seen_by(&self, guards: &[usize]) -> Option<usize> {
+        let player = self.actors.first()?;
+        let target = (player.column, player.row);
+        let footing = self.actors.first().map_or(0, Actor::footing_offset);
+        guards.iter().copied().find(|&guard| {
+            let Some(actor) = self.actors.get(guard) else {
+                return false;
+            };
+            if !actor.visible || self.culled(guard) || actor.step.is_some() {
+                return false;
+            }
+            let (dx, dy, reach) = match actor.facing {
+                Direction::Up => (0, -1, 5),
+                Direction::Down => (0, 1, 5),
+                Direction::Left => (-1, 0, 7),
+                Direction::Right => (1, 0, 7),
+            };
+            (1..=reach)
+                .map_while(|k| {
+                    let column = actor.column.checked_add_signed(dx * k)?;
+                    let row = actor.row.checked_add_signed(dy * k)?;
+                    let blocked = self
+                        .scene
+                        .attribute(column, row + footing)
+                        .is_some_and(|attribute| attribute & SIGHT_BLOCKERS != 0);
+                    (!blocked).then_some((column, row))
+                })
+                .any(|cell| cell == target)
+        })
     }
 
     fn talk(&mut self) -> Option<FieldEvent> {

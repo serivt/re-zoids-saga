@@ -244,6 +244,18 @@ enum Talk {
     Event(&'static [Op]),
 }
 
+/// What the story's events set on the field beyond its objects.
+#[derive(Debug, Default)]
+struct StoryEffects {
+    /// No enemy meets the player (`0x02000008` bit 1), until the next
+    /// map's handler runs.
+    calm: bool,
+    /// How far the field is brightened toward white (`BLDY`), 0 to 16.
+    whiten: u8,
+    /// The guard that last saw the player.
+    seen_guard: Option<usize>,
+}
+
 /// The running game.
 pub struct Game<'rom> {
     data: GameData<'rom>,
@@ -290,6 +302,9 @@ pub struct Game<'rom> {
     /// A reward an event gives through the chest's ops (see
     /// [`Op::Gift`](crate::event::Op::Gift)).
     gift: Option<Reward>,
+    effects: StoryEffects,
+    /// How far the frame shown is brightened toward white.
+    shown_whiten: u8,
     player_name: String,
     party: Party,
     state: Vec<u8>,
@@ -445,6 +460,8 @@ impl<'rom> Game<'rom> {
             portal_exit: None,
             chest: None,
             gift: None,
+            effects: StoryEffects::default(),
+            shown_whiten: 0,
             player_name: DEFAULT_PLAYER_NAME.to_owned(),
             party: Party::default(),
             state,
@@ -523,6 +540,7 @@ impl<'rom> Game<'rom> {
         }
         self.windows.latch();
         self.shown_brightness = self.events.brightness();
+        self.shown_whiten = self.effects.whiten;
     }
 
     /// Turns the port's debugging mode on or off and says whether it is on
@@ -540,6 +558,7 @@ impl<'rom> Game<'rom> {
     fn latch_debug_mode(&mut self) {
         if let Some(field) = self.field.as_mut() {
             field.set_intangible(self.debug);
+            field.set_calm(self.effects.calm);
         }
         if let Some(combat) = self.combat.as_mut() {
             combat.set_overpowered(self.debug);
@@ -1069,7 +1088,12 @@ impl<'rom> Game<'rom> {
         self.run_handler(story::map_handler(map))
     }
 
+    /// Runs a map's handler once the map is loaded. Every handler of the
+    /// original starts with `0x0800BEE4` or `0x0800802C`, which clear the
+    /// field's state halfword (`0x02000008`), so the enemies meet the party
+    /// again on the next map.
     fn run_handler(&mut self, handler: Option<&'static [Op]>) -> Result<(), GameError> {
+        self.effects.calm = false;
         let Some(handler) = handler else {
             return Ok(());
         };
@@ -1100,6 +1124,7 @@ impl<'rom> Game<'rom> {
             portal_exit: self.portal_exit,
             chest: self.chest,
             gift: &mut self.gift,
+            effects: &mut self.effects,
             party: &mut self.party,
             sound: &mut self.sound,
             extensions: &self.extensions,
@@ -1694,6 +1719,7 @@ impl<'rom> Game<'rom> {
                 if let Some(field) = &self.field {
                     field.draw(frame);
                 }
+                whiten(frame, self.shown_whiten);
                 self.windows.draw_shown(frame, &self.skin, &self.painter);
                 darken(frame, self.shown_brightness);
             }
@@ -1800,6 +1826,7 @@ struct Host<'a, 'rom> {
     portal_exit: Option<(usize, usize)>,
     chest: Option<(usize, u16)>,
     gift: &'a mut Option<Reward>,
+    effects: &'a mut StoryEffects,
     party: &'a mut Party,
     sound: &'a mut SoundEngine<'rom>,
     extensions: &'a SharedExtensions,
@@ -2212,6 +2239,25 @@ impl EventHost for Host<'_, '_> {
         *self.gift = reward;
     }
 
+    fn set_calm(&mut self, calm: bool) {
+        self.effects.calm = calm;
+        if let Some(field) = self.field.as_mut() {
+            field.set_calm(calm);
+        }
+    }
+
+    fn set_whiten(&mut self, level: u8) {
+        self.effects.whiten = level.min(WHITE_LEVELS);
+    }
+
+    fn seen_guard(&self) -> Option<usize> {
+        self.effects.seen_guard
+    }
+
+    fn set_seen_guard(&mut self, guard: usize) {
+        self.effects.seen_guard = Some(guard);
+    }
+
     fn zoid_owned(&self, zoid: u16) -> bool {
         saga_party::owns_zoid(self.state, zoid)
     }
@@ -2363,6 +2409,30 @@ impl EventHost for Host<'_, '_> {
     }
 }
 
+/// The levels of the brightening toward white (`BLDY`).
+const WHITE_LEVELS: u8 = 16;
+
+/// Brightens every pixel of `frame` toward white by `level` of 16, as the
+/// GBA's brightness increase does on each 5-bit channel.
+fn whiten(frame: &mut Frame, level: u8) {
+    if level == 0 {
+        return;
+    }
+    let level = u16::from(level.min(WHITE_LEVELS));
+    let up = |channel: u8| {
+        let five = u16::from(channel >> 3);
+        let raised = five + (31 - five) * level / 16;
+        u8::try_from(raised << 3 | raised >> 2).unwrap_or(u8::MAX)
+    };
+    for y in 0..frame.height() {
+        for x in 0..frame.width() {
+            if let Some(color) = frame.pixel(x, y) {
+                frame.set_pixel(x, y, Rgb::new(up(color.r), up(color.g), up(color.b)));
+            }
+        }
+    }
+}
+
 /// The interpreter state the runner that ran last left: `last` is a slot
 /// of `scripts`, or `None` for the dialogue runner.
 fn last_context(
@@ -2392,9 +2462,22 @@ fn start_dialogue(
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT_PLAYER_NAME, Party, store_party, take_party, translated_name};
+    use super::{DEFAULT_PLAYER_NAME, Party, store_party, take_party, translated_name, whiten};
     use formats::Progress;
     use formats::progress::{ProgressError, STATE_LEN};
+    use platform::{Frame, Rgb};
+
+    #[test]
+    fn whitening_raises_each_channel_by_its_share_of_the_way() {
+        let mut frame = Frame::new(1, 1, Rgb::new(0, 128, 248));
+        whiten(&mut frame, 0);
+        assert_eq!(frame.pixel(0, 0), Some(Rgb::new(0, 128, 248)));
+        whiten(&mut frame, 8);
+        assert_eq!(frame.pixel(0, 0), Some(Rgb::new(123, 189, 255)));
+        let mut white = Frame::new(1, 1, Rgb::new(0, 0, 0));
+        whiten(&mut white, 16);
+        assert_eq!(white.pixel(0, 0), Some(Rgb::new(255, 255, 255)));
+    }
 
     #[test]
     fn a_translation_gives_the_default_name_its_latin_form() {

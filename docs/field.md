@@ -153,6 +153,25 @@ which bars the way to the canyon's far side in chapter 2, meets the player the s
 when the carrier walks into it. Meeting and the battle are described in
 [combat.md](combat.md).
 
+### Guards
+
+Source: `0x0801BC2C`, which the hidden lab's handlers (maps 199 and 200) run every
+frame from the field's hook with a list of objects. A guard sees the player when it is
+on the screen (entity flag `0x10` clear) and standing: the routine reads the
+animation at `+0x30`, one of the four standing ones (0 up, 1 down, 2 left, 3 right),
+and passes over a walking one. Its line of sight is a table per facing (ROM
+`0x08669820`, `0x08669834`, `0x08669848`, `0x08669864`): the next 5 cells up or down,
+or 7 left or right, each read through `0x08008498`; a cell whose attribute has any of
+bits `0xE000` ends the look, and the player's cell (`+0x4E`, `+0x50`) on it is seen.
+The guard's command then becomes 1, the player loses the controls, and the field's
+hook hands over to the scene that follows. The hook runs before the entities move, so
+a guard that ends a step facing the player sees it on the next frame.
+
+The enemies are kept away while some scenes run: bit 1 of the field's state halfword
+(`0x02000008`) set, no roaming enemy meets the player (see [combat.md](combat.md)).
+Every map's handler starts by clearing that halfword (`0x0800BEE4`, or `0x0800802C`
+unless its bit 0 is set).
+
 ## Random numbers
 
 Source: the routine at `0x08001080` and its seeding at `0x08001068`. A 16-bit state
@@ -169,6 +188,15 @@ Because the frame counter enters every draw, the port's sequences only match the
 original's when both run the same calls on the same frames; the wander logic re-seeds
 before each direction, so what matters is that draws are distributed like the game's.
 Implemented in `crates/game-core/src/rng.rs`.
+
+## White flash
+
+Source: `0x0801D93C` and `0x0801D968`, chapter 6's beam. A callback of the vertical
+blank sets `BLDCNT` to `0xBE`: the brightness increase on BG1 to BG3, the sprites and
+the backdrop, BG0, the windows' layer, left out. `BLDY` (RAM `0x03002356`) then
+rises a level every other frame from 1 to 16, and falls from 15 to 0 the same way,
+after which the callback clears `BLDCNT`. The port raises each 5-bit channel `c` of
+the field's frame to `c + (31 − c) × level / 16`, before the windows are drawn.
 
 ## Talking
 
