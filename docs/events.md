@@ -473,9 +473,11 @@ battle's first sounds; Opis; the gate, refused and with Dr. D; the rear entrance
 command room (its lines on the original's frames); the zone's turning back and edge;
 the measurements (every interval that no key bounds equal, and the pictures but for the
 roaming enemies, which are random); an amplifier's destruction (identical pictures but
-for a roaming enemy); the Kronos fort; the core; the laser; the crater to story battle 7.
-The chapter's end after story battle 7 is not compared yet: the patched saves' party
-cannot win it in the original. The loads of the desert and the other Zoid maps take the
+for a roaming enemy); the Kronos fort; the core; the laser; the crater to story battle 7; and the chapter's
+end, with the battle's enemies kept at 1 hit point and the party's at full by writing the
+battle's units (their hit points are the word at `+0x10` of the 0x2CC-byte units): every
+interval no key bounds is equal from `0xF2` to `0xFB`, but for `0xF5`, a frame early. The
+loads of the desert and the other Zoid maps take the
 original 10 to 30 frames longer than the port's (see Not modeled yet); the songs the
 loads start come earlier within the black in the port.
 
