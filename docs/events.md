@@ -546,8 +546,7 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
 - The fighting in battles, and the story battles (`0x08008D28`); the roaming enemies,
   meeting them, the battle screen's opening, its menu and retreating are described in
   [combat.md](combat.md).
-- The Zoid lab's development, pilot change and sale, and the other towns' shops (see
-  [shop.md](shop.md)).
+- The Zoid lab's development, pilot change and sale (see [shop.md](shop.md)).
 - Dr. T in the other areas: whether the party has the Zoids `0x90` or `0x8F`, and the
   game-state byte `+0x3320` (flags `0x140`, `0x141`).
 - The field's per-frame hooks (RAM `0x02000000`, `0x02000004`), which the world map's

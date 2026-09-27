@@ -6,7 +6,9 @@ the warp, per-frame logs of the fade level and the wallpaper's scroll, and scree
 of every frame in a reference emulator while buying and selling in Arcana's item shop
 (map 25) and armaments shop (map 26), and for the Zoid lab (map 27) the same with saves
 changed by hand (a broken unit, damaged units, money). The port's frames were compared
-with the original's on the same inputs. Implemented in `crates/game-core/src/menu/shop.rs` (the
+with the original's on the same inputs; for the shops of areas 2 and 3 too, from saves
+changed by hand, with the reference emulator's cycle counter read at the lab keeper's
+rebuild and its return. Implemented in `crates/game-core/src/menu/shop.rs` (the
 screens, as a mode of the pause menu), `crates/extraction/src/saga_shop.rs` (goods,
 prices and counts), and `crates/game-core/src/story.rs` (the keepers).
 
@@ -217,15 +219,25 @@ shops', the welcome 258 and the question 259, whose menu offers ゾイドの復�
   field's return. So does opening the armaments shop.
 - Buying, the notices, selling and cancelling a question match as sequences of screens
   in both shops: every window and text in the same place with the same values.
+- The shops of areas 2 and 3 (with saves changed by hand to stand the player before
+  each keeper): Sand Colony's lab (map 33), area 3's item shop 3 (map 52), armaments
+  shop 3 (map 53) and labs 3 (map 62) and 4 (map 90) open on the same frame as the
+  original's, but for the labs of area 3 (below), and show the same goods, prices and
+  menus.
 
 ## Differences
 
 - The port draws each step of a list or a question at once and counts the frames its
   scripts would have cost, as it does in the pause menu. The original redraws over one
-  to seven frames, so the port's windows change that much earlier.
+  to eight frames, so the port's windows change that much earlier.
+- In area 3 the lab keeper's rebuild of the object states (`0x08006E4C`) runs past its
+  frame: about 296,000 cycles (a frame is 280,896) to draw formations for the area's 88
+  map Zoids, against about 69,000 in areas 1 and 2 (23 and 27). The original's lab
+  there opens, and every frame after, one frame later than the port's, which does not
+  count the time.
 - The original drops a frame here and there while it prints (one to three when a list
   or a question opens), which stands the wallpaper still. The port models only the
   welcome's, so after the first list its wallpaper runs a few pixels ahead.
 - The Zoid lab's ゾイド開発 (with Zi data), ゾイド乗せ換え and ゾイドを売る, and START on the
   revival's list (the Zoid's details), are not implemented: the port answers with the
-  pause menu's まだできてません. The other towns' shops are not implemented either.
+  pause menu's まだできてません.
