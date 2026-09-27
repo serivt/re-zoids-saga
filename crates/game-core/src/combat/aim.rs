@@ -171,9 +171,9 @@ const SELF_ONLY: u32 = 4;
 const EVERYONE: u32 = 8;
 /// A part the grid doesn't remember as the unit's last weapon.
 const UNREMEMBERED_PART: u16 = 0x70;
-/// The first of the fixed weapons' slots, which some reaches take
-/// differently.
-const FIXED_SLOTS: usize = 3;
+/// The first slot of a side's back row, from which a weapon's reach
+/// covers other rows than from the front.
+const BACK_ROW: usize = 3;
 /// The slot of the rack behind the Zoid, which fades the Zoid to show it.
 const BEHIND_SLOT: usize = 2;
 
@@ -1002,7 +1002,7 @@ impl Aim {
             self.state = State::NoGrid;
             return;
         }
-        let shape = shape(weapon.code, self.slot >= FIXED_SLOTS);
+        let shape = shape(weapon.code, self.setup.slot >= BACK_ROW);
         self.show_icons(rom, entities);
         if self.grid_weapon != Some(self.slot) {
             self.group = first_group(shape, self.icons);
@@ -1560,12 +1560,14 @@ fn previous_weapon(parts: &[u16; SLOTS], from: Option<usize>) -> usize {
     slot
 }
 
-/// A weapon's shape on the grid from its reach's code and whether it is
-/// one of the fixed weapons (`0x0804593C`): `0xFE` and `0xFF` for one
-/// that reaches nothing from there.
+/// A weapon's shape on the grid from its reach's code and whether its
+/// user stands in the back row (`0x0804593C`, given the acting unit's
+/// slot above 2): `0xFE` for one too close to reach anything from there,
+/// `0xFF` for one too far. Code 5, the melee weapons', reaches the enemy's
+/// front row from the front and nothing from the back.
 #[must_use]
-pub fn shape(code: u8, fixed: bool) -> u8 {
-    let pick = |rack: u8, fixed_one: u8| if fixed { fixed_one } else { rack };
+pub fn shape(code: u8, back_row: bool) -> u8 {
+    let pick = |front: u8, back: u8| if back_row { back } else { front };
     match code {
         0 | 0xF | 0x10 => 0,
         2 | 0x11 => 2,
@@ -1754,7 +1756,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn shapes_come_from_the_reach_and_the_rack() {
+    fn shapes_come_from_the_reach_and_the_user_s_row() {
+        assert_eq!(shape(5, false), 5);
         assert_eq!(shape(0, false), 0);
         assert_eq!(shape(6, true), 5);
         assert_eq!(shape(9, false), 0xFE);

@@ -784,9 +784,12 @@ a code by its reach (5, 6, 0, 7, 8, 9 or 10, 11, 2, 12, 13, 14); the spread itse
 for the rest. With the scene's result 1 the
 attacker speaks and fires (`0x1010`); with 2 it fades out and ends (`0x2010`).
 
-**The grid.** A weapon's reach code and whether it is a fixed weapon (slot 3 on) give
-its shape (`0x0804593C`): single cells, a cell and the one behind it, a column, a
-square, the whole side, or one column only. Each shape tries its groups in the order of
+**The grid.** A weapon's reach code and whether its user stands in the back row (the
+acting unit's slot above 2, `0x0200DA7C`) give its shape (`0x0804593C`): single cells,
+a cell and the one behind it, a column, a square, the whole side, or one column only.
+A code whose reach misses every row from there gives `0xFE` (too close, as code 9 from
+the front) or `0xFF` (too far, as code 5, the melee weapons', from the back), and the
+aim refuses the weapon with the matching notice. Each shape tries its groups in the order of
 ROM `0x6D43BC` and starts on the first with a unit (`0x08047310`). Up and down go round
 a column, sideways to the other column's same row first, then its others from the top
 (`0x08047754`); a move only takes a group with a unit (`0x08047184`). The grid is entity
