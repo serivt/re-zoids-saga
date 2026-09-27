@@ -869,6 +869,19 @@ pub const SONG_TABLE: usize = 0x0056_7768;
 pub const SONG_COUNT: usize = 134;
 /// The driver's master volume, read from its RAM.
 pub const MASTER_VOLUME: u8 = 14;
+/// The sampled voices' key table (`0x0805BC90` reads it): per key, the
+/// frequency table's entry and the octave's shift.
+pub const SOUND_KEY_TABLE: usize = 0x0056_62B4;
+/// The top octave's twelve 32-bit frequencies.
+pub const SOUND_FREQUENCY_TABLE: usize = 0x0056_6368;
+/// The tone channels' key table (`0x0805C744` reads it), from key 36.
+pub const SOUND_TONE_KEY_TABLE: usize = 0x0056_63B0;
+/// The tone channels' twelve 16-bit register values of the lowest octave.
+pub const SOUND_TONE_FREQUENCY_TABLE: usize = 0x0056_6434;
+/// The noise channel's frequency bytes per key from 21.
+pub const SOUND_NOISE_TABLE: usize = 0x0056_644C;
+/// The wave channel's volume bytes per envelope level (`0x0805C8A4`).
+pub const SOUND_WAVE_VOLUME_TABLE: usize = 0x0056_6488;
 /// Music the title screen plays.
 pub const MUSIC_TITLE: usize = 1;
 /// Music behind the name entry.

@@ -20,6 +20,8 @@ const TIE: u8 = 0xCF;
 /// The first command a bare argument can repeat: the driver keeps the
 /// running status from `VOICE` on, so after `PRIO`, `TEMPO` or `KEYSH` a
 /// bare byte repeats the command before them.
+/// End of a tie; it becomes the running status like the commands after it.
+const END_OF_TIE: u8 = 0xCE;
 const FIRST_RUNNING: u8 = 0xBD;
 const SAMPLE_LOOP_FLAG: u32 = 0x4000_0000;
 const VOICE_DIRECT: u8 = 0x00;
@@ -287,6 +289,16 @@ impl Voice {
     }
 }
 
+/// The pan byte of entry `index` of the voice group at `group` (`+3`), which
+/// a drum kit's entry gives its notes when bit 7 is set.
+///
+/// # Errors
+///
+/// Returns [`M4aError::Truncated`] when the entry is past the data.
+pub fn voice_pan(bytes: &[u8], group: usize, index: u8) -> Result<u8, M4aError> {
+    byte(bytes, group + usize::from(index) * VOICE_SIZE + 3)
+}
+
 /// A sampled waveform: 8-bit signed samples after a 16-byte header.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sample {
@@ -375,8 +387,9 @@ pub enum Command {
     Tune(u8),
     /// Extended command (unused by this game's songs).
     Extended(u8, u8),
-    /// End the tied note.
-    EndOfTie,
+    /// End the tied note of the key given, or of the track's last key
+    /// (`0x0805BC00`).
+    EndOfTie(Option<u8>),
     /// Play a note: length in ticks (0 is a tie), key, velocity, extra
     /// gate ticks; missing arguments repeat the previous note's.
     Note {
@@ -416,6 +429,7 @@ pub fn read_command(
         };
         return match command {
             TIE..=0xFF => Ok(note(bytes, at, command)),
+            END_OF_TIE => Ok((Command::EndOfTie(Some(first)), at + 1)),
             FIRST_RUNNING..=0xC8 => Ok((one_argument(command, first, at)?, at + 1)),
             _ => Err(M4aError::BadCommand {
                 byte: first,
@@ -445,7 +459,13 @@ pub fn read_command(
             Command::Extended(byte(bytes, at + 1)?, byte(bytes, at + 2)?),
             at + 3,
         )),
-        0xCE => Ok((Command::EndOfTie, at + 1)),
+        END_OF_TIE => {
+            running.0 = Some(first);
+            match bytes.get(at + 1) {
+                Some(key) if *key < FIRST_WAIT => Ok((Command::EndOfTie(Some(*key)), at + 2)),
+                _ => Ok((Command::EndOfTie(None), at + 1)),
+            }
+        }
         TIE..=0xFF => {
             running.0 = Some(first);
             Ok(note(bytes, at + 1, first))
@@ -694,7 +714,7 @@ mod tests {
                     gate: None
                 },
                 Command::Wait(96),
-                Command::EndOfTie,
+                Command::EndOfTie(None),
                 Command::Pattern(0),
                 Command::PatternEnd,
                 Command::Goto(2),

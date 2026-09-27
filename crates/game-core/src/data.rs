@@ -19,6 +19,7 @@ use extraction::saga_save::{self, SaveDataError};
 use extraction::string_table::StringTableError;
 use formats::SaveLayout;
 use formats::font::{Glyph, GlyphIndex};
+use gba_runtime::apu::DriverLayout;
 
 use crate::extension::GameSound;
 use crate::menu::{Member, Roster, UNIT_SLOTS};
@@ -366,11 +367,21 @@ impl<'rom> GameData<'rom> {
         }
     }
 
-    /// Where the sound driver's song table is: offset, entries and the
-    /// master volume.
+    /// Where the sound driver's song table and tables are, and its master
+    /// volume.
     #[must_use]
-    pub fn song_table(&self) -> (usize, usize, u8) {
-        (saga::SONG_TABLE, saga::SONG_COUNT, saga::MASTER_VOLUME)
+    pub fn sound_layout(&self) -> DriverLayout {
+        DriverLayout {
+            song_table: saga::SONG_TABLE,
+            song_count: saga::SONG_COUNT,
+            master_volume: saga::MASTER_VOLUME,
+            key_table: saga::SOUND_KEY_TABLE,
+            frequency_table: saga::SOUND_FREQUENCY_TABLE,
+            cgb_key_table: saga::SOUND_TONE_KEY_TABLE,
+            cgb_frequency_table: saga::SOUND_TONE_FREQUENCY_TABLE,
+            noise_table: saga::SOUND_NOISE_TABLE,
+            wave_volume_table: saga::SOUND_WAVE_VOLUME_TABLE,
+        }
     }
 
     /// Offsets of the strings of script table `table` (`0` marks an absent

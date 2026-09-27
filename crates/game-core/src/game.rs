@@ -421,7 +421,6 @@ impl<'rom> Game<'rom> {
             .map_err(|error| text_error(&error))?
             .ok_or_else(|| GameError::Text("no dialogue table".to_owned()))?;
         let extensions = SharedExtensions::default();
-        let (song_table, song_count, master_volume) = data.song_table();
         let save = SaveFile::new(data.save_layout()?);
         let state = data.new_game_state()?;
         Ok(Self {
@@ -436,7 +435,7 @@ impl<'rom> Game<'rom> {
                 windows.set_extensions(extensions);
                 windows
             },
-            sound: SoundEngine::new(data.bytes(), song_table, song_count, master_volume),
+            sound: SoundEngine::new(data.bytes(), data.sound_layout()),
             dialogue: ScriptRunner::named(DIALOGUE_TABLE, dialogue),
             scripts: Vec::new(),
             active_script: None,

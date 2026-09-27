@@ -1,22 +1,29 @@
 //! The sequencer of the GBA's common sound driver: music players that walk
 //! their tracks' bytecode once per tick and raise note events.
 //!
-//! Source of knowledge: the public description of the driver's track
-//! commands and tempo (a tempo of `t` half-beats per minute advances
-//! `2t` per frame and ticks every 150), checked against the frame counts
-//! of the game's own songs.
+//! Source of knowledge: own reading of the driver in Zoids Saga (Japan,
+//! Rev 1): the player's frame (`0x0805B724`: a tempo of `t` adds `2t` per
+//! frame and ticks every 150; per tick each track's notes count their
+//! gates down, its commands run until a wait, and its modulation steps),
+//! a track's defaults as a song starts it (`0x0805B7C2`), the modulation's
+//! reset (`0x0805BC40`) and the volume, pan and pitch it derives
+//! (`0x0805C690`).
 
 use formats::m4a::{Command, M4aError, Running, SongHeader};
 
 const TICK: u32 = 150;
 const CENTER: u8 = 64;
 const DEFAULT_TEMPO: u8 = 75;
-const DEFAULT_VOLUME: u8 = 100;
 const DEFAULT_BEND_RANGE: u8 = 2;
+const DEFAULT_LFO_SPEED: u8 = 0x16;
+const DEFAULT_VOLUME_SCALE: u8 = 64;
 const MAX_PATTERN_DEPTH: usize = 3;
-const LFO_CYCLE: u32 = 256;
-const LFO_AMPLITUDE: u8 = 64;
-const PITCH_STEPS: f64 = 256.0;
+const LFO_QUARTER: u8 = 64;
+/// A track's pending changes (the low bits of its flags): its volume or
+/// pan, and its pitch.
+pub const VOLUME_CHANGED: u8 = 0x03;
+/// See [`VOLUME_CHANGED`].
+pub const PITCH_CHANGED: u8 = 0x0C;
 
 /// What a tick asks of the mixer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,24 +34,33 @@ pub enum Event {
         player: usize,
         /// Track index in the player.
         track: usize,
-        /// Key after the track's key shift.
+        /// Key as the track plays it, before its key shift.
         key: u8,
         /// Velocity 0–127.
         velocity: u8,
         /// Ticks until the key goes up; `None` for a tie.
         gate: Option<u32>,
+        /// The track's right and left volumes as the note starts.
+        volumes: (u8, u8),
+        /// The track's pitch as the note starts.
+        pitch: (i8, u8),
     },
-    /// Let the track's tied notes go.
+    /// Let the track's latest note of `key` still held go.
     EndTie {
         /// Player the track belongs to.
         player: usize,
         /// Track index in the player.
         track: usize,
+        /// The key.
+        key: u8,
     },
-    /// One tick passed on the player: its notes' gates count down.
+    /// One tick reached a track, before its commands run: its notes'
+    /// gates count down.
     Tick {
         /// The player.
         player: usize,
+        /// Track index in the player.
+        track: usize,
     },
     /// The track ended: let its notes go.
     TrackEnd {
@@ -89,16 +105,21 @@ pub struct Track {
     pub tune: u8,
     /// Priority of the track's notes.
     pub priority: u8,
-    /// Modulation speed.
+    /// Modulation speed: added to the modulation's phase every tick.
     pub lfo_speed: u8,
     /// Modulation depth.
     pub modulation: u8,
     /// Modulation type: 0 pitch, 1 volume, 2 pan.
     pub modulation_type: u8,
-    /// Frames the modulation waits after a note before it starts.
+    /// Ticks the modulation waits after a note before it starts.
     pub lfo_delay: u8,
-    lfo_phase: u32,
+    /// Volume scale, 64 for none (no command of this game's songs sets
+    /// it).
+    pub volume_scale: u8,
+    lfo_phase: u8,
     lfo_wait: u8,
+    modulation_value: i8,
+    changes: u8,
 }
 
 impl Track {
@@ -108,24 +129,27 @@ impl Track {
             running: Running::default(),
             wait: 0,
             stack: Vec::new(),
-            key: 60,
-            velocity: 127,
+            key: 0,
+            velocity: 0,
             gate: 0,
             finished: false,
             key_shift: 0,
             voice: 0,
-            volume: DEFAULT_VOLUME,
+            volume: 0,
             pan: CENTER,
             bend: CENTER,
             bend_range: DEFAULT_BEND_RANGE,
             tune: CENTER,
             priority: 0,
-            lfo_speed: 0,
+            lfo_speed: DEFAULT_LFO_SPEED,
             modulation: 0,
             modulation_type: 0,
             lfo_delay: 0,
+            volume_scale: DEFAULT_VOLUME_SCALE,
             lfo_phase: 0,
             lfo_wait: 0,
+            modulation_value: 0,
+            changes: 0,
         }
     }
 
@@ -135,42 +159,137 @@ impl Track {
         self.finished
     }
 
-    /// Pitch offset in semitones from bend, tune and modulation.
+    /// The track's right and left volumes (`0x0805C690`): volume times its
+    /// scale over 32, split by the pan, 0 the left edge and 127 the right,
+    /// each a byte.
     #[must_use]
-    pub fn pitch_offset(&self) -> f64 {
-        let bend = f64::from(i32::from(self.bend) - i32::from(CENTER)) * f64::from(self.bend_range)
-            / f64::from(CENTER);
-        let tune = f64::from(i32::from(self.tune) - i32::from(CENTER)) / f64::from(CENTER);
-        let vibrato = if self.modulation_type == 0 && self.lfo_wait == 0 {
-            self.lfo() * f64::from(LFO_AMPLITUDE) * f64::from(self.modulation)
-                / PITCH_STEPS
-                / f64::from(CENTER)
-        } else {
-            0.0
-        };
-        bend + tune + vibrato
+    pub fn volumes(&self) -> (u8, u8) {
+        let mut level = (u32::from(self.volume) * u32::from(self.volume_scale)) >> 5;
+        if self.modulation_type == 1 {
+            let scale = i32::from(self.modulation_value) + 128;
+            level = (level * u32::try_from(scale).unwrap_or(0)) >> 7;
+        }
+        let mut pan = (i32::from(self.pan) - i32::from(CENTER)) * 2;
+        if self.modulation_type == 2 {
+            pan += i32::from(self.modulation_value);
+        }
+        let pan = pan.clamp(-128, 127);
+        let level = i32::try_from(level).unwrap_or(0);
+        let byte = |value: i32| u8::try_from(value & 0xFF).unwrap_or(0);
+        (
+            byte((level * (pan + 128)) >> 8),
+            byte((level * (127 - pan)) >> 8),
+        )
     }
 
-    /// Triangle wave of the modulation, -1..=1.
-    fn lfo(&self) -> f64 {
-        let phase = i32::try_from(self.lfo_phase % LFO_CYCLE).unwrap_or(0);
-        let cycle = i32::try_from(LFO_CYCLE).unwrap_or(0);
-        let quarter = cycle / 4;
-        let value = if phase < quarter {
-            phase
-        } else if phase < 3 * quarter {
-            2 * quarter - phase
-        } else {
-            phase - cycle
-        };
-        f64::from(value) / f64::from(quarter)
+    /// The track's pitch as whole keys and 256ths of a key (`0x0805C690`):
+    /// the bend times its range and the tune in quarters of 1/64 key, the
+    /// key shift, and the pitch modulation in 16ths of a key.
+    #[must_use]
+    pub fn pitch(&self) -> (i8, u8) {
+        let bend = i32::from(self.bend) - i32::from(CENTER);
+        let tune = i32::from(self.tune) - i32::from(CENTER);
+        let mut pitch = (bend * i32::from(self.bend_range) + tune) * 4;
+        pitch += i32::from(self.key_shift) << 8;
+        if self.modulation_type == 0 {
+            pitch += i32::from(self.modulation_value) << 4;
+        }
+        let keys = i8::from_le_bytes([u8::try_from((pitch >> 8) & 0xFF).unwrap_or(0)]);
+        (keys, u8::try_from(pitch & 0xFF).unwrap_or(0))
     }
 
-    fn advance_lfo(&mut self) {
+    /// Applies a command that only sets one of the track's values,
+    /// marking what it changes.
+    fn set(&mut self, command: Command) {
+        match command {
+            Command::KeyShift(value) => {
+                self.key_shift = value;
+                self.changes |= PITCH_CHANGED;
+            }
+            Command::Volume(value) => {
+                self.volume = value;
+                self.changes |= VOLUME_CHANGED;
+            }
+            Command::Pan(value) => {
+                self.pan = value;
+                self.changes |= VOLUME_CHANGED;
+            }
+            Command::Bend(value) => {
+                self.bend = value;
+                self.changes |= PITCH_CHANGED;
+            }
+            Command::BendRange(value) => {
+                self.bend_range = value;
+                self.changes |= PITCH_CHANGED;
+            }
+            Command::ModulationType(value) => {
+                if self.modulation_type != value {
+                    self.modulation_type = value;
+                    self.changes |= VOLUME_CHANGED | PITCH_CHANGED;
+                }
+            }
+            Command::Tune(value) => {
+                self.tune = value;
+                self.changes |= PITCH_CHANGED;
+            }
+            Command::Priority(value) => self.priority = value,
+            Command::Voice(value) => self.voice = value,
+            Command::LfoSpeed(value) => {
+                self.lfo_speed = value;
+                if value == 0 {
+                    self.reset_lfo();
+                }
+            }
+            Command::LfoDelay(value) => self.lfo_delay = value,
+            Command::Modulation(value) => {
+                self.modulation = value;
+                if value == 0 {
+                    self.reset_lfo();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Clears the modulation's phase and value (`0x0805BC40`).
+    fn reset_lfo(&mut self) {
+        self.modulation_value = 0;
+        self.lfo_phase = 0;
+        self.changes |= self.modulation_changes();
+    }
+
+    /// What a change of the modulation's value changes.
+    fn modulation_changes(&self) -> u8 {
+        if self.modulation_type == 0 {
+            PITCH_CHANGED
+        } else {
+            VOLUME_CHANGED
+        }
+    }
+
+    /// One tick of the modulation: after its delay the phase advances by
+    /// the speed, and the value is the depth times a triangle of the phase
+    /// (-64 to 64) over 64.
+    fn step_lfo(&mut self) {
+        if self.lfo_speed == 0 || self.modulation == 0 {
+            return;
+        }
         if self.lfo_wait > 0 {
             self.lfo_wait -= 1;
-        } else if self.modulation > 0 {
-            self.lfo_phase = self.lfo_phase.wrapping_add(u32::from(self.lfo_speed));
+            return;
+        }
+        self.lfo_phase = self.lfo_phase.wrapping_add(self.lfo_speed);
+        let phase = self.lfo_phase;
+        let triangle = if i8::from_le_bytes([phase.wrapping_sub(LFO_QUARTER)]) >= 0 {
+            128 - i32::from(phase)
+        } else {
+            i32::from(i8::from_le_bytes([phase]))
+        };
+        let value = (i32::from(self.modulation) * triangle) >> 6;
+        let value = i8::from_le_bytes([u8::try_from(value & 0xFF).unwrap_or(0)]);
+        if value != self.modulation_value {
+            self.modulation_value = value;
+            self.changes |= self.modulation_changes();
         }
     }
 }
@@ -182,6 +301,7 @@ pub struct Player {
     tempo: u32,
     tempo_counter: u32,
     voices: usize,
+    priority: u8,
     song: Option<usize>,
 }
 
@@ -194,6 +314,7 @@ impl Player {
             tempo: u32::from(DEFAULT_TEMPO) * 2,
             tempo_counter: 0,
             voices: 0,
+            priority: 0,
             song: None,
         }
     }
@@ -204,7 +325,14 @@ impl Player {
         self.tempo = u32::from(DEFAULT_TEMPO) * 2;
         self.tempo_counter = 0;
         self.voices = header.voices;
+        self.priority = header.priority;
         self.song = Some(song).filter(|_| !header.tracks.is_empty());
+    }
+
+    /// The song's priority, which its notes add their track's to.
+    #[must_use]
+    pub fn priority(&self) -> u8 {
+        self.priority
     }
 
     /// Stops the player.
@@ -237,6 +365,15 @@ impl Player {
         &self.tracks
     }
 
+    /// Takes the changes pending on track `track` since its last note or
+    /// the last frame ([`VOLUME_CHANGED`], [`PITCH_CHANGED`]).
+    pub fn take_changes(&mut self, track: usize) -> u8 {
+        self.tracks
+            .get_mut(track)
+            .filter(|track| !track.finished)
+            .map_or(0, |track| std::mem::take(&mut track.changes))
+    }
+
     /// Advances one frame; the events tell the mixer what to start or stop.
     ///
     /// # Errors
@@ -251,9 +388,6 @@ impl Player {
         if self.song.is_none() {
             return Ok(());
         }
-        for track in &mut self.tracks {
-            track.advance_lfo();
-        }
         self.tempo_counter += self.tempo;
         while self.tempo_counter >= TICK {
             self.tempo_counter -= TICK;
@@ -263,11 +397,14 @@ impl Player {
     }
 
     fn tick(&mut self, rom: &[u8], index: usize, events: &mut Vec<Event>) -> Result<(), M4aError> {
-        events.push(Event::Tick { player: index });
         for number in 0..self.tracks.len() {
             if self.tracks[number].finished {
                 continue;
             }
+            events.push(Event::Tick {
+                player: index,
+                track: number,
+            });
             if self.tracks[number].wait > 0 {
                 self.tracks[number].wait -= 1;
             }
@@ -279,6 +416,9 @@ impl Player {
                 if let Some(tempo) = self.apply(number, command, index, events) {
                     self.tempo = u32::from(tempo) * 2;
                 }
+            }
+            if !self.tracks[number].finished {
+                self.tracks[number].step_lfo();
             }
         }
         Ok(())
@@ -314,22 +454,14 @@ impl Player {
                 }
             }
             Command::Tempo(tempo) => return Some(tempo),
-            Command::Priority(value) => track.priority = value,
-            Command::KeyShift(value) => track.key_shift = value,
-            Command::Voice(value) => track.voice = value,
-            Command::Volume(value) => track.volume = value,
-            Command::Pan(value) => track.pan = value,
-            Command::Bend(value) => track.bend = value,
-            Command::BendRange(value) => track.bend_range = value,
-            Command::LfoSpeed(value) => track.lfo_speed = value,
-            Command::LfoDelay(value) => track.lfo_delay = value,
-            Command::Modulation(value) => track.modulation = value,
-            Command::ModulationType(value) => track.modulation_type = value,
-            Command::Tune(value) => track.tune = value,
-            Command::EndOfTie => events.push(Event::EndTie {
-                player,
-                track: number,
-            }),
+            Command::EndOfTie(key) => {
+                track.key = key.unwrap_or(track.key);
+                events.push(Event::EndTie {
+                    player,
+                    track: number,
+                    key: track.key,
+                });
+            }
             Command::Note {
                 length,
                 key,
@@ -340,17 +472,24 @@ impl Player {
                 track.velocity = velocity.unwrap_or(track.velocity);
                 track.gate = gate.unwrap_or(0);
                 track.lfo_wait = track.lfo_delay;
-                track.lfo_phase = 0;
-                let shifted = i32::from(track.key) + i32::from(track.key_shift);
+                if track.lfo_delay != 0 {
+                    track.reset_lfo();
+                }
+                let volumes = track.volumes();
+                let pitch = track.pitch();
+                track.changes = 0;
                 events.push(Event::NoteOn {
                     player,
                     track: number,
-                    key: u8::try_from(shifted.clamp(0, 127)).unwrap_or(0),
+                    key: track.key,
                     velocity: track.velocity,
+                    volumes,
+                    pitch,
                     gate: (length > 0).then(|| u32::from(length) + u32::from(track.gate)),
                 });
             }
             Command::Repeat | Command::MemoryAccess | Command::Extended(..) => {}
+            setting => track.set(setting),
         }
         None
     }
@@ -390,13 +529,38 @@ mod tests {
         assert_eq!(
             events,
             [
-                Event::Tick { player: 0 },
+                Event::Tick {
+                    player: 0,
+                    track: 0
+                },
+                Event::NoteOn {
+                    player: 0,
+                    track: 0,
+                    key: 60,
+                    velocity: 100,
+                    gate: Some(2),
+                    volumes: (0, 0),
+                    pitch: (2, 0)
+                }
+            ]
+        );
+        events.clear();
+        player.frame(&rom, 0, &mut events).unwrap();
+        assert_eq!(
+            events,
+            [
+                Event::Tick {
+                    player: 0,
+                    track: 0
+                },
                 Event::NoteOn {
                     player: 0,
                     track: 0,
                     key: 62,
                     velocity: 100,
-                    gate: Some(2)
+                    gate: None,
+                    volumes: (0, 0),
+                    pitch: (2, 0)
                 }
             ]
         );
@@ -404,29 +568,24 @@ mod tests {
         player.frame(&rom, 0, &mut events).unwrap();
         assert_eq!(
             events,
-            [
-                Event::Tick { player: 0 },
-                Event::NoteOn {
-                    player: 0,
-                    track: 0,
-                    key: 64,
-                    velocity: 100,
-                    gate: None
-                }
-            ]
+            [Event::Tick {
+                player: 0,
+                track: 0
+            }]
         );
-        events.clear();
-        player.frame(&rom, 0, &mut events).unwrap();
-        assert_eq!(events, [Event::Tick { player: 0 }]);
         events.clear();
         player.frame(&rom, 0, &mut events).unwrap();
         assert_eq!(
             events,
             [
-                Event::Tick { player: 0 },
-                Event::EndTie {
+                Event::Tick {
                     player: 0,
                     track: 0
+                },
+                Event::EndTie {
+                    player: 0,
+                    track: 0,
+                    key: 62
                 },
                 Event::TrackEnd {
                     player: 0,
@@ -459,21 +618,48 @@ mod tests {
     }
 
     #[test]
-    fn bend_and_tune_move_the_pitch() {
+    fn bend_tune_and_key_shift_make_the_pitch() {
         let mut track = Track::new(0);
         track.bend = 96;
         track.bend_range = 12;
-        assert!((track.pitch_offset() - 6.0).abs() < 1e-9);
+        assert_eq!(track.pitch(), (6, 0));
         track.bend = CENTER;
         track.tune = 0;
-        assert!((track.pitch_offset() + 1.0).abs() < 1e-9);
-        track.tune = CENTER;
-        track.modulation = 128;
-        track.lfo_phase = 64;
-        assert!((track.pitch_offset() - 0.5).abs() < 1e-9);
-        track.lfo_phase = 192;
-        assert!((track.pitch_offset() + 0.5).abs() < 1e-9);
-        track.lfo_wait = 3;
-        assert!(track.pitch_offset().abs() < 1e-9);
+        assert_eq!(track.pitch(), (-1, 0));
+        track.tune = 96;
+        track.key_shift = 2;
+        assert_eq!(track.pitch(), (2, 128));
+    }
+
+    #[test]
+    fn pan_splits_the_volume() {
+        let mut track = Track::new(0);
+        track.volume = 100;
+        assert_eq!(track.volumes(), (100, 99));
+        track.pan = 0;
+        assert_eq!(track.volumes(), (0, 199));
+        track.pan = 127;
+        assert_eq!(track.volumes(), (198, 0));
+    }
+
+    #[test]
+    fn the_modulation_steps_a_triangle_per_tick_after_its_delay() {
+        let mut track = Track::new(0);
+        track.modulation = 64;
+        track.lfo_speed = 32;
+        track.lfo_wait = 1;
+        track.step_lfo();
+        assert_eq!(track.modulation_value, 0);
+        track.step_lfo();
+        assert_eq!(track.modulation_value, 32);
+        track.step_lfo();
+        assert_eq!(track.modulation_value, 64);
+        track.step_lfo();
+        assert_eq!(track.modulation_value, 32);
+        assert_eq!(track.pitch(), (2, 0));
+        for _ in 0..3 {
+            track.step_lfo();
+        }
+        assert_eq!(track.modulation_value, -64);
     }
 }

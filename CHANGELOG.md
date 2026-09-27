@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Music and sound effects mix as the original's sound driver does: the sampled channels'
+  buffer equals the driver's byte for byte (interpolation, volumes, wrapping, reverb),
+  notes take channels by the driver's priorities, vibrato has its full depth, and the
+  programmable channels follow the driver's envelopes, tables and pan at the hardware's
+  level.
 - Characters sharing a palette slot with another object show the colors the original
   shows.
 - Weapons whose effects have large frames show their shots.
