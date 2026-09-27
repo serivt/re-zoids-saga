@@ -263,6 +263,9 @@ pub struct Attack {
     /// For a staged scene (`0x0200EB84` bit 0), the `battle` string the
     /// attacker speaks: the pauses are longer and A skips nothing.
     pub staged: Option<usize>,
+    /// For a staged scene whose target has a line of its own, that line
+    /// (the record's), spoken in place of its pilot's reaction.
+    pub staged_reaction: Option<usize>,
 }
 
 /// What a scene asks of the battle as it runs.
@@ -1087,7 +1090,11 @@ impl AttackScene {
             (self.attack.roll >> 1) % QUOTE_VARIANTS
         };
         self.battle.select_window(MESSAGE_WINDOW);
-        self.battle.start(REACTIONS + usize::from(pilot))?;
+        let string = self
+            .attack
+            .staged_reaction
+            .unwrap_or(REACTIONS + usize::from(pilot));
+        self.battle.start(string)?;
         let mut vars = [0; 8];
         vars[QUOTE_VARIABLE] = variant;
         vars[PILOT_VARIABLE] = u16::from(pilot);

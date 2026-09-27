@@ -762,6 +762,7 @@ impl StagedAttack {
                 roll: 0,
                 aim: None,
                 staged: Some(quote),
+                staged_reaction: other.quote.filter(|_| count > 0),
             },
         );
         Ok(Self {

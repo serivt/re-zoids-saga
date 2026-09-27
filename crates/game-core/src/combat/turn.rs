@@ -1197,6 +1197,7 @@ impl Combat {
                 roll: self.fight.rolls[0],
                 aim,
                 staged: None,
+                staged_reaction: None,
             },
         ));
     }

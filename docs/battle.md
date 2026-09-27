@@ -180,7 +180,7 @@ its start.
 
 ## Scenes played as attacks
 
-The later scenes (2 and 3, chapter 5's final) run the battles' attack scene
+The later scenes (2 to 7 and 20, chapters 5 and 6) run the battles' attack scene
 ([combat.md](combat.md#attack-scenes)). The module's task (`0x0803DC54`) builds the
 scene's two units from the record (`0x0803DD54`), marks the scene staged (`0x0803DF08`,
 bit 0 of `0x0200EB84`) and starts the attack scene's task (`0x0802BC99`) on them. The
@@ -202,12 +202,24 @@ frames before the line, 180 after the target's reaction, the shots unskippable, 
 and the line the record names; the attack lands. Scene 2 is Blood's Zoid (`0x95`)
 firing its part `0x250` at the Trinity Liger (`0x8F`, pilot `0x55`, whose reaction is
 ガオォォォ！); scene 3 is the same Zoid firing its smoke, part `0x6C`, on its own side.
+Chapter 6 stages Van's Blade Liger (`0x3D`, pilot 4) firing its slot 5 at no one
+(scene 4); Raven's Genosaurer (`0x1E`, pilot `0x22`) firing its slot 5, then 4, at Van
+(scenes 5 and 6) and its slot 4 at a Command Wolf (`0x4C`, pilot `0x3A`, scene 20); and
+Gale's Zoid (`0x7F`, pilot `0x1E`) firing its smoke (part `0x6C` on its third rack) on
+its own side (scene 7). The target's line is its reaction when it is hit.
+
+The field runs these through `0x08012040` with a scene or a list of them ended by
+`0xFF` (ROM `0x08669494` holds 4, 5): it plays song `0x17`, each scene with its reload,
+then the song that was playing (`0x02000B54`, which `0x080019B4` keeps).
 
 The port plays these through its attack scene (`crates/game-core/src/battle.rs`,
 `StagedAttack`), followed by the map's reload. Checked against the original on the
 chapter's final: both scenes last as many frames as the original's, and every sound
 after the attacker's first shot falls on the original's frame; that first shot comes 2
-frames late in scene 2 and 3 in scene 3, which the hold after it makes up.
+frames late in scene 2 and 3 in scene 3, which the hold after it makes up. In
+chapter 6 the scenes also last as long, the first shot 3 frames late; on the plains
+(map 176) the original's reload after a scene takes 15 frames to the song against the
+port's 9, a load time like the others.
 
 The effects' frames can have more pieces than the opening's: up to 42 in the effects of
 this ROM, all of which the drawer reads until the end marker.
