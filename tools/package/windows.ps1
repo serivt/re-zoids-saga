@@ -12,6 +12,7 @@ $Folder = "$Executable-$Version"
 $Stage = Join-Path $Dist "stage"
 
 $env:RUSTFLAGS = "-C target-feature=+crt-static"
+$env:CMAKE_TOOLCHAIN_FILE_x86_64_pc_windows_msvc = (Resolve-Path tools/package/windows-static-crt.cmake).Path
 cargo build --release --locked -p launcher --features packaged
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
