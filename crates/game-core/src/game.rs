@@ -1493,6 +1493,7 @@ impl<'rom> Game<'rom> {
                 && combat.state().len() == self.state.len()
             {
                 self.state.clone_from_slice(combat.state());
+                take_party(&self.state, &mut self.party);
             }
             // The battle hands back as it queues the text system's reset,
             // which clears whatever its results left on the screen.
@@ -1712,12 +1713,12 @@ pub const fn screen_size() -> (usize, usize) {
     (SCREEN_WIDTH, SCREEN_HEIGHT)
 }
 
-/// Shows the chests already opened open, as the game does from their flags.
 /// The frame counter the random draws mix in, as the game's 16-bit one.
 fn frame_counter(frame: u64) -> u16 {
     u16::try_from(frame & u64::from(u16::MAX)).unwrap_or(0)
 }
 
+/// Shows the chests already opened open, as the game does from their flags.
 fn show_opened_chests(field: &mut Field, windows: &ScriptWindows<'_>) {
     for actor in &mut field.actors {
         if let Some(chest) = actor.chest
@@ -1725,6 +1726,27 @@ fn show_opened_chests(field: &mut Field, windows: &ScriptWindows<'_>) {
         {
             actor.play(CHEST_OPEN_ANIMATION);
         }
+    }
+}
+
+/// Writes the party's level, experience and money into the game-state
+/// block, where a battle reads them and adds its winnings.
+fn store_party(state: &mut [u8], party: &Party) {
+    if let Ok(mut progress) = Progress::read(state) {
+        progress.level = u8::try_from(party.level).unwrap_or(u8::MAX);
+        progress.experience = party.experience;
+        progress.money = party.money;
+        let _ = progress.write(state);
+    }
+}
+
+/// Takes the level, experience and money a battle left in the game-state
+/// block back into the party, which the menu shows and a save writes.
+fn take_party(state: &[u8], party: &mut Party) {
+    if let Ok(progress) = Progress::read(state) {
+        party.level = u32::from(progress.level);
+        party.experience = progress.experience;
+        party.money = progress.money;
     }
 }
 
@@ -1863,6 +1885,7 @@ impl EventHost for Host<'_, '_> {
             .formation(zoid.group)
             .copied()
             .unwrap_or([0; extraction::saga_encounter::FORMATION_LEN]);
+        store_party(self.state, self.party);
         let mut combat = Combat::new(
             &self.data,
             self.state.as_mut_slice(),
@@ -2138,6 +2161,7 @@ impl EventHost for Host<'_, '_> {
         else {
             return self.fail(GameError::Text(format!("no story battle {battle}")));
         };
+        store_party(self.state, self.party);
         let mut combat = Combat::story(&self.data, self.state.as_mut_slice(), battle);
         if let Err(error) = combat.update(self.data.bytes(), Input::default(), self.windows) {
             self.fail(error);
@@ -2282,4 +2306,36 @@ fn start_dialogue(
     dialogue.resume(context);
     *last = None;
     dialogue.start(index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Party, store_party, take_party};
+    use formats::Progress;
+    use formats::progress::{ProgressError, STATE_LEN};
+
+    #[test]
+    fn a_battles_winnings_reach_the_party() -> Result<(), ProgressError> {
+        let mut state = vec![0; STATE_LEN];
+        let mut party = Party {
+            level: 3,
+            experience: 120,
+            money: 500,
+            message_speed: 3,
+        };
+        store_party(&mut state, &party);
+        let mut progress = Progress::read(&state)?;
+        assert_eq!(
+            (progress.level, progress.experience, progress.money),
+            (3, 120, 500)
+        );
+        progress.level = 4;
+        progress.experience = 260;
+        progress.money = 740;
+        progress.write(&mut state)?;
+        take_party(&state, &mut party);
+        assert_eq!((party.level, party.experience, party.money), (4, 260, 740));
+        assert_eq!(party.message_speed, 3);
+        Ok(())
+    }
 }

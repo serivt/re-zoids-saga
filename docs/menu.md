@@ -86,7 +86,9 @@ right-aligns the amount before Ｇ. The experience to the next level comes from 
 The game keeps its state in a block at RAM `0x02000B5C`, the one its save holds (see
 [formats/save.md](formats/save.md)). The panel prints the party's level (`+0xCD2`),
 experience (`+0xCD4`) and money (`+0xD28`), and the player's name is at `+0xD18`; the port
-keeps these in `Party`. The status screens read the rest from the block when the menu
+keeps these in `Party`, writes them into the block before a battle, which adds its
+money and experience there and raises the level, and takes them back when it ends. The
+status screens read the rest from the block when the menu
 opens (`Roster`, built by `crates/extraction/src/saga_party.rs`):
 
 - the members are the characters whose flag word has bit `0x02`, in character order
