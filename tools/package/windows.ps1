@@ -1,5 +1,6 @@
 # Builds the Windows package: the program and its texts in
-# dist/re-zoids-saga-<version>-windows-x86_64.zip.
+# dist/re-zoids-saga-<version>-windows-x86_64.zip. The C runtime is linked
+# in, so the program runs without the Visual C++ Redistributable.
 # Usage: tools/package/windows.ps1 [version]
 
 param([string]$Version = (git describe --tags --always --dirty))
@@ -10,6 +11,7 @@ $Dist = "dist"
 $Folder = "$Executable-$Version"
 $Stage = Join-Path $Dist "stage"
 
+$env:RUSTFLAGS = "-C target-feature=+crt-static"
 cargo build --release --locked -p launcher --features packaged
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

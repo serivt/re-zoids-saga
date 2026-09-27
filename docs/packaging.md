@@ -17,6 +17,9 @@ the `sdl3-sys` crate's `build-from-source-static` feature.
   it off and link the system's SDL3, which is faster to build.
 - On Windows, the GUI subsystem: no console window opens behind the game's.
 
+The Windows script also links the C runtime in (`-C target-feature=+crt-static`, which
+the CMake build of SDL3 follows), so the program needs no Visual C++ Redistributable.
+
 Building it needs CMake and a C compiler; on Linux, also the development headers
 of the audio and windowing systems SDL3 supports (see the workflow below for the
 list). SDL3 loads those systems' libraries at run time, so the program runs on
@@ -28,7 +31,7 @@ whichever the player's desktop has.
 |---|---|---|
 | macOS 11+ | `tools/package/macos.sh [version]` | `re-zoids-saga-<version>-macos.dmg`: `Re Zoids Saga.app` (universal: Apple Silicon and Intel, ad-hoc signed), `README.txt`, `LICENSE.txt` and a link to Applications |
 | Windows | `tools/package/windows.ps1 [version]` | `re-zoids-saga-<version>-windows-x86_64.zip`: `re-zoids-saga.exe`, `README.txt`, `LICENSE.txt` |
-| Linux (glibc 2.35+) | `tools/package/linux.sh [version]` | `re-zoids-saga-<version>-linux-x86_64.tar.gz`: `re-zoids-saga`, `README.txt`, `LICENSE.txt` |
+| Linux (glibc 2.34+) | `tools/package/linux.sh [version]` | `re-zoids-saga-<version>-linux-x86_64.tar.gz`: `re-zoids-saga`, `README.txt`, `LICENSE.txt` |
 
 Each script runs from the repository's root, builds with `--locked`, and writes to
 `dist/` (gitignored). The version defaults to `git describe`. `README.txt` is
