@@ -43,6 +43,8 @@ pub(in crate::menu) enum LabList {
     Bases,
     /// The units the lab buys.
     Sale,
+    /// The broken units the lab revives.
+    Broken,
 }
 
 /// Why the lab takes a unit apart.
@@ -73,8 +75,13 @@ impl PauseMenu {
             session.lab.unit_view = Some((unit, back));
         }
         self.shown_zoid = None;
-        self.run_now(rom, SCRIPT_CLOSE + usize::from(LIST_WINDOW), windows)?;
-        self.run_now(rom, SCRIPT_CLOSE + usize::from(ZOID_WINDOW), windows)?;
+        let closing: &[u8] = match back {
+            LabList::Bases | LabList::Sale => &[LIST_WINDOW, ZOID_WINDOW],
+            LabList::Broken => &[LIST_WINDOW, 2, ZOID_WINDOW],
+        };
+        for window in closing {
+            self.run_now(rom, SCRIPT_CLOSE + usize::from(*window), windows)?;
+        }
         self.run_now(rom, SCRIPT_CLEAR_HELP, windows)?;
         self.run_now(rom, SCRIPT_DETAIL_WINDOWS, windows)?;
         self.run_now(rom, SCRIPT_DRAW_CHARACTER, windows)?;
@@ -173,6 +180,7 @@ impl PauseMenu {
         match back {
             LabList::Bases => self.reopen_bases(rom, windows),
             LabList::Sale => self.reopen_sale(rom, windows),
+            LabList::Broken => self.reopen_broken(rom, windows),
         }
     }
 

@@ -20,6 +20,7 @@ use super::super::{
     SCRIPT_CLEAR_MEMBERS, SCRIPT_CLOSE, SCRIPT_DRAW_MEMBERS, SCRIPT_MONEY_UNIT, SCRIPT_NOT_DONE,
     SCRIPT_PRESENT_ALL, SCRIPT_SPACE, SCRIPT_WAIT_KEY, SCRIPT_YES_NO,
 };
+use super::units::LabList;
 use super::{
     HELP_WINDOW, MONEY_WINDOW, PRICE_CELLS, SCRIPT_CLEAR_MONEY, SCRIPT_DRAW_HELP,
     SCRIPT_DRAW_MONEY, ShopStep, price_shown,
@@ -57,6 +58,7 @@ pub(super) const SCRIPT_REVIVAL_MENU: usize = 36;
 const SCRIPT_CLEAR_ZOID: usize = 2;
 const SCRIPT_PRESENT_MONEY: usize = 17;
 const REVIVAL: u16 = 0;
+const STARTED: u16 = 0x80;
 const DEVELOPMENT: u16 = 1;
 const SALE: u16 = 3;
 const ZOID_WINDOW: u8 = 2;
@@ -426,6 +428,10 @@ impl PauseMenu {
                 self.show_broken(rom, false, windows)
             }
             CONFIRMED => self.ask_revival(rom, windows),
+            STARTED => match self.chosen_broken() {
+                Some(unit) => self.show_lab_unit(rom, unit, LabList::Broken, windows),
+                None => self.show_broken(rom, false, windows),
+            },
             0 => {
                 windows.play_sound(LEAVE_SOUND);
                 self.shown_zoid = None;
@@ -436,6 +442,22 @@ impl PauseMenu {
             }
             _ => self.show_broken(rom, false, windows),
         }
+    }
+
+    /// The broken Zoids again after one shown in full: the money comes
+    /// back, script 328 opens the windows and the list is printed anew.
+    pub(super) fn reopen_broken(
+        &mut self,
+        rom: &[u8],
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        self.reopen_money(rom, windows)?;
+        self.run_now(rom, SCRIPT_REVIVAL_WINDOWS, windows)?;
+        if let Some(lab) = self.lab_mut() {
+            lab.page_shown = None;
+            lab.shown = None;
+        }
+        self.show_broken(rom, false, windows)
     }
 
     fn chosen_broken(&self) -> Option<u8> {

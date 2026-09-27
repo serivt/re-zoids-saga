@@ -201,7 +201,10 @@ shops', the welcome 258 and the question 259, whose menu offers ゾイドの復�
   332 (わかりました カンペキな状態にしておきますからね), `0x41`, and the list again, or with
   none left 262 and the lab's menu. いいえ gives 333 (それでバトルに支障はきたさないのですか？);
   B on the question sound `0x3F` and the list. B on the list: `0x3F`, windows 3 and 2
-  close and script 257 builds the lab's screen again.
+  close and script 257 builds the lab's screen again. START shows the unit in full as
+  the development's lists do (see below), windows 3, 2 and 1 closing first; the way
+  back prints the money again (script 44), opens the windows (328) and prints the list
+  anew.
 - **ゾイド開発** with no Zi data (`0x0804E3A0`: the bytes `+0x33E2` for the Zoids 0–0x98)
   gives notice 260 (Ｚｉデータを持ってないと開発できませんよ), and with more than 0x98 units
   261 (これ以上ゾイドを持てないみたいですね), each with `0x4F` and `0x41`. Otherwise it
@@ -327,6 +330,8 @@ money too) and script 293 opens the unit's window (1) and the list's (3).
   START on a piloted unit and its parts' pages, and the ways back: the same scripts and
   sounds (B and the refusal's sound a frame later in the port) and the same screens
   but for the transitions and the wallpaper.
+- START on its revival list with a unit broken by hand, the unit's parts and the way
+  back: the same scripts and sounds, and the same screens but for the wallpaper.
 - Dr. T's lab: every frame from the talk to the welcome, through a revival refused for
   money, one paid for, the keeper's word on the repair and the way out, matches once
   aligned, but for the transitions and the wallpaper visible between the windows.
@@ -354,5 +359,5 @@ money too) and script 293 opens the unit's window (1) and the list's (3).
 - The original drops a frame here and there while it prints (one to three when a list
   or a question opens), which stands the wallpaper still. The port models only the
   welcome's, so after the first list its wallpaper runs a few pixels ahead.
-- The Zoid lab's ゾイド乗せ換え and START on the revival's list (the Zoid's details) are
-  not implemented: the port answers with the pause menu's まだできてません.
+- The Zoid lab's ゾイド乗せ換え is not implemented: the port answers with the pause
+  menu's まだできてません.

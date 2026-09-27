@@ -187,7 +187,7 @@ impl PauseMenu {
 
     /// The money window, which the Zoid's window replaced: script 44, a
     /// space, the money in seven cells and Ｇ.
-    fn reopen_money(
+    pub(super) fn reopen_money(
         &mut self,
         rom: &[u8],
         windows: &mut ScriptWindows<'_>,
