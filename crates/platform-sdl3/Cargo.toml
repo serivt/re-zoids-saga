@@ -8,6 +8,10 @@ rust-version.workspace = true
 [dependencies]
 platform.workspace = true
 sdl3 = "0.20.0"
+sdl3-sys = { version = "0.7.1", optional = true }
+
+[features]
+static-sdl = ["dep:sdl3-sys", "sdl3-sys/build-from-source-static"]
 
 [lints]
 workspace = true

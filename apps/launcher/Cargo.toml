@@ -18,5 +18,8 @@ game-legacy.workspace = true
 game-fuzors.workspace = true
 anyhow = "1.0.104"
 
+[features]
+packaged = ["platform-sdl3/static-sdl"]
+
 [lints]
 workspace = true

@@ -1,4 +1,9 @@
 //! Launcher: ROM picker, title detection, transparent extraction and game start.
+//!
+//! Built with the `packaged` feature, as players download it, SDL3 is
+//! linked in and, on Windows, no console window opens behind the game's.
+
+#![cfg_attr(all(windows, feature = "packaged"), windows_subsystem = "windows")]
 
 mod front;
 mod quit;

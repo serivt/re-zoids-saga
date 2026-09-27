@@ -95,6 +95,14 @@ cargo run -p extractor-cli -- dump-text path/to/rom.gba dialogue
 cargo run -p extractor-cli -- check-layout path/to/rom.gba dialogue
 ```
 
+The packages players download (a macOS disk image, a Windows zip and a Linux archive,
+each running without SDL3 installed) are built by `tools/package/` and published by
+GitHub Actions when a `v*` tag is pushed (see [docs/packaging.md](docs/packaging.md)):
+
+```bash
+tools/package/macos.sh v0.1.0
+```
+
 Before submitting a change:
 
 ```bash

@@ -1,5 +1,6 @@
 # Rust
 /target/
+/dist/
 **/*.rs.bk
 
 # ROMs and anything derived from them are never committed

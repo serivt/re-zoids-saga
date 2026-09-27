@@ -102,6 +102,7 @@ re-zoids-saga/
 ├── Cargo.toml                   # workspace definition
 ├── rust-toolchain.toml
 ├── .gitignore                   # must exclude data/ and any ROM or extracted content
+├── .github/workflows/           # CI: packaged builds and releases (docs/packaging.md)
 │
 ├── crates/
 │   ├── platform/                # platform abstraction traits only (window, input,
@@ -149,6 +150,7 @@ re-zoids-saga/
 │   └── formats/                 # reverse-engineering notes per ROM format
 │
 └── tools/                       # development scripts (CI helpers, validators)
+    └── package/                 # scripts that build the packages players download
 ```
 
 Placement rules:

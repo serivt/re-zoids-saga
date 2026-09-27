@@ -1,0 +1,109 @@
+# Builds the packages players download, for macOS, Windows and Linux, with
+# the scripts in tools/package. A tag v* publishes them as a GitHub release
+# (a prerelease when the tag has a suffix, such as v0.1.0-demo); running
+# the workflow by hand only keeps them as the run's artifacts.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-14
+          - name: Windows
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install SDL3's build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev \
+            libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev \
+            libdbus-1-dev libibus-1.0-dev libudev-dev
+
+      - name: Add the Intel target
+        if: runner.os == 'macOS'
+        run: rustup target add x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: tools/package/macos.sh "$VERSION"
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: tools/package/linux.sh "$VERSION"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: tools/package/windows.ps1 $env:VERSION
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.name }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Re:Zoids Saga $GITHUB_REF_NAME" \
+            --generate-notes \
+            "${prerelease[@]}"
