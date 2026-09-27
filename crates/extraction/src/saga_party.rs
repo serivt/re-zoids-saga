@@ -1376,6 +1376,18 @@ pub fn zoid_units(state: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+/// Whether a unit slot 0–`0xAC` holds Zoid `zoid`, as stored
+/// (`0x0802AACC`, which Dr. T asks).
+#[must_use]
+pub fn owns_zoid(state: &[u8], zoid: u16) -> bool {
+    (0..ALL_UNITS).any(|slot| {
+        let at = UNITS + slot * UNIT_LEN + UNIT_ZOID_INDEX;
+        state
+            .get(at..at + 2)
+            .is_some_and(|stored| half(stored, 0) == zoid)
+    })
+}
+
 /// How many of those units the party could part with (`0x08058458`):
 /// the ones with no pilot or whose pilot does not keep them (flag
 /// `0x08`). The lab buys nothing when fewer than five are.

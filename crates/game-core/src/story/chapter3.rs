@@ -1609,10 +1609,6 @@ const TO_CHAPTER_4: &[Op] = &[
     Op::End,
 ];
 
-/// Where the port's story stops: chapter 4's first map once chapter 3 is
-/// over.
-pub(super) const STORY_END: (usize, u16) = (CHAPTER_4_START, OPIS_BEATEN);
-
 /// The townsfolk of area 3 (`0x08006914` on; `0x08014618` tests flag
 /// `0x16A`): a line before the core is destroyed and one after.
 macro_rules! before_and_after_the_core {

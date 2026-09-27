@@ -39,6 +39,13 @@ are the code an object runs when spoken to and the code a map runs when it loads
 The port writes each task as a program of `Op`s, one per call of the original, and
 keeps the slot order, the holds and the frame costs.
 
+The field's per-frame hook (RAM `0x02000000`) runs before the entities move. A hook that
+watches where the player stands (chapter 4's yard, `0x08017208`) takes the control away
+in the first field frame the player is on its spot, before a roaming enemy beside it
+can step in. The port runs such a hook in its own slot (`FIELD_WATCH`) before the
+field's update, and ends it when the player leaves the map; the hooks that only start a
+battle or a warp after a scene stay in the slot before the map's task.
+
 ## Entities
 
 Each entity takes 0x88 bytes, and its number is the object index plus 1. The fields
@@ -220,7 +227,11 @@ Once the command is learned, it runs the second line. Command 16 takes another p
 (`0x0803795C`).
 
 Dr. T's code reads the area (the low byte of the map record's id, RAM `0x0200000C`).
-Area 1 is the talk above; areas 9 and 10 have a line each (`0x2C9`, `0x2CA`).
+Area 1 is the talk above; areas 9 and 10 have a line each (`0x2C9`, `0x2CA`). In the
+other areas the first that holds says its line: flag `0x140` set, `0x2C8`; a unit of
+Zoid `0x90` owned (`0x0802AACC`), `0x2C7` and flag `0x140`; one of `0x8F`, `0x2C6`; the
+game-state byte `+0x3320` not zero (what sets it is not traced), `0x2C5`; flag `0x141`
+set, `0x2C4`; otherwise `0x2C3` and flag `0x141`.
 
 ## The party
 
@@ -488,10 +499,63 @@ chapters 1 to 3 but the choices not taken and the zone's turning back, which it
 avoids. On the way it found the tunnel's guard of chapter 2 (see
 [field.md](field.md), Roaming enemies).
 
+## Chapter 4
+
+Source of knowledge: own reading of the area's map handlers, the tasks and field hooks
+they install, the objects' code and the routines named below; checked against a
+reference emulator with saves patched to each scene's flags, as chapter 3's. Implemented
+in `crates/game-core/src/story/chapter4.rs`.
+
+Area 4 is maps 94 to 132: the border's plains (94), a Zoid map with a portal, a town
+(95 to 97), the Empire's Ark (101 to 103), Bego (104, 105), Zeta (106) and Deme (107 to
+111, 131, 132) bases, and the Emperor's castle and the kingdom's base again (120 to
+129). The chapter's story is a chain of flags:
+
+| Where | Handler | Condition | What happens | Sets |
+|---|---|---|---|---|
+| 120 | `0x080172F4` | not `0x16D` | The characters of group 3 are met (`0x080099D8`); the throne room loads with the Emperor and Gale (ROM `0x0866815C`) and the opening runs (task `0x080173E0`): Gale counsels the Emperor, who puts his loyalty to the test (`0xFC`, `0xFD`); in the portal room (123) the soldiers see the device in use (`0xFE`, after a 64-pixel pan); in the room above the base's bar (129) Jack brings the news (`0xFF`) and the party leaves | `0x16D` |
+| 94 | `0x08016D20` | `0x16D`, not `0x16E` | Through the portal (task `0x08017648`): the portal brings the Gustav (`0x102`); three blasts (sound `0x5B`, each waited out) and `0x103`; the Ark base in ruins (101, `0x104`), someone slips away (`0x105`); on the plains Jack knows him, Gale, his old instructor (`0x106`, `0x107`) | `0x16E` |
+| 103 | `0x08016E78` | `0x16E`, not `0x16F` | Fiene in the ruins (task `0x08017938`, `0x108` to `0x10D`); she joins (list 9) | `0x16F` |
+| 104 | `0x08016EF4` | `0x16F`, not `0x170` | The Bego base (task `0x08017C3C`): the First Armoured Division surrounds the Gustav, three Zoids circling it while the scene goes on (`0x08017E90`, `0x08017F6C`, `0x08018048`), Schwarz calls on it to surrender and Fiene comes (`0x10E`, `0x10F`); in the hall (105) Schwarz joins (`0x110`, list 10). A beaten party is taken to the base from then on (return point 11) | `0x170` |
+| 106 | `0x08016F74` | `0x170`, not `0x171` | The Zeta base: the view pans 256 pixels across the ruins (task `0x08018124`, `0x111`) | `0x171` |
+| 106 | | `0x171`, not `0x172` | Van's Zoid stands by the base (object 1 at (20, 2)); speaking to it (`0x08017014`) runs task `0x08018188`: Van joins (`0x112`, list 11) | `0x172` |
+| 97 | `0x08016DC4` | `0x172`, not `0x173` | The house in the town (task `0x08018224`): the party comes in one by one, Irvine and Moonbay tell of the raiders heading for Deme (`0x113`); Irvine gives Zi data `0x48`, announced as a chest's (`0x08037A24`: dialogue `0x1F`, the Zi data's line, `0x22`); the pair leaves and the party sets off (`0x114`) | `0x173` |
+| 107 | `0x080170E8` (object 1) | | The Deme base's guard: before Schwarz joins `0x115`; after it `0x116` | `0x174` |
+| 107 | `0x08017048` | `0x173`, not `0x175` | Thomas's Dibison at the gate, to Gale's song (task `0x0801851C`, `0x117`); story battle 8 follows from the hook `0x08018550`; won, the party is taken to the side road (131). Once Thomas is beaten the guard is gone | `0x175` on winning |
+| 131 | `0x08017138` | | Thomas comes to (task `0x080185AC`, `0x118`) and leads the way; back to the gate | |
+| 111 | `0x080171AC` | `0x175`, not `0x176` | The hook `0x08017208` waits for the player's sprite at x `0x540` to `0x560`, y `0x200`: in the passage (132) Hiltz and Reese mock the party and slip away (task `0x08018650`, `0x119`); Thomas, Van, Fiene and Schwarz give chase and leave the party (`0x11A`, `0x11B`, lists 9 to 12), and the others follow (`0x11C`); the hook `0x0801889C` brings the party back to the yard | `0x176` |
+| 111 | | `0x176`, not `0x177` | On the same spot (hook `0x08017264`): Gale waits (task `0x08018AA8`, `0x11D`) and, to the duel's song (1), challenges Jack (`0x11E`); story battle 9 follows from the hook `0x08018DB0`; won, the chapter's end (task `0x08018B74`): Gale gives way (`0x11F`, `0x120`), Van, Thomas and Schwarz come back (`0x121`), the party goes home (`0x122`) through the plains' portal (ROM `0x08668454`), and the hook `0x08018D80` warps to map 165, chapter 5's first | `0x177` on winning |
+
+The port runs the yard's hooks before the field's update (see Tasks above).
+
+The teachers use `0x08012090`: deck commands 25 (`0x08006AC8`), 6, 27, 31, 28 and 14
+(`0x08006AE0` to `0x08006B3C`), and 32 (`0x08009600` through `0x08009430`). The keepers
+(`0x08009198` on): item shops 5, 6 and 7, armaments shops 6, 7 and 8, and the labs 5 and
+19. Dr. T (`0x0802AB08`) has his own lab in the area (map 127); see Teachers above for
+what he says outside area 1.
+
+What the chapter needed of the engine: a gift announced as a chest's (the reward the
+chest's announcement reads comes first from the event), and branches on a Zoid owned
+(a unit slot whose half at `+6` is the Zoid) and on a game-state byte, for Dr. T.
+
+Checked against the original, scene by scene from patched saves (the frames of each
+song, sound and dialogue, the brightness, and the pictures between dialogues): the
+opening, the portal and the plains, Fiene, the Bego base (the circling Zoids' positions
+equal on every frame), the Zeta base's pan, Van, the house and the gift, Thomas to story
+battle 8, the side road, Hiltz and Reese, Gale to story battle 9, and the chapter's end,
+with Gale's hit points kept at 1 and the party's at full: every interval that no key
+bounds is equal, and the scenes' darkenings fall on the same frames. What differs is the
+loads (the original's continue loads a map twice when its handler loads a cutscene list,
+and its warps take up to 20 frames longer, see Not modeled yet) and, after them or after a
+dialogue that keys end, the phase of the animations that were already running. On the yard,
+continuing a patched save on the spot, the hook takes the control from the party in the
+first field frame, as the original's does, before the roaming enemy beside the spot can
+step in.
+
 ## The end of the demo (a port feature)
 
-Source of knowledge: this project's own design. The port's story stops where chapter 3
-does, in chapter 4's first map (120) once Opis is beaten (flag `0x16C`). When
+Source of knowledge: this project's own design. The port's story stops where chapter 4
+does, in chapter 5's first map (165) once Gale is beaten (flag `0x177`). When
 the player walks freely there in full light (after the scene's fade in, or after
 continuing a save made there), the game waits a second and ends the demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the
 player (`port/demo/thanks`) and waits for A with the prompt blinking; it then asks
@@ -546,8 +610,6 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
 - The fighting in battles, and the story battles (`0x08008D28`); the roaming enemies,
   meeting them, the battle screen's opening, its menu and retreating are described in
   [combat.md](combat.md).
-- Dr. T in the other areas: whether the party has the Zoids `0x90` or `0x8F`, and the
-  game-state byte `+0x3320` (flags `0x140`, `0x141`).
 - The field's per-frame hooks (RAM `0x02000000`, `0x02000004`), which the world map's
   and Arcana's handlers set. The ones seen so far (`0x08008024`, `0x08008028`,
   `0x0800C4D0`, `0x0800C708`) return at once; the world map's battles come from its
@@ -560,9 +622,9 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
   takes it away. The chapter's way into map 23 does not need it: the corridor (17)
   leads through maps 18, 19 and 21 to map 23's left entrance, (0, 3), where its
   handler stands the player; map 20 is the factory's other door, from the world map.
-- Chapters 2 and 3: the time the original's loader takes for each map (the cutscene
-  loads and warps of Sand Colony, the deserts, the ruins and chapter 3's Zoid maps take
-  10 to 30 frames longer than the port's estimate, see "Chapter 2" and "Chapter 3"
+- Chapters 2 to 4: the time the original's loader takes for each map (the cutscene
+  loads and warps of Sand Colony, the deserts, the ruins and chapters 3 and 4's Zoid maps
+  take 10 to 30 frames longer than the port's estimate, see "Chapter 2" to "Chapter 4"
   above), and the page turns of a message under keys pressed every other frame, which
   the original takes two frames longer to accept.
 - A portal's wait for the cell below it to clear before it brings someone out (see

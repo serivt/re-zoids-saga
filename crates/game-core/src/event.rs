@@ -18,6 +18,7 @@
 
 use crate::field::{Actor, Command, Direction, Field, PIXEL, Walk};
 use crate::menu::Shop;
+use extraction::saga::Reward;
 
 /// Task slots, as in the game's kernel.
 pub const TASKS: usize = 16;
@@ -28,6 +29,12 @@ pub const MAP_TASK: usize = 3;
 /// task, so a load the hook makes lets the map's handler start its task.
 /// Like the map's task, it ends when the player leaves the map.
 pub const FIELD_HOOK: usize = 2;
+/// The slot for a per-frame hook that watches where the player stands
+/// (`0x08017208`): the original runs its field hook before the entities
+/// move, so the game runs this slot on its own before the field's update
+/// ([`Events::update_watch`]), never with the other tasks. It ends when the
+/// player leaves the map.
+pub const FIELD_WATCH: usize = 1;
 const IMMEDIATE: usize = TASKS;
 /// The darkest brightness level; levels above 16 all show black.
 pub const BLACK: u8 = 31;
@@ -293,6 +300,31 @@ pub enum Op {
         /// Program run otherwise.
         otherwise: &'static [Op],
     },
+    /// Makes `reward` the one the chest's ops give and announce, in place of
+    /// the searched chest's, or with `None` gives them back to the chest:
+    /// an event's gift runs the chest's announcement (`0x08037A24` gives a
+    /// Zoid's Zi data that way).
+    Gift(Option<Reward>),
+    /// Runs `then` when one of the unit slots 0–`0xAC` holds Zoid `zoid`
+    /// (`0x0802AACC`), `otherwise` else.
+    IfZoidOwned {
+        /// The Zoid.
+        zoid: u16,
+        /// Program run when a unit is of it.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Runs `then` when byte `at` of the game-state block is not 0,
+    /// `otherwise` else.
+    IfStateSet {
+        /// Offset in the game-state block.
+        at: usize,
+        /// Program run when it is set.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
     /// Gives the chest's reward (`0x08037014`, `0x08037040`, `0x0803706C`,
     /// `0x08037098`, `0x08037100`); money is also printed into window 1
     /// (`0x08001848`).
@@ -492,6 +524,12 @@ pub trait EventHost {
     fn zi_data_held(&self) -> bool;
     /// Gives the searched chest's reward; money is printed into window 1.
     fn take_chest(&mut self);
+    /// Makes `reward` the chest's ops' reward (see [`Op::Gift`]).
+    fn set_gift(&mut self, reward: Option<Reward>);
+    /// Whether a unit slot holds Zoid `zoid`.
+    fn zoid_owned(&self, zoid: u16) -> bool;
+    /// Byte `at` of the game-state block, 0 outside it.
+    fn state_byte(&self, at: usize) -> u8;
     /// Starts the script that prints the name of the searched chest's
     /// reward.
     fn start_chest_name(&mut self);
@@ -948,6 +986,22 @@ impl Events {
         self.run_slots(0, host);
     }
 
+    /// Runs the field's watch ([`FIELD_WATCH`]) for one frame, unless
+    /// something holds the game.
+    pub fn update_watch(&mut self, host: &mut impl EventHost) {
+        if self.hold.is_some() {
+            return;
+        }
+        if let Some(task) = self.tasks[FIELD_WATCH].as_mut() {
+            if task.wait > 1 {
+                task.wait -= 1;
+                return;
+            }
+            task.wait = 0;
+            self.run_task(FIELD_WATCH, host);
+        }
+    }
+
     /// The task whose dialogue or script holds only itself: the kernel
     /// switches away from a task waiting on its script runner every frame
     /// (`0x0803E51C` calls `0x0805EF90`), so the other tasks go on.
@@ -960,6 +1014,9 @@ impl Events {
 
     fn run_slots(&mut self, from: usize, host: &mut impl EventHost) {
         for slot in from..=TASKS {
+            if slot == FIELD_WATCH {
+                continue;
+            }
             if self.hold.is_some() {
                 match self.task_dialogue() {
                     Some(talking) if talking == slot => continue,
@@ -1059,6 +1116,8 @@ impl Events {
             | Op::IfLost { .. }
             | Op::IfChest { .. }
             | Op::IfZiDataHeld { .. }
+            | Op::IfZoidOwned { .. }
+            | Op::IfStateSet { .. }
             | Op::IfPlayerSprite { .. }
             | Op::IfPlayerOn { .. }
             | Op::IfBattlesWon { .. }
@@ -1384,6 +1443,16 @@ impl Events {
                 otherwise,
             } => taken(host.chest_kind() == Some(kind), then, otherwise),
             Op::IfZiDataHeld { then, otherwise } => taken(host.zi_data_held(), then, otherwise),
+            Op::IfZoidOwned {
+                zoid,
+                then,
+                otherwise,
+            } => taken(host.zoid_owned(zoid), then, otherwise),
+            Op::IfStateSet {
+                at,
+                then,
+                otherwise,
+            } => taken(host.state_byte(at) != 0, then, otherwise),
             Op::IfPlayerSprite {
                 x,
                 y,
@@ -1563,6 +1632,7 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::OpenChest => host.open_chest(),
         Op::MarkChest => host.mark_chest(),
         Op::TakeChest => host.take_chest(),
+        Op::Gift(reward) => host.set_gift(reward),
         Op::AfterCombat => host.after_combat(),
         Op::RestartMapMusic => host.restart_map_music(),
         Op::ForgetBattlesWon => host.forget_battles_won(),
@@ -1827,6 +1897,18 @@ mod tests {
             self.log.push("chest".to_owned());
         }
 
+        fn set_gift(&mut self, reward: Option<Reward>) {
+            self.log.push(format!("gift {reward:?}"));
+        }
+
+        fn zoid_owned(&self, zoid: u16) -> bool {
+            zoid == 0x90
+        }
+
+        fn state_byte(&self, _at: usize) -> u8 {
+            0
+        }
+
         fn start_chest_name(&mut self) {
             self.log.push("chest name".to_owned());
         }
@@ -1925,6 +2007,17 @@ mod tests {
 
     const TALKER: &[Op] = &[Op::Dialogue(7), Op::Music(1), Op::End];
     const COUNTER: &[Op] = &[Op::Loop(&[Op::Sound(2), Op::Wait(1)])];
+
+    #[test]
+    fn the_field_watch_runs_only_on_its_own() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.spawn(FIELD_WATCH, TALKER);
+        events.update(&mut host);
+        assert!(host.log.is_empty());
+        events.update_watch(&mut host);
+        assert_eq!(host.log, ["dialogue 7"]);
+    }
 
     #[test]
     fn a_tasks_dialogue_holds_only_that_task() {

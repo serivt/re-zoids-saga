@@ -37,7 +37,9 @@ use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::combat::{Combat, Outcome};
 use crate::data::GameData;
 use crate::demo::{DemoEnd, DemoStep};
-use crate::event::{BLACK, ChestKind, EventHost, Events, FIELD_HOOK, HoldStep, MAP_TASK, Op};
+use crate::event::{
+    BLACK, ChestKind, EventHost, Events, FIELD_HOOK, FIELD_WATCH, HoldStep, MAP_TASK, Op,
+};
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
 use crate::guide::{Cover, Guide, GuideError, GuideKind};
@@ -285,6 +287,9 @@ pub struct Game<'rom> {
     /// The map and exit whose portal the player last pushed toward.
     portal_exit: Option<(usize, usize)>,
     chest: Option<(usize, u16)>,
+    /// A reward an event gives through the chest's ops (see
+    /// [`Op::Gift`](crate::event::Op::Gift)).
+    gift: Option<Reward>,
     player_name: String,
     party: Party,
     state: Vec<u8>,
@@ -439,6 +444,7 @@ impl<'rom> Game<'rom> {
             warped: None,
             portal_exit: None,
             chest: None,
+            gift: None,
             player_name: DEFAULT_PLAYER_NAME.to_owned(),
             party: Party::default(),
             state,
@@ -1090,6 +1096,7 @@ impl<'rom> Game<'rom> {
             warped: &mut self.warped,
             portal_exit: self.portal_exit,
             chest: self.chest,
+            gift: &mut self.gift,
             party: &mut self.party,
             sound: &mut self.sound,
             extensions: &self.extensions,
@@ -1307,6 +1314,7 @@ impl<'rom> Game<'rom> {
                 .update(self.data.bytes(), input, &mut self.windows)?;
             return Ok(());
         }
+        self.update_events(|events, host| events.update_watch(host))?;
         let event = self.field.as_mut().and_then(|field| field.update(input));
         if let Some(field) = self.field.as_mut() {
             AreaObjects::record(&mut self.state, field);
@@ -1406,6 +1414,7 @@ impl<'rom> Game<'rom> {
                 .map_or((0, 0), |field| (field.player().column, field.player().row));
             Self::emit(&self.extensions, &Event::RoomEntered { map, cell });
             self.play_map_music(map)?;
+            self.events.end(FIELD_WATCH);
             self.run_handler(story::map_handler(map))?;
         }
         Ok(())
@@ -1454,6 +1463,7 @@ impl<'rom> Game<'rom> {
         self.events.fade_in_after(black, WARP_SETTLE_FRAMES);
         self.events.end(MAP_TASK);
         self.events.end(FIELD_HOOK);
+        self.events.end(FIELD_WATCH);
         self.run_handler(story::map_handler(arrived))
     }
 
@@ -1567,6 +1577,7 @@ impl<'rom> Game<'rom> {
             .fade_in_after(DEFEAT_BLACK_FRAMES, WARP_SETTLE_FRAMES);
         self.events.end(MAP_TASK);
         self.events.end(FIELD_HOOK);
+        self.events.end(FIELD_WATCH);
         self.run_handler(story::map_handler(point.map))
     }
 
@@ -1781,6 +1792,7 @@ struct Host<'a, 'rom> {
     warped: &'a mut Option<usize>,
     portal_exit: Option<(usize, usize)>,
     chest: Option<(usize, u16)>,
+    gift: &'a mut Option<Reward>,
     party: &'a mut Party,
     sound: &'a mut SoundEngine<'rom>,
     extensions: &'a SharedExtensions,
@@ -1805,6 +1817,9 @@ impl Host<'_, '_> {
 impl Host<'_, '_> {
     /// What the chest being searched gives.
     fn chest_reward(&self) -> Reward {
+        if let Some(gift) = *self.gift {
+            return gift;
+        }
         self.chest
             .and_then(|(_, chest)| self.data.treasure(usize::from(chest)))
             .map_or(Reward::Nothing, |treasure| treasure.reward())
@@ -2156,6 +2171,18 @@ impl EventHost for Host<'_, '_> {
             }
             Reward::Nothing => {}
         }
+    }
+
+    fn set_gift(&mut self, reward: Option<Reward>) {
+        *self.gift = reward;
+    }
+
+    fn zoid_owned(&self, zoid: u16) -> bool {
+        saga_party::owns_zoid(self.state, zoid)
+    }
+
+    fn state_byte(&self, at: usize) -> u8 {
+        self.state.get(at).copied().unwrap_or(0)
     }
 
     fn start_chest_name(&mut self) {

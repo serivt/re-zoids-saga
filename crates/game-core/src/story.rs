@@ -10,6 +10,7 @@
 
 mod chapter2;
 mod chapter3;
+mod chapter4;
 
 use crate::event::{
     AT_THE_PORTAL, BELOW_THE_PORTAL, BLACK, ChestKind, EXIT_ARRIVAL, FIELD_HOOK, HERE, MAP_TASK,
@@ -1714,9 +1715,9 @@ const PORTAL_ARRIVAL_SOUND: u16 = 0x49;
 const PORTAL_BRINGS_STEP: usize = 32;
 /// Sand Colony's field, where the party goes on (map 31).
 const SAND_COLONY_FIELD: usize = 31;
-/// Where the port's story stops, and its demo ends: chapter 4's first map
-/// once chapter 3 is over.
-pub const DEMO_END: (usize, u16) = chapter3::STORY_END;
+/// Where the port's story stops, and its demo ends: chapter 5's first map
+/// once chapter 4 is over.
+pub const DEMO_END: (usize, u16) = chapter4::STORY_END;
 /// A cell off the map, left of its top row.
 const BESIDE_THE_MAP: (usize, usize) = (0xFF, 0);
 
@@ -1919,7 +1920,11 @@ const DEVICE_ROOM_ARRIVAL: &[Op] = &[Op::IfFlags {
 
 /// Dr. T in his lab (`0x0802AB08`). In area 1 he first talks with Regina
 /// about the Trinity Liger, then repeats his advice; areas 9 and 10 have a
-/// line each.
+/// line each. Elsewhere his line follows the party's progress: once the
+/// Trinity Liger is rebuilt (flag `0x140`) `0x2C8`; with a unit of Zoid
+/// `0x90` `0x2C7`, which sets that flag; with one of `0x8F` `0x2C6`; with
+/// the game state's byte `+0x3320` set `0x2C5`; the first time `0x2C3`
+/// (flag `0x141`), later `0x2C4`.
 const DR_T: &[Op] = &[Op::IfArea {
     area: 1,
     then: &[Op::IfFlags {
@@ -1934,7 +1939,39 @@ const DR_T: &[Op] = &[Op::IfArea {
         otherwise: &[Op::IfArea {
             area: 10,
             then: &[Op::Dialogue(0x2CA)],
-            otherwise: &[],
+            otherwise: DR_T_ELSEWHERE,
+        }],
+    }],
+}];
+
+/// Set once the party has a unit of Zoid `0x90` and Dr. T has seen it.
+const TRINITY_REBUILT: u16 = 0x140;
+/// Set once Dr. T has greeted the party outside area 1.
+const DR_T_GREETED: u16 = 0x141;
+/// The game-state byte Dr. T asks outside area 1 (what sets it is not
+/// traced).
+const DR_T_STATE: usize = 0x3320;
+
+const DR_T_ELSEWHERE: &[Op] = &[Op::IfFlags {
+    all: &[TRINITY_REBUILT],
+    none: &[],
+    then: &[Op::Dialogue(0x2C8)],
+    otherwise: &[Op::IfZoidOwned {
+        zoid: 0x90,
+        then: &[Op::Dialogue(0x2C7), Op::Flag(TRINITY_REBUILT, true)],
+        otherwise: &[Op::IfZoidOwned {
+            zoid: 0x8F,
+            then: &[Op::Dialogue(0x2C6)],
+            otherwise: &[Op::IfStateSet {
+                at: DR_T_STATE,
+                then: &[Op::Dialogue(0x2C5)],
+                otherwise: &[Op::IfFlags {
+                    all: &[DR_T_GREETED],
+                    none: &[],
+                    then: &[Op::Dialogue(0x2C4)],
+                    otherwise: &[Op::Dialogue(0x2C3), Op::Flag(DR_T_GREETED, true)],
+                }],
+            }],
         }],
     }],
 }];
@@ -2006,7 +2043,7 @@ const ZI_DATA_HELD: &[Op] = &[
     AFTER_REWARD,
 ];
 /// Zi data: Ｚｉデータ「…」を手に入れた, then whether the party had it.
-const ZI_DATA_REWARD: &[Op] = &[
+pub(super) const ZI_DATA_REWARD: &[Op] = &[
     BEFORE_REWARD[0],
     BEFORE_REWARD[1],
     Op::Script("battle-text", 0x2A),
@@ -2156,7 +2193,7 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
         34 => Some(chapter2::HOUSE_ARRIVAL),
         37 => Some(chapter2::HIDEOUT_ARRIVAL),
         38 => Some(chapter2::CANYON_ARRIVAL),
-        _ => chapter3::map_handler(map),
+        _ => chapter3::map_handler(map).or_else(|| chapter4::map_handler(map)),
     }
 }
 
@@ -2229,6 +2266,8 @@ pub fn talk_handler(address: u32) -> Option<&'static [Op]> {
         0x0800_90F0 => Some(ARCANA_ITEM_SHOP),
         0x0800_90FC => Some(ARCANA_ARMS_SHOP),
         0x0800_9108 => Some(ARCANA_LAB),
-        _ => chapter2::talk_handler(address).or_else(|| chapter3::talk_handler(address)),
+        _ => chapter2::talk_handler(address)
+            .or_else(|| chapter3::talk_handler(address))
+            .or_else(|| chapter4::talk_handler(address)),
     }
 }
