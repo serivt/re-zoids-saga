@@ -57,8 +57,9 @@ impl AreaObjects {
         self.formations.get(usize::from(slot))
     }
 
-    /// Enters map `map`: records its area in the block and rebuilds the
-    /// object states when the area changed; `frame` is the frame counter
+    /// Enters map `map`: records its area in the block and, when the area
+    /// changed, rebuilds the object states and makes the area's own return
+    /// point the current one (`0x08007328`); `frame` is the frame counter
     /// the random draws mix in.
     pub fn enter(&mut self, data: &GameData<'_>, state: &mut [u8], map: usize, frame: u16) {
         let Ok(record) = data.map_record(map) else {
@@ -70,11 +71,9 @@ impl AreaObjects {
         }
         if self.area != Some(area) {
             self.rebuild(data, state, area, frame);
+            Self::set_area_index(state, area.wrapping_sub(1));
         }
         self.area = Some(area);
-        if let Some(byte) = state.get_mut(AREA_INDEX) {
-            *byte = area.wrapping_sub(1);
-        }
     }
 
     /// Rebuilds the object states of the area last entered (`0x08006E4C`
@@ -82,6 +81,15 @@ impl AreaObjects {
     pub fn rebuild_current(&mut self, data: &GameData<'_>, state: &mut [u8], frame: u16) {
         if let Some(area) = self.area {
             self.rebuild(data, state, area, frame);
+        }
+    }
+
+    /// Makes `index` the area index the block holds, as chapter 3's
+    /// fortress does to send a beaten party to another return point
+    /// (`0x08006DFC`).
+    pub fn set_area_index(state: &mut [u8], index: u8) {
+        if let Some(byte) = state.get_mut(AREA_INDEX) {
+            *byte = index;
         }
     }
 

@@ -77,6 +77,10 @@ const CHASE_RADIUS: usize = 2;
 /// The attribute bit that sets a cell on another level; Zoids on different
 /// levels pass without meeting (`0x0800AE7C`).
 const LEVEL_BIT: u16 = 0x1000;
+/// The space-time portal's sprite, and how many entities `0x0800960C`
+/// looks through for it.
+const PORTAL_SPRITE: u16 = 0xF7;
+const PORTAL_SEARCH: usize = 29;
 /// What a beaten Zoid turns into (`0x080089A0` with sprite `0xFD`), and
 /// the sound it goes off with.
 pub const EXPLOSION_SPRITE: usize = 0xFD;
@@ -135,7 +139,9 @@ impl Direction {
         }
     }
 
-    const fn delta(self) -> (isize, isize) {
+    /// The cell step one way: columns and rows.
+    #[must_use]
+    pub const fn delta(self) -> (isize, isize) {
         match self {
             Self::Up => (0, -1),
             Self::Down => (0, 1),
@@ -155,7 +161,9 @@ impl Direction {
         }
     }
 
-    const fn opposite(self) -> Self {
+    /// The way back.
+    #[must_use]
+    pub const fn opposite(self) -> Self {
         match self {
             Self::Up => Self::Down,
             Self::Down => Self::Up,
@@ -172,6 +180,8 @@ pub enum FieldEvent {
     Exit(usize),
     /// The player pushed against this door (a `0xC000` exit).
     Door(usize),
+    /// The player pushed toward the portal on this exit (a `0x4800` exit).
+    Portal(usize),
     /// The player and a roaming enemy ran into each other.
     Encounter {
         /// Index into the field's actors of the enemy.
@@ -296,6 +306,9 @@ pub struct Actor {
     /// Frames it stands still before its command runs again, as an enemy
     /// does after the party retreated from it.
     pub pause: u16,
+    /// The sprite it shows (entity `+0x5A`), as its object or state lists
+    /// it.
+    pub sprite: u16,
     /// The sheet a wrecked actor explodes with.
     explosion: Option<Box<SpriteSheet>>,
     /// For an object showing a party member's Zoid, its sprite as listed
@@ -342,6 +355,7 @@ impl Actor {
             slot: None,
             group: 0,
             pause: 0,
+            sprite: 0,
             explosion: None,
             party_sprite: None,
             start_shift: None,
@@ -357,6 +371,7 @@ impl Actor {
         actor.behavior = object.behavior;
         actor.command = command_for(object.kind);
         actor.party_sprite = (object.sprite_sheet_id().is_none()).then_some(object.sprite);
+        actor.sprite = object.sprite;
         actor
     }
 
@@ -857,6 +872,7 @@ impl Field {
             if state.sprite & SPRITE_LOOKUP == 0 {
                 actor.sheet = Some(data.sprite_sheet(usize::from(state.sprite))?);
             }
+            actor.sprite = state.sprite;
             actor.command = command_for(u16::from(state.command));
             actor.slot = slot;
             actor.group = state.group;
@@ -867,13 +883,14 @@ impl Field {
         Ok(())
     }
 
-    /// The cells the actors built from object states stand on, by state:
-    /// what the stepping command writes back halfway through each step
-    /// (`0x0800B764`).
+    /// The cells the actors built from object states stand on, by state,
+    /// for those taking a step: what the stepping command writes back
+    /// halfway through each step (`0x0800B764`). An object an event places
+    /// keeps its state.
     pub fn object_cells(&self) -> impl Iterator<Item = (usize, (usize, usize))> + '_ {
         self.actors
             .iter()
-            .filter(|actor| actor.visible)
+            .filter(|actor| actor.visible && actor.walking())
             .filter_map(|actor| actor.slot.map(|slot| (slot, actor.previous)))
     }
 
@@ -1077,6 +1094,12 @@ impl Field {
         if player.facing != direction {
             player.face(direction);
         }
+        if let Some(exit) = self
+            .ahead(direction)
+            .and_then(|(column, row)| self.scene.portal(column, row))
+        {
+            return Some(FieldEvent::Portal(exit));
+        }
         if self.free(0, direction, false) {
             let running = input.is_held(Button::B);
             let speed = if running {
@@ -1102,6 +1125,25 @@ impl Field {
         let column = column.checked_add_signed(dx)?;
         let row = row.checked_add_signed(dy)?;
         self.scene.door(column, row).map(FieldEvent::Door)
+    }
+
+    /// The player's footing one cell toward `direction`.
+    fn ahead(&self, direction: Direction) -> Option<(usize, usize)> {
+        let (dx, dy) = direction.delta();
+        let (column, row) = self.actors[0].footing();
+        Some((column.checked_add_signed(dx)?, row.checked_add_signed(dy)?))
+    }
+
+    /// The first object showing the space-time portal (sprite `0xF7`), and
+    /// its cell, as `0x0800960C` looks for it among the entities.
+    #[must_use]
+    pub fn portal(&self) -> Option<(usize, (usize, usize))> {
+        self.actors
+            .iter()
+            .enumerate()
+            .take(PORTAL_SEARCH)
+            .find(|(_, actor)| actor.visible && actor.sprite == PORTAL_SPRITE)
+            .map(|(index, actor)| (index, (actor.column, actor.row)))
     }
 
     /// The Zoid actor `index`, stepping toward `direction`, runs into, when
@@ -1910,6 +1952,23 @@ mod tests {
         assert_eq!((field.player().column, field.player().row), (3, 1));
         assert!(!field.player().walking());
         assert_eq!(field.player().facing, Direction::Right);
+    }
+
+    #[test]
+    fn pushing_toward_a_portal_starts_the_trip_and_the_portal_is_found() {
+        let mut field = field(6, 5);
+        field.scene.attributes[2 * 6 + 4] = 0x4802;
+        assert_eq!(field.portal(), None);
+        let mut portal = character(4, 1, None, 0);
+        portal.sprite = PORTAL_SPRITE;
+        field.actors.push(portal);
+        assert_eq!(
+            field.update(held(Direction::Right)),
+            Some(FieldEvent::Portal(2))
+        );
+        assert!(!field.player().walking());
+        assert_eq!(field.player().facing, Direction::Right);
+        assert_eq!(field.portal(), Some((1, (4, 1))));
     }
 
     #[test]

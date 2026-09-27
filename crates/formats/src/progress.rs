@@ -349,6 +349,22 @@ pub fn count_battle(state: &mut [u8]) {
     }
 }
 
+/// The roaming battles won that `+0x0A` counts: chapter 3's rare-hertz
+/// zone clears it whenever the party is out of it (`0x080144DC`).
+#[must_use]
+pub fn battles_won(state: &[u8]) -> u16 {
+    state
+        .get(BATTLES..BATTLES + 2)
+        .map_or(0, |bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+}
+
+/// Clears the count of roaming battles won.
+pub fn forget_battles(state: &mut [u8]) {
+    if let Some(bytes) = state.get_mut(BATTLES..BATTLES + 2) {
+        bytes.fill(0);
+    }
+}
+
 fn check_len(state: &[u8]) -> Result<(), ProgressError> {
     if state.len() == STATE_LEN {
         Ok(())
@@ -500,6 +516,9 @@ mod tests {
         assert_eq!((read[0].column, read[0].present), (7, false));
         count_battle(&mut state);
         assert_eq!(&state[0x0A..0x0C], &[1, 0]);
+        assert_eq!(battles_won(&state), 1);
+        forget_battles(&mut state);
+        assert_eq!(battles_won(&state), 0);
     }
 
     #[test]

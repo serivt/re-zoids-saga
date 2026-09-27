@@ -253,6 +253,7 @@ const EXIT_KIND_MASK: u16 = 0xC000;
 const EXIT_WALK: u16 = 0x4000;
 const EXIT_INDEX_MASK: u16 = 0x00FF;
 const COUNTER: u16 = 0x2000;
+const PORTAL: u16 = 0x0800;
 
 /// A field scene: a scrolling map over a repeating backdrop.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,6 +344,22 @@ impl Scene {
         self.attributes
             .get(row * self.attribute_columns() + column)
             .filter(|attribute| *attribute & EXIT_KIND_MASK == EXIT_WALK)
+            .map(|attribute| usize::from(attribute & EXIT_INDEX_MASK))
+    }
+
+    /// The portal on attribute cell (`column`, `row`), if any: an exit with
+    /// bit 11 set (`0x4800 | n`) is exit `n`, taken through the space-time
+    /// portal that stands on it by pushing toward it (`0x0800B0C4`).
+    #[must_use]
+    pub fn portal(&self, column: usize, row: usize) -> Option<usize> {
+        if column >= self.attribute_columns() {
+            return None;
+        }
+        self.attributes
+            .get(row * self.attribute_columns() + column)
+            .filter(|attribute| {
+                *attribute & EXIT_KIND_MASK == EXIT_WALK && *attribute & PORTAL != 0
+            })
             .map(|attribute| usize::from(attribute & EXIT_INDEX_MASK))
     }
 
@@ -2087,6 +2104,14 @@ mod tests {
         assert_eq!(scene.door(1, 1), None);
         assert_eq!(scene.exit(2, 0), None);
         assert_eq!(scene.exit(1, 5), None);
+        assert_eq!(scene.portal(1, 0), None);
+        let portal = Scene {
+            attributes: vec![0x4803, 0xC803, 0x0800, 0x0001],
+            ..scene
+        };
+        assert_eq!(portal.portal(0, 0), Some(3));
+        assert_eq!(portal.portal(1, 0), None);
+        assert_eq!(portal.portal(0, 1), None);
     }
 
     #[test]

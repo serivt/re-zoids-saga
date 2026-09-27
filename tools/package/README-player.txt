@@ -5,7 +5,8 @@ A free, native port of Zoids Saga (Game Boy Advance, Japan). This package
 holds only the program: no part of the game comes with it. You need your
 own copy of the Zoids Saga ROM (Japan, Rev 1), dumped from your cartridge.
 
-This demo plays chapter 1, from the title to the arrival in Sand Colony.
+This demo plays the first three chapters, from the title to the party's
+return from the Mount Ossa fortress.
 
 
 Starting

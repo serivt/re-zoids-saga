@@ -9,8 +9,12 @@
 //! table; actors are object indices (the game's entity index minus one).
 
 mod chapter2;
+mod chapter3;
 
-use crate::event::{BLACK, ChestKind, HERE, MAP_TASK, Op};
+use crate::event::{
+    AT_THE_PORTAL, BELOW_THE_PORTAL, BLACK, ChestKind, EXIT_ARRIVAL, FIELD_HOOK, HERE, MAP_TASK,
+    Op, THE_PORTAL,
+};
 use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
@@ -34,10 +38,6 @@ const HALF: i32 = PIXEL / 2;
 const DOUBLE: i32 = PIXEL * 2;
 const QUARTER: i32 = PIXEL / 4;
 const HELPER_TASK: usize = 4;
-/// The slot that stands for the field's per-frame hook (RAM
-/// `0x02000000`), which runs outside the tasks: a slot before the map's
-/// task, so a load the hook makes lets the map's handler start its task.
-const FIELD_HOOK: usize = 2;
 const REGINA: usize = 1;
 const PLAYER: usize = 0;
 const KING: usize = 2;
@@ -1714,9 +1714,9 @@ const PORTAL_ARRIVAL_SOUND: u16 = 0x49;
 const PORTAL_BRINGS_STEP: usize = 32;
 /// Sand Colony's field, where the party goes on (map 31).
 const SAND_COLONY_FIELD: usize = 31;
-/// Where the port's story stops, and its demo ends: chapter 3's first map
-/// once chapter 2 is over.
-pub const DEMO_END: (usize, u16) = chapter2::STORY_END;
+/// Where the port's story stops, and its demo ends: chapter 4's first map
+/// once chapter 3 is over.
+pub const DEMO_END: (usize, u16) = chapter3::STORY_END;
 /// A cell off the map, left of its top row.
 const BESIDE_THE_MAP: (usize, usize) = (0xFF, 0);
 
@@ -2065,6 +2065,75 @@ pub const CHEST: &[Op] = &[
     Op::Dialogue(0x22),
 ];
 
+/// The slot the trip through a portal runs in (`0x0800990C` spawns it
+/// into slot 10).
+pub const PORTAL_TASK: usize = 10;
+/// The portal's runs: standing, taking whoever stands on it, and opening
+/// to bring someone; the steps on whose last frame the one taken is gone
+/// and the second sound plays, and on whose last the one brought is out.
+const PORTAL_STANDS: usize = 0;
+const PORTAL_TAKES_ONE: usize = 1;
+const PORTAL_BRINGS_ONE: usize = 2;
+const PORTAL_TAKEN_STEP: usize = 8;
+const PORTAL_TAKEN_SOUND_STEP: usize = 41;
+const PORTAL_BROUGHT_STEP: usize = 32;
+const PORTAL_TAKEN_SOUND: u16 = 0x44;
+/// A second before the next map loads, and one after it has brightened.
+const PORTAL_PAUSE: u32 = 60;
+
+/// A trip through a space-time portal (`0x0800960C`, which pushing toward
+/// a portal's exit starts, the player's controls taken): the Gustav drives
+/// onto the portal, which takes it with its sounds; a second later the
+/// exit's sound plays, the field darkens and the exit's map loads, the
+/// Gustav keeping its facing; if that map has a portal, a second after
+/// it brightens the portal opens and on the last frame of its 32nd step
+/// the Gustav comes out and drives a cell down; otherwise it stands at the
+/// exit's arrival. The player then has the controls back.
+pub const PORTAL_TRIP: &[Op] = &[
+    Op::IfPortal {
+        then: &[
+            through(PLAYER, AT_THE_PORTAL, PIXEL, 1),
+            Op::PlayOnce(THE_PORTAL, PORTAL_TAKES_ONE),
+            Op::Sound(PORTAL_SOUND),
+            Op::AwaitStepEnd(THE_PORTAL, PORTAL_TAKEN_STEP),
+            Op::Place(PLAYER, OFF_THE_MAP),
+            Op::AwaitStepEnd(THE_PORTAL, PORTAL_TAKEN_SOUND_STEP),
+            Op::Sound(PORTAL_TAKEN_SOUND),
+            Op::AwaitAnimation(THE_PORTAL),
+            Op::Animate(THE_PORTAL, PORTAL_STANDS),
+        ],
+        otherwise: &[],
+    },
+    Op::Wait(PORTAL_PAUSE),
+    Op::ExitSound,
+    Op::FadeOutHolding,
+    Op::TakeExit,
+    Op::Control(false),
+    Op::Place(PLAYER, OFF_THE_MAP),
+    Op::IfPortal {
+        then: &[],
+        otherwise: &[Op::Place(PLAYER, EXIT_ARRIVAL)],
+    },
+    Op::FadeInHolding,
+    Op::Wait(PORTAL_PAUSE),
+    Op::IfPortal {
+        then: &[
+            Op::PlayOnce(THE_PORTAL, PORTAL_BRINGS_ONE),
+            Op::Sound(PORTAL_SOUND),
+            Op::AwaitStepEnd(THE_PORTAL, PORTAL_BROUGHT_STEP),
+            Op::Show(PLAYER),
+            Op::Place(PLAYER, AT_THE_PORTAL),
+            stride(PLAYER, BELOW_THE_PORTAL),
+            Op::Sound(PORTAL_ARRIVAL_SOUND),
+            Op::AwaitAnimation(THE_PORTAL),
+            Op::Animate(THE_PORTAL, PORTAL_STANDS),
+        ],
+        otherwise: &[],
+    },
+    Op::Control(true),
+    Op::End,
+];
+
 /// What map `map` runs when it loads, when it runs anything.
 #[must_use]
 pub fn map_handler(map: usize) -> Option<&'static [Op]> {
@@ -2087,7 +2156,7 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
         34 => Some(chapter2::HOUSE_ARRIVAL),
         37 => Some(chapter2::HIDEOUT_ARRIVAL),
         38 => Some(chapter2::CANYON_ARRIVAL),
-        _ => None,
+        _ => chapter3::map_handler(map),
     }
 }
 
@@ -2160,6 +2229,6 @@ pub fn talk_handler(address: u32) -> Option<&'static [Op]> {
         0x0800_90F0 => Some(ARCANA_ITEM_SHOP),
         0x0800_90FC => Some(ARCANA_ARMS_SHOP),
         0x0800_9108 => Some(ARCANA_LAB),
-        _ => chapter2::talk_handler(address),
+        _ => chapter2::talk_handler(address).or_else(|| chapter3::talk_handler(address)),
     }
 }

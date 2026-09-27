@@ -20,9 +20,14 @@ use crate::field::{Actor, Command, Direction, Field, PIXEL, Walk};
 use crate::menu::Shop;
 
 /// Task slots, as in the game's kernel.
-pub const TASKS: usize = 8;
+pub const TASKS: usize = 16;
 /// The slot of a map's own event.
 pub const MAP_TASK: usize = 3;
+/// The slot that stands for the field's per-frame hook (RAM
+/// `0x02000000`), which runs outside the tasks: a slot before the map's
+/// task, so a load the hook makes lets the map's handler start its task.
+/// Like the map's task, it ends when the player leaves the map.
+pub const FIELD_HOOK: usize = 2;
 const IMMEDIATE: usize = TASKS;
 /// The darkest brightness level; levels above 16 all show black.
 pub const BLACK: u8 = 31;
@@ -39,6 +44,17 @@ const WALKING: usize = 4;
 /// A [`Op::LoadMap`] player cell that keeps the player where it stands
 /// (the handlers that pass the player entity's own cell).
 pub const HERE: (usize, usize) = (usize::MAX, usize::MAX);
+/// The repeat count of a program that runs until its task ends.
+const FOREVER: u16 = 0;
+/// An actor index that stands for the space-time portal of the map
+/// walked (see [`crate::field::Field::portal`]).
+pub const THE_PORTAL: usize = usize::MAX - 1;
+/// A cell that stands for the portal's own.
+pub const AT_THE_PORTAL: (usize, usize) = (usize::MAX - 1, usize::MAX - 1);
+/// A cell that stands for the one below the portal.
+pub const BELOW_THE_PORTAL: (usize, usize) = (usize::MAX - 2, usize::MAX - 2);
+/// A cell that stands for the arrival of the exit the player pushed into.
+pub const EXIT_ARRIVAL: (usize, usize) = (usize::MAX - 3, usize::MAX - 3);
 
 /// One step of an event program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,6 +135,8 @@ pub enum Op {
     Spawn(usize, &'static [Op]),
     /// Ends the task running this program.
     End,
+    /// Ends the task in slot `n` (`0x08003DD8`), a helper still under way.
+    Stop(usize),
     /// Plays a song unless it is already playing (`0x080019B4`).
     Music(u16),
     /// Stops song `n` and plays it from its start (`0x08001A08`, then
@@ -322,6 +340,79 @@ pub enum Op {
     /// Forms the party around the Zoid picked in the hangar
     /// (`0x08037644`: 0 the Shield Liger, 1 the Saber Tiger, 2 the Raynos).
     FormParty(u8),
+    /// Runs `then` when the map walked has a space-time portal, `otherwise`
+    /// else.
+    IfPortal {
+        /// Program run when it has.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Plays the sound of the exit the player pushed into (`0x080083B8`).
+    ExitSound,
+    /// Takes the player through the exit it pushed into, keeping its facing
+    /// (`0x08007188`), and runs the map's handler.
+    TakeExit,
+    /// Runs `program` over and over, as the field's per-frame hook runs its
+    /// routine: the program yields every frame, and [`Op::End`] ends it.
+    Loop(&'static [Op]),
+    /// Runs `then` when the attribute of the player's cell has any of
+    /// `bits` (`0x08008434` with the player's entity), `otherwise` else.
+    IfPlayerOn {
+        /// Attribute bits tested.
+        bits: u16,
+        /// Program run when one is set.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Runs `then` when more than `more_than` roaming battles have been won
+    /// since the count was last cleared (the game state's half-word `+0x0A`,
+    /// which `0x0800B9CC` counts), `otherwise` else.
+    IfBattlesWon {
+        /// The count to exceed.
+        more_than: u16,
+        /// Program run when it is exceeded.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Clears the count of roaming battles won.
+    ForgetBattlesWon,
+    /// Runs `then` when a task runs in slot `slot`, `otherwise` else.
+    IfTask {
+        /// The slot.
+        slot: usize,
+        /// Program run when a task runs there.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Runs `then` when song `song` is the one playing (RAM `0x02000B54`),
+    /// `otherwise` else.
+    IfMusic {
+        /// The song.
+        song: u16,
+        /// Program run when it plays.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Plays the map's own song from its start (`0x08001A08` and
+    /// `0x080019B4` with the song of the map's record).
+    RestartMapMusic,
+    /// Makes return point `index` the one a beaten party is taken to
+    /// (`0x08006DFC`: the game state's byte 3), until the next map entered
+    /// sets its area's.
+    ReturnPoint(u8),
+    /// Walks the player a cell back, away from the way it faces, through
+    /// everything (entity command 11 toward the cell behind it).
+    StepBack {
+        /// Pixels a frame, 16.16 fixed point.
+        speed: i32,
+        /// Animation tick shift while walking.
+        shift: i8,
+    },
     /// Loads map `map` with `count` objects from the list at ROM address
     /// `objects` and the player on `player` (`0x080079E8`); the game holds
     /// while it decompresses and places one object a frame.
@@ -417,6 +508,23 @@ pub trait EventHost {
     fn set_sprite(&mut self, actor: usize, sprite: usize);
     /// Whether sound or song `n` has ended.
     fn sound_ended(&self, n: u16) -> bool;
+    /// The song playing, if any.
+    fn music_playing(&self) -> Option<u16>;
+    /// Plays the current map's own song from its start.
+    fn restart_map_music(&mut self);
+    /// The roaming battles won since the count was last cleared.
+    fn battles_won(&self) -> u16;
+    /// Clears the count of roaming battles won.
+    fn forget_battles_won(&mut self);
+    /// Makes return point `index` the one a beaten party is taken to.
+    fn set_return_point(&mut self, index: u8);
+    /// Plays the sound of the exit the player pushed into.
+    fn exit_sound(&mut self);
+    /// Takes the player through the exit it pushed into; returns how many
+    /// objects the map places.
+    fn take_exit(&mut self) -> usize;
+    /// Where the exit the player pushed into leads.
+    fn exit_arrival(&self) -> Option<(usize, usize)>;
 }
 
 /// A program running in a task, where it is and how many more times it
@@ -563,6 +671,9 @@ pub struct Events {
     /// The map a task's cutscene load brings, whose song starts once the
     /// load is over.
     loading_map: Option<usize>,
+    /// Whether a task's dialogue started this frame: the other tasks have
+    /// had their turn in it already.
+    dialogue_started: bool,
 }
 
 impl Events {
@@ -699,8 +810,13 @@ impl Events {
             ) => {
                 if dialogue_done {
                     self.hold = None;
+                    self.dialogue_started = false;
                     self.run_task(slot, host);
                     self.run_slots(slot + 1, host);
+                } else if self.task_dialogue().is_some()
+                    && !std::mem::take(&mut self.dialogue_started)
+                {
+                    self.run_slots(0, host);
                 }
                 HoldStep::Held
             }
@@ -832,10 +948,24 @@ impl Events {
         self.run_slots(0, host);
     }
 
+    /// The task whose dialogue or script holds only itself: the kernel
+    /// switches away from a task waiting on its script runner every frame
+    /// (`0x0803E51C` calls `0x0805EF90`), so the other tasks go on.
+    fn task_dialogue(&self) -> Option<usize> {
+        match self.hold {
+            Some(Hold::Dialogue(slot)) if slot < IMMEDIATE => Some(slot),
+            _ => None,
+        }
+    }
+
     fn run_slots(&mut self, from: usize, host: &mut impl EventHost) {
         for slot in from..=TASKS {
             if self.hold.is_some() {
-                return;
+                match self.task_dialogue() {
+                    Some(talking) if talking == slot => continue,
+                    Some(_) => {}
+                    None => return,
+                }
             }
             if let Some(task) = self.tasks[slot].as_mut() {
                 if task.wait > 1 {
@@ -858,7 +988,9 @@ impl Events {
                 return;
             };
             let Some(&op) = frame.program.get(frame.pc) else {
-                if frame.repeat > 1 {
+                if frame.repeat == FOREVER {
+                    frame.pc = 0;
+                } else if frame.repeat > 1 {
                     frame.repeat -= 1;
                     frame.pc = 0;
                 } else {
@@ -894,6 +1026,7 @@ impl Events {
     }
 
     fn execute(&mut self, slot: usize, op: Op, host: &mut impl EventHost) -> Flow {
+        let op = resolve(op, host);
         match op {
             Op::Wait(_)
             | Op::Dialogue(_)
@@ -917,6 +1050,7 @@ impl Events {
             | Op::FadeOutHolding
             | Op::FadeOutHoldingAfter(_)
             | Op::LoadMap { .. }
+            | Op::TakeExit
             | Op::Warp { .. } => self.wait(slot, op, host),
             Op::IfFlags { .. }
             | Op::IfCommand { .. }
@@ -926,12 +1060,22 @@ impl Events {
             | Op::IfChest { .. }
             | Op::IfZiDataHeld { .. }
             | Op::IfPlayerSprite { .. }
+            | Op::IfPlayerOn { .. }
+            | Op::IfBattlesWon { .. }
+            | Op::IfMusic { .. }
+            | Op::IfTask { .. }
+            | Op::IfPortal { .. }
             | Op::Call(_)
+            | Op::Loop(_)
             | Op::Repeat(..)
             | Op::Spawn(..)
             | Op::End => self.branch(slot, op, host),
             Op::Sprite(actor, sprite) => {
                 host.set_sprite(actor, sprite);
+                Flow::Next
+            }
+            Op::Stop(other) => {
+                self.end(other);
                 Flow::Next
             }
             Op::Glide {
@@ -962,6 +1106,7 @@ impl Events {
             | Op::Pose(..)
             | Op::Animate(..)
             | Op::Shift(..)
+            | Op::StepBack { .. }
             | Op::Pan(..) => {
                 if let Some(field) = host.field() {
                     command_actor(field, op);
@@ -998,6 +1143,7 @@ impl Events {
             | Op::StoryBattle(_) => {
                 self.advance(slot);
                 self.hold = Some(start_hold(slot, op, host));
+                self.dialogue_started = self.task_dialogue().is_some();
                 return Flow::Yield;
             }
             Op::Freeze(frames) => {
@@ -1032,6 +1178,10 @@ impl Events {
             }
             Op::Warp { map, cell, facing } => {
                 let count = host.warp(map, cell, facing);
+                return self.hold_loading(slot, count);
+            }
+            Op::TakeExit => {
+                let count = host.take_exit();
                 return self.hold_loading(slot, count);
             }
             Op::WarpHome => {
@@ -1241,7 +1391,36 @@ impl Events {
                 otherwise,
             } => taken(sprite_within(host, x, y), then, otherwise),
             Op::IfLost { then, otherwise } => taken(host.battle_lost(), then, otherwise),
+            Op::IfPlayerOn {
+                bits,
+                then,
+                otherwise,
+            } => taken(player_on(host, bits), then, otherwise),
+            Op::IfBattlesWon {
+                more_than,
+                then,
+                otherwise,
+            } => taken(host.battles_won() > more_than, then, otherwise),
+            Op::IfMusic {
+                song,
+                then,
+                otherwise,
+            } => taken(host.music_playing() == Some(song), then, otherwise),
+            Op::IfTask {
+                slot: other,
+                then,
+                otherwise,
+            } => taken(self.task_running(other), then, otherwise),
+            Op::IfPortal { then, otherwise } => taken(
+                host.field().and_then(|field| field.portal()).is_some(),
+                then,
+                otherwise,
+            ),
             Op::Call(program) => program,
+            Op::Loop(program) => {
+                self.push(slot, program, FOREVER);
+                return Flow::Continue;
+            }
             Op::Repeat(times, program) => {
                 if times == 0 {
                     return Flow::Next;
@@ -1299,6 +1478,65 @@ fn player_within(
     })
 }
 
+/// `op` with the stand-ins for the portal, its cells and the exit's
+/// arrival replaced by what they stand for now.
+fn resolve(op: Op, host: &mut impl EventHost) -> Op {
+    let stand_in =
+        |cell: (usize, usize)| [AT_THE_PORTAL, BELOW_THE_PORTAL, EXIT_ARRIVAL].contains(&cell);
+    let needed = match op {
+        Op::Walk { actor, to, .. } => actor == THE_PORTAL || stand_in(to),
+        Op::Place(actor, cell) => actor == THE_PORTAL || stand_in(cell),
+        Op::PlayOnce(actor, _)
+        | Op::AwaitStepEnd(actor, _)
+        | Op::AwaitAnimation(actor)
+        | Op::Animate(actor, _) => actor == THE_PORTAL,
+        _ => false,
+    };
+    if !needed {
+        return op;
+    }
+    let arrival = host.exit_arrival();
+    let portal = host.field().and_then(|field| field.portal());
+    let actor = |actor: usize| match (actor, portal) {
+        (THE_PORTAL, Some((index, _))) => index,
+        _ => actor,
+    };
+    let cell = |cell: (usize, usize)| match (cell, portal, arrival) {
+        (AT_THE_PORTAL, Some((_, at)), _) | (EXIT_ARRIVAL, _, Some(at)) => at,
+        (BELOW_THE_PORTAL, Some((_, (column, row))), _) => (column, row + 1),
+        _ => cell,
+    };
+    match op {
+        Op::Walk {
+            actor: walker,
+            to,
+            speed,
+            shift,
+            through,
+        } => Op::Walk {
+            actor: actor(walker),
+            to: cell(to),
+            speed,
+            shift,
+            through,
+        },
+        Op::Place(placed, at) => Op::Place(actor(placed), cell(at)),
+        Op::PlayOnce(played, animation) => Op::PlayOnce(actor(played), animation),
+        Op::AwaitStepEnd(played, step) => Op::AwaitStepEnd(actor(played), step),
+        Op::AwaitAnimation(played) => Op::AwaitAnimation(actor(played)),
+        Op::Animate(played, animation) => Op::Animate(actor(played), animation),
+        other => other,
+    }
+}
+
+/// Whether the attribute of the player's cell has any of `bits`.
+fn player_on(host: &mut impl EventHost, bits: u16) -> bool {
+    host.field().is_some_and(|field| {
+        let (column, row) = field.player().footing();
+        field.scene().attribute(column, row).unwrap_or(0) & bits != 0
+    })
+}
+
 /// Whether the player's sprite is within `x` and `y`, inclusive ranges of
 /// map pixels of its box's top-left.
 fn sprite_within(host: &mut impl EventHost, x: (i32, i32), y: (i32, i32)) -> bool {
@@ -1326,6 +1564,10 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::MarkChest => host.mark_chest(),
         Op::TakeChest => host.take_chest(),
         Op::AfterCombat => host.after_combat(),
+        Op::RestartMapMusic => host.restart_map_music(),
+        Op::ForgetBattlesWon => host.forget_battles_won(),
+        Op::ReturnPoint(index) => host.set_return_point(index),
+        Op::ExitSound => host.exit_sound(),
         _ => {}
     }
 }
@@ -1406,6 +1648,17 @@ fn command_actor(field: &mut Field, op: Op) {
             }
         }
         Op::Pan(dx, dy) => field.pan_by(dx, dy),
+        Op::StepBack { speed, shift } => {
+            let player = field.player_mut();
+            let (dx, dy) = player.facing.opposite().delta();
+            player.command = Command::WalkTo(Walk {
+                column: player.column.saturating_add_signed(dx),
+                row: player.row.saturating_add_signed(dy),
+                speed,
+                animation_shift: shift,
+                through: true,
+            });
+        }
         _ => {}
     }
 }
@@ -1454,6 +1707,8 @@ mod tests {
     struct Host {
         flags: Vec<u16>,
         log: Vec<String>,
+        music: Option<u16>,
+        battles_won: u16,
     }
 
     impl EventHost for Host {
@@ -1600,6 +1855,39 @@ mod tests {
         fn sound_ended(&self, _: u16) -> bool {
             true
         }
+
+        fn music_playing(&self) -> Option<u16> {
+            self.music
+        }
+
+        fn restart_map_music(&mut self) {
+            self.log.push("restart map music".to_owned());
+        }
+
+        fn battles_won(&self) -> u16 {
+            self.battles_won
+        }
+
+        fn forget_battles_won(&mut self) {
+            self.battles_won = 0;
+        }
+
+        fn set_return_point(&mut self, index: u8) {
+            self.log.push(format!("return point {index}"));
+        }
+
+        fn exit_sound(&mut self) {
+            self.log.push("exit sound".to_owned());
+        }
+
+        fn take_exit(&mut self) -> usize {
+            self.log.push("exit".to_owned());
+            0
+        }
+
+        fn exit_arrival(&self) -> Option<(usize, usize)> {
+            None
+        }
     }
 
     const WAITING: &[Op] = &[Op::Music(1), Op::Wait(3), Op::Music(2), Op::End];
@@ -1617,13 +1905,72 @@ mod tests {
         Op::End,
     ];
 
+    const WATCHED: &[Op] = &[Op::Wait(2), Op::Music(9), Op::End];
+    const WATCH: &[Op] = &[Op::Loop(&[
+        Op::IfTask {
+            slot: MAP_TASK,
+            then: &[],
+            otherwise: &[Op::IfBattlesWon {
+                more_than: 1,
+                then: &[Op::ForgetBattlesWon, Op::Spawn(MAP_TASK, WATCHED)],
+                otherwise: &[Op::IfMusic {
+                    song: 5,
+                    then: &[Op::RestartMapMusic, Op::End],
+                    otherwise: &[],
+                }],
+            }],
+        },
+        Op::Wait(1),
+    ])];
+
+    const TALKER: &[Op] = &[Op::Dialogue(7), Op::Music(1), Op::End];
+    const COUNTER: &[Op] = &[Op::Loop(&[Op::Sound(2), Op::Wait(1)])];
+
+    #[test]
+    fn a_tasks_dialogue_holds_only_that_task() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.spawn(MAP_TASK, TALKER);
+        events.spawn(MAP_TASK + 1, COUNTER);
+        events.update(&mut host);
+        assert_eq!(host.log, ["dialogue 7", "sound 2"]);
+        assert_eq!(events.update_hold(false, &mut host), HoldStep::Held);
+        assert_eq!(host.log, ["dialogue 7", "sound 2"]);
+        assert_eq!(events.update_hold(false, &mut host), HoldStep::Held);
+        assert_eq!(host.log, ["dialogue 7", "sound 2", "sound 2"]);
+        events.update_hold(true, &mut host);
+        assert_eq!(
+            host.log,
+            ["dialogue 7", "sound 2", "sound 2", "music 1", "sound 2"]
+        );
+    }
+
+    #[test]
+    fn a_loop_runs_every_frame_and_skips_while_its_helper_runs() {
+        let mut events = Events::new();
+        let mut host = Host {
+            battles_won: 2,
+            ..Host::default()
+        };
+        events.spawn(FIELD_HOOK, WATCH);
+        events.update(&mut host);
+        assert_eq!(host.battles_won, 0);
+        assert!(events.task_running(MAP_TASK));
+        for _ in 0..3 {
+            events.update(&mut host);
+        }
+        assert_eq!(host.log, ["music 9"]);
+        assert!(events.task_running(FIELD_HOOK));
+        host.music = Some(5);
+        events.update(&mut host);
+        assert_eq!(host.log, ["music 9", "restart map music"]);
+        assert!(!events.task_running(FIELD_HOOK));
+    }
+
     #[test]
     fn a_task_spawned_into_a_loading_tasks_slot_is_lost() {
         let mut events = Events::new();
-        let mut host = Host {
-            flags: vec![],
-            log: vec![],
-        };
+        let mut host = Host::default();
         events.spawn(MAP_TASK, WARPING);
         events.update(&mut host);
         events.spawn(MAP_TASK, REPLACED);

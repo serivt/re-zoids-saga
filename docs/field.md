@@ -212,6 +212,36 @@ next one runs into a door, the door is taken in that frame. The world map's driv
 Arcana ends so (see [events.md](events.md)); traced there, the sound comes two frames
 after the Gustav reaches the cell before the door.
 
+## Portals
+
+Each chapter's region is joined to the kingdom's base by a pair of space-time portals:
+exits whose attribute also has bit 11 (`0x4800 | n`), with an object showing the portal
+(sprite `0xF7`) on the cell. Pushing toward such a cell does not step onto it
+(`0x0800B0C4`): the player loses the controls and a trip starts in task slot 10
+(`0x0800990C`, `0x0800960C`):
+
+1. The first object showing a portal is looked for among the entities. When there is
+   one, the Gustav drives onto its cell (command 11, a pixel a frame) while the portal
+   plays its taking run once with sound `0x6F`; on the last frame of its 8th step the
+   Gustav is gone, on its 41st sound `0x44` plays, and the portal stands again.
+2. A second later the exit's sound plays, the field darkens a level a frame and the
+   exit's map loads with the facing kept (`0x08007188`), running its handler.
+3. The new map's portal is looked for. Without one, the Gustav stands at the exit's
+   arrival. The field brightens a level a frame and a second passes.
+4. With a portal, it plays its opening run once with sound `0x6F`; on the last frame of
+   its 32nd step the Gustav appears on it and drives a cell down (command 10) with sound
+   `0x49`. Once the run has played the portal stands again and the player has the
+   controls back.
+
+On the last frame of the opening run's 24th step the original checks the cell below the
+portal and, when something stands there, starts the run again with its sound; the port
+does not model that wait. Chapter 3's arrival in the desert shows the trip meeting a
+map's own event: the desert's handler loads the arrival scene, whose task opens the
+portal too, and the trip's own opening a few frames later starts the run again, so
+both the sounds and the Gustav's two walks happen as in the original (see
+[events.md](events.md), Chapter 3). Implemented in `crates/game-core/src/story.rs`
+(`PORTAL_TRIP`) and `crates/game-core/src/field.rs` (`Field::portal`).
+
 ## Pause menu
 
 START opens the menu described in [menu.md](menu.md); the field waits underneath it.

@@ -37,7 +37,7 @@ use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::combat::{Combat, Outcome};
 use crate::data::GameData;
 use crate::demo::{DemoEnd, DemoStep};
-use crate::event::{BLACK, ChestKind, EventHost, Events, HoldStep, MAP_TASK, Op};
+use crate::event::{BLACK, ChestKind, EventHost, Events, FIELD_HOOK, HoldStep, MAP_TASK, Op};
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
 use crate::guide::{Cover, Guide, GuideError, GuideKind};
@@ -282,6 +282,8 @@ pub struct Game<'rom> {
     /// The door the exit being taken is, when it is one.
     door_taken: Option<usize>,
     warped: Option<usize>,
+    /// The map and exit whose portal the player last pushed toward.
+    portal_exit: Option<(usize, usize)>,
     chest: Option<(usize, u16)>,
     player_name: String,
     party: Party,
@@ -435,6 +437,7 @@ impl<'rom> Game<'rom> {
             exit_taken: None,
             door_taken: None,
             warped: None,
+            portal_exit: None,
             chest: None,
             player_name: DEFAULT_PLAYER_NAME.to_owned(),
             party: Party::default(),
@@ -1082,6 +1085,7 @@ impl<'rom> Game<'rom> {
             aftermath: &mut self.aftermath,
             battle_lost: self.battle_lost,
             warped: &mut self.warped,
+            portal_exit: self.portal_exit,
             chest: self.chest,
             party: &mut self.party,
             sound: &mut self.sound,
@@ -1331,6 +1335,13 @@ impl<'rom> Game<'rom> {
                 self.take_exit(exit, true)?;
                 return Ok(true);
             }
+            Some(FieldEvent::Portal(exit)) => {
+                if let Some(field) = self.field.as_mut() {
+                    self.portal_exit = Some((field.map(), exit));
+                    field.player_mut().command = Command::Idle;
+                }
+                self.events.spawn(story::PORTAL_TASK, story::PORTAL_TRIP);
+            }
             Some(FieldEvent::Talk {
                 actor,
                 script: ObjectScript::Dialogue(id),
@@ -1439,6 +1450,7 @@ impl<'rom> Game<'rom> {
         };
         self.events.fade_in_after(black, WARP_SETTLE_FRAMES);
         self.events.end(MAP_TASK);
+        self.events.end(FIELD_HOOK);
         self.run_handler(story::map_handler(arrived))
     }
 
@@ -1550,6 +1562,7 @@ impl<'rom> Game<'rom> {
         self.events
             .fade_in_after(DEFEAT_BLACK_FRAMES, WARP_SETTLE_FRAMES);
         self.events.end(MAP_TASK);
+        self.events.end(FIELD_HOOK);
         self.run_handler(story::map_handler(point.map))
     }
 
@@ -1578,11 +1591,21 @@ impl<'rom> Game<'rom> {
         let Some(map) = self.field.as_ref().map(Field::map) else {
             return Ok(());
         };
-        let Ok(warp) = self.data.warp(map, exit) else {
+        Self::door_sound(&mut self.sound, &self.data, &self.extensions, map, exit)
+    }
+
+    /// The sound exit `exit` of map `map` plays (`0x080083B8`).
+    fn door_sound(
+        engine: &mut SoundEngine<'rom>,
+        data: &GameData<'rom>,
+        extensions: &SharedExtensions,
+        map: usize,
+        exit: usize,
+    ) -> Result<(), GameError> {
+        let Ok(warp) = data.warp(map, exit) else {
             return Ok(());
         };
-        let on_foot = self
-            .data
+        let on_foot = data
             .map_objects(map)
             .ok()
             .and_then(|objects| objects.first().map(|player| player.sprite))
@@ -1590,18 +1613,11 @@ impl<'rom> Game<'rom> {
         let sound = match warp.sound {
             NO_DOOR_SOUND => return Ok(()),
             0 if on_foot => usize::from(ON_FOOT_DOOR_SOUND),
-            0 => {
-                return Self::play(
-                    &mut self.sound,
-                    &self.data,
-                    &self.extensions,
-                    GameSound::Door,
-                );
-            }
+            0 => return Self::play(engine, data, extensions, GameSound::Door),
             sound => usize::from(sound),
         };
-        Self::emit(&self.extensions, &Event::SoundRequested(sound));
-        self.sound.play(sound)?;
+        Self::emit(extensions, &Event::SoundRequested(sound));
+        engine.play(sound)?;
         Ok(())
     }
 
@@ -1728,6 +1744,7 @@ struct Host<'a, 'rom> {
     aftermath: &'a mut Option<(usize, Outcome)>,
     battle_lost: bool,
     warped: &'a mut Option<usize>,
+    portal_exit: Option<(usize, usize)>,
     chest: Option<(usize, u16)>,
     party: &'a mut Party,
     sound: &'a mut SoundEngine<'rom>,
@@ -2140,6 +2157,67 @@ impl EventHost for Host<'_, '_> {
 
     fn sound_ended(&self, n: u16) -> bool {
         self.sound.song_ended(usize::from(n))
+    }
+
+    fn music_playing(&self) -> Option<u16> {
+        self.sound
+            .playing(MUSIC_PLAYER)
+            .and_then(|song| u16::try_from(song).ok())
+    }
+
+    fn restart_map_music(&mut self) {
+        let Some(map) = self.field.as_ref().map(Field::map) else {
+            return;
+        };
+        let song = self
+            .extensions
+            .borrow()
+            .music_for_map(map)
+            .or_else(|| self.data.map_music(map))
+            .and_then(|song| u16::try_from(song).ok());
+        if let Some(song) = song {
+            self.restart_music(song);
+        }
+    }
+
+    fn battles_won(&self) -> u16 {
+        formats::progress::battles_won(self.state)
+    }
+
+    fn forget_battles_won(&mut self) {
+        formats::progress::forget_battles(self.state);
+    }
+
+    fn set_return_point(&mut self, index: u8) {
+        AreaObjects::set_area_index(self.state, index);
+    }
+
+    fn exit_sound(&mut self) {
+        let Some((map, exit)) = self.portal_exit else {
+            return;
+        };
+        if let Err(error) = Game::door_sound(self.sound, &self.data, self.extensions, map, exit) {
+            self.fail(error);
+        }
+    }
+
+    fn take_exit(&mut self) -> usize {
+        let Some((map, exit)) = self.portal_exit else {
+            return 0;
+        };
+        match self.data.warp(map, exit) {
+            Ok(warp) => self.warp(warp.map, (warp.column, warp.row), None),
+            Err(error) => {
+                self.fail(FieldError::from(error));
+                0
+            }
+        }
+    }
+
+    fn exit_arrival(&self) -> Option<(usize, usize)> {
+        let (map, exit) = self.portal_exit?;
+        let warp = self.data.warp(map, exit).ok()?;
+        Some((warp.column, warp.row))
     }
 
     fn set_sprite(&mut self, actor: usize, sprite: usize) {

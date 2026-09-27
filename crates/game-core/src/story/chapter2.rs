@@ -1226,7 +1226,3 @@ const TO_CHAPTER_3: &[Op] = &[
     Op::FadeInHoldingSlow,
     Op::End,
 ];
-
-/// Where the port's story stops: chapter 3's first map once chapter 2 is
-/// over.
-pub(super) const STORY_END: (usize, u16) = (CHAPTER_3_START, CHAPTER_ENDED);

@@ -15,11 +15,16 @@ map's own event and slots 4–7 its helpers (fades, flicker, walks that run besi
 main event). Each frame the entities update first, then every task runs in slot order
 until it yields. A task spawned into a later slot runs in the same frame.
 
-Some calls hold the tasks until they finish: a dialogue, a blocking fade and a scene
-load. The task that started it continues in the frame the hold ends. A fade or a load
-holds the whole game. A task's dialogue runs inside the task, after the entities'
-update, so the entities go on walking and animating while it shows: in Arcana the
-soldiers leave during dialogue `0x4E`.
+Some calls hold the tasks until they finish: a blocking fade and a scene load hold the
+whole game. A task's dialogue holds only that task: the script runner hands the frame
+back to the kernel every frame (`0x0803E51C` calls `0x0805EF90`), so the entities go on
+walking and animating while it shows (in Arcana the soldiers leave during dialogue
+`0x4E`) and the other tasks go on too, from the frame it starts. The task that started
+it continues in the frame it ends. Chapter 3 needs this: in the fortress's wing a helper
+task walking an officer in ends its walk in the frame the main task starts dialogue
+`0xD7`, and the officer's later walk out would otherwise meet the helper's unfinished
+one. During a dialogue started by speaking to someone the port still holds every task,
+which is not checked against the original.
 
 Handlers the game calls directly run at once, until they yield or end. Those handlers
 are the code an object runs when spoken to and the code a map runs when it loads.
@@ -387,10 +392,102 @@ the chapter's end event for event, its sounds and songs on the same frames relat
 each load. The loads themselves take longer in the original, 10 to 23 frames each at
 Sand Colony, the desert and the ruins.
 
+## Chapter 3
+
+Source of knowledge: own reading of the area's map handlers, the tasks and field hooks
+they install, the objects' code and the routines named below; checked against a
+reference emulator with saves patched to each scene's flags, comparing the frames of the
+songs, sounds and dialogues and the pictures between them. Implemented in
+`crates/game-core/src/story/chapter3.rs`.
+
+Area 3 is maps 50 to 93: the desert around Mount Ossa (50), a Zoid map, with its town
+(51 to 53), the Kronos fort (54 to 60), the Mount Ossa fortress (61 to 66), its rear
+tunnels (67 to 71), the path to the crater (72 to 77) and a cave (78 to 80); the
+Emperor's castle (81, 82), and the kingdom's base in the past, whose rooms reuse the
+first chapter's (83 to 93). The base and the desert are joined by a pair of portals (map
+86's and map 50's; see [field.md](field.md), Portals). The chapter's story is a chain of
+flags:
+
+| Where | Handler | Condition | What happens | Sets |
+|---|---|---|---|---|
+| 82 | `0x08014C68` | not `0x158` | The characters of group 2 are met; the throne room loads with the court (ROM `0x0866770C`) and the opening runs (task `0x08014D5C`): Fran is sent away (`0xA8`, `0xA9`), Opis brings the rare-hertz amplifier and takes the command, Blood and Gale are sent to guard the castle (`0xAA`, `0xAB`); in the hall (81) Blood hints that Gale let the prince go (`0xAC`, `0xAD`); at the base (92) a soldier reports the space-time device in use (`0xAE`) and the party leaves | `0x158` |
+| 50 | `0x0801426C` | `0x158`, not `0x159` | Through the portal (task `0x08015000`): the portal brings the Gustav (`0xB1`) | `0x159` |
+| 51 | `0x08014628` | | Entering the town | `0x15D` |
+| 50 | | `0x15D`, not `0x15C` | Out of the town, to the danger song (4), three runaway Zoids close in (task `0x080152A4`, `0xBE`, `0xBF`); story battle 6 follows from the hook `0x08015338`. The handler clears `0x15D` first, so a lost fight waits for another visit to the town | `0x15C` on winning |
+| 50 | | `0x15C`, not `0x15E` | Opis shows himself to his song (9) and heads for the fortress (task `0x08015400`, `0xC0` to `0xC2`) | `0x15E` |
+| 61 | `0x080147F8` | `0x158`, not `0x161` | The fortress's gate loads with Dr. D and a guard (ROM `0x0866757C`). Before `0x15E` the guard sends the party away (task `0x0801574C`, `0xC3`); after it Dr. D takes the party in (task `0x080154FC`, `0xC6` to `0xCB`), and a beaten party is taken to the fortress's lab from then on (return point 10, `0x08006DFC`) | `0x161` |
+| 68 | `0x08014A44` | not `0x15F` | The rear entrance's guard: the first time `0xC4`, later `0xC5` (task `0x08015498`) | `0x160` |
+| 66 | `0x08014918` | not `0x162` | The command room (task `0x080157C0`, `0xCC` to `0xCF`): Colonel Ford, Captain Herman and Lieutenant O'Connell; Dr. D sends the party to measure the rare-hertz zone | `0x162` |
+| 50 | | `0x159`, not `0x15A`, not `0x164` | The zone's watch (the hook `0x080144DC`, below) | `0x15B`, `0x163`, `0x164` |
+| 50 | | `0x164` | The four amplifiers (objects 1 to 4, `0x08016A58` on) stand until each is destroyed: speaking to one runs `0xD9`, an explosion over it (object 5, sound `0x5B`) and four blinks of eight frames (`0x08016C38`, `0x08016CA8`, `0x08016BC8`) | `0x165` to `0x168` |
+| 54 | `0x08014654` | `0x165` to `0x168`, not `0x169` | The Kronos fort (task `0x08015BEC`): the officers arrive (`0xDF`), Van, Fiene and Colonel Krueger come out (55, `0xE0` to `0xE2`), and in Krueger's room (57, `0xE3`) Van and Fiene join (lists 6, 7) and Irvine, Moonbay and Zeke leave (lists 4, 3, 5). Before that the rare hertz sends the party back (task `0x08015F18`, `0xDD` or, once the amplifiers are located, `0xDE`) | `0x169` |
+| 60 | `0x08014780` | `0x169`, not `0x16A` | The amplifier's core (object 1, `0x080147B0`): speaking to it runs its scene (task `0x08015F74`): it blows up, but the runaway Zoids go on (`0xE7`, `0xE8`); the officers (57, `0xE9`), Dr. D's guess about the volcano (66, `0xEA`); list 8 joins, list 7 leaves | `0x15F`, `0x16A` |
+| 71 | `0x08014AB4` | not `0x16B` | The rock-boring laser's container (object 1, `0x08014AD4`): it opens with sound `0x46`, the laser is found (`0xED`, task `0x080161C0`) and brought to Dr. D (`0xEE`) | `0x16B` |
+| 77 | `0x08014B74` | `0x16B`, not `0x16C` | The crater's path reloads with Opis (ROM `0x086676BC`); the hook `0x08014BE0` waits for the Gustav at pixel (`0x440`, `0x280`); Opis (task `0x08016264`, `0xEF`); the first time Van and Irvine go on to the crater (`0xF0`, `0xF1`, lists 8 and 6 leave, flag `0x198`); story battle 7 follows from the hook `0x080168B0`. Once the laser is found the path's rock (object 1) is gone | `0x198`, `0x16C` on winning |
+| 77 | | after the win | The chapter's end (task `0x08016378`): Opis flees (`0xF2`, `0xF3`), the laser opens the crater (`0xF4`, `0xF5`), the thanks in the command room (`0xF6` to `0xF8`), the Gustav through the desert's portal, the Emperor sends for Gale (82, `0xF9`, `0xFA`), the base's portal brings the party home (86, `0xFB`); the hook `0x08016880` warps to map 120, chapter 4's first | |
+
+The zone's watch (`0x080144DC`) runs every frame on the desert until the amplifiers are
+located. The zone is the cells whose attribute has bit `0x1000` (`0x08008434` reads the
+player's). On one, before the command room has sent the party, the player stops and the
+task `0x08015118` turns it back: once its step is over, the first time the danger song
+plays with `0xB2` (flag `0x15B`), later `0xB3`; the Gustav backs off a cell (command 11
+toward the cell behind it, two pixels a frame). Once sent, the first time
+`0x08015968` says the zone starts here (`0xD4`, flag `0x163`) and the count of roaming
+battles won (the game state's `+0x0A`, which `0x0800B9CC` counts) starts again. While
+measuring, the danger song plays on the zone and, once more than two battles have been
+won there, the task `0x080159B4` runs: the party is called back (`0xD5`), Dr. D finds
+the amplifiers (66, `0xD6`), and in the fortress's wing (64) Irvine and Moonbay burst
+in after Van (`0xD7`, `0xD8`) and join with Zeke (lists 4, 3, 5; flag `0x164`). Off the
+zone the count starts again and the map's song comes back. The tasks the watch starts
+clear the hook while they run and set it again as they end; the port keeps the watch
+running and has it skip its check while the map's task runs.
+
+The town's people (`0x08006914` on; `0x08014618` tests `0x16A`) have a line before the
+core is destroyed and one after. The teachers use `0x08012090`: deck commands 1 (the
+town), 9 (the fortress's gate), 13 (its wing), 10 (its hall) and 11 (the command room,
+whose reminder is dialogue `0xEC` in the original), and 21 (the base's bar, `0x0800957C`
+through `0x08009430`). Dr. D in the command room (`0x080149C0`) has a line for each
+stage (`0x2D7` to `0x2DB`). The keepers (`0x08009138` on): item shops 3 (the town) and 4
+(the base), armaments shops 3 (the town), 4 (the fortress), 5 (the base) and 26 (the
+Kronos fort), and the labs 3 (the fortress) and 4 (the base).
+
+What the chapter needed of the engine:
+
+- **Portals** (see [field.md](field.md)).
+- **The return point** is the game state's byte 3, which the loader sets to the area's
+  own only when the area changes (`0x08007328`), so `0x08006DFC` can move it until the
+  party leaves the area.
+- **Object states** keep the cells the stepping command writes back (`0x0800B764`); an
+  object an event places (the amplifiers off the map before they are located) keeps
+  its state.
+- **A task's dialogue** holds only its own task (see Tasks above).
+- **Loops, the player's cell attribute, the count of battles won, the song playing, the
+  map's song again, a step back** and ending another task are new ops.
+
+Checked against the original, scene by scene from patched saves (the frames of each
+song, sound and dialogue, and the pictures between dialogues): the opening (every
+interval between its lines, `0xA9` to `0xAE`, equal); the portal from the base (the
+portal's sounds on the original's frames, and in the desert the two openings, the two
+`0x49` and `0xB1` at its intervals, one of them a frame apart); the runaway Zoids to the
+battle's first sounds; Opis; the gate, refused and with Dr. D; the rear entrance; the
+command room (its lines on the original's frames); the zone's turning back and edge;
+the measurements (every interval that no key bounds equal, and the pictures but for the
+roaming enemies, which are random); an amplifier's destruction (identical pictures but
+for a roaming enemy); the Kronos fort; the core; the laser; the crater to story battle 7.
+The chapter's end after story battle 7 is not compared yet: the patched saves' party
+cannot win it in the original. The loads of the desert and the other Zoid maps take the
+original 10 to 30 frames longer than the port's (see Not modeled yet); the songs the
+loads start come earlier within the black in the port.
+
+A driver in the research notes plays the chapter in the port in three stretches: from
+chapter 2's end to the measurements, and from saves patched to the flags reached (the
+amplifiers, and the Kronos fort on) to chapter 4's first map, setting every flag of the
+table on the way.
+
 ## The end of the demo (a port feature)
 
-Source of knowledge: this project's own design. The port's story stops where chapter 2
-does, in chapter 3's first map (82) once the chapter's end has run (flag `0x156`). When
+Source of knowledge: this project's own design. The port's story stops where chapter 3
+does, in chapter 4's first map (120) once Opis is beaten (flag `0x16C`). When
 the player walks freely there in full light (after the scene's fade in, or after
 continuing a save made there), the game waits a second and ends the demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the
 player (`port/demo/thanks`) and waits for A with the prompt blinking; it then asks
@@ -461,8 +558,11 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
   takes it away. The chapter's way into map 23 does not need it: the corridor (17)
   leads through maps 18, 19 and 21 to map 23's left entrance, (0, 3), where its
   handler stands the player; map 20 is the factory's other door, from the world map.
-- Chapter 2: the time the original's loader takes for each map (the cutscene loads
-  and warps of Sand Colony, the desert and the ruins take 10 to 23 frames longer than
-  the port's estimate, see "Chapter 2" above), and the page turns of a message under
-  keys pressed every other frame, which the original takes two frames longer to accept.
+- Chapters 2 and 3: the time the original's loader takes for each map (the cutscene
+  loads and warps of Sand Colony, the deserts, the ruins and chapter 3's Zoid maps take
+  10 to 30 frames longer than the port's estimate, see "Chapter 2" and "Chapter 3"
+  above), and the page turns of a message under keys pressed every other frame, which
+  the original takes two frames longer to accept.
+- A portal's wait for the cell below it to clear before it brings someone out (see
+  [field.md](field.md), Portals).
 - A one-frame drift of the backdrop.
