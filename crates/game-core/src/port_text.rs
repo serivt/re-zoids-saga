@@ -88,14 +88,40 @@ pub const LAUNCHER_READY: &str = "port/launcher/ready";
 /// The launcher's controls.
 pub const LAUNCHER_HELP: &str = "port/launcher/help";
 
-/// The label of the launcher's controls line.
-pub const LAUNCHER_CONTROLS: &str = "port/launcher/controls";
+/// The label of the launcher's options line, and its help.
+pub const LAUNCHER_OPTIONS: &str = "port/launcher/options";
+/// See [`LAUNCHER_OPTIONS`].
+pub const LAUNCHER_PICK_OPTIONS: &str = "port/launcher/pick-options";
+/// The options screen's lines and values.
+pub const LAUNCHER_KEYBOARD: &str = "port/launcher/keyboard";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_GAMEPAD: &str = "port/launcher/gamepad";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_NO_GAMEPAD: &str = "port/launcher/no-gamepad";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_WINDOW: &str = "port/launcher/window";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_FULLSCREEN: &str = "port/launcher/fullscreen";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_FILTER: &str = "port/launcher/filter";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_SHARP: &str = "port/launcher/sharp";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_SMOOTH: &str = "port/launcher/smooth";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_ON: &str = "port/launcher/on";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_OFF: &str = "port/launcher/off";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_VOLUME: &str = "port/launcher/volume";
+/// The options screen's help.
+pub const LAUNCHER_OPTIONS_HELP: &str = "port/launcher/options-help";
+/// The gamepad screen while it waits for the button of `{button}`.
+pub const LAUNCHER_PRESS_PAD: &str = "port/launcher/press-pad";
 /// The controls line while every button has its default key.
 pub const LAUNCHER_KEYS_DEFAULT: &str = "port/launcher/keys-default";
 /// The controls line once some button has another key.
 pub const LAUNCHER_KEYS_CUSTOM: &str = "port/launcher/keys-custom";
-/// The help for the controls line.
-pub const LAUNCHER_PICK_CONTROLS: &str = "port/launcher/pick-controls";
 /// The controls screen's help.
 pub const LAUNCHER_CONTROLS_HELP: &str = "port/launcher/controls-help";
 /// The controls screen while it waits for the key of `{button}`.
@@ -112,15 +138,73 @@ pub const LAUNCHER_DOWN: &str = "port/launcher/down";
 pub const LAUNCHER_LEFT: &str = "port/launcher/left";
 /// See [`LAUNCHER_UP`].
 pub const LAUNCHER_RIGHT: &str = "port/launcher/right";
+/// The question before closing, from the launcher's screen or the game.
+pub const LAUNCHER_QUIT_QUESTION: &str = "port/launcher/quit-question";
+/// The warning under the question while the game plays.
+pub const LAUNCHER_QUIT_UNSAVED: &str = "port/launcher/quit-unsaved";
+/// The answers to the question.
+pub const LAUNCHER_YES: &str = "port/launcher/yes";
+/// See [`LAUNCHER_YES`].
+pub const LAUNCHER_NO: &str = "port/launcher/no";
 
 /// The launcher's screen, in English until a translation is chosen; one
 /// line each: up to 208 pixels in its panel, 232 across the screen (the
 /// subtitle, the status and the help).
 pub const LAUNCHER_TEXTS: &[PortText] = &[
+    launcher(LAUNCHER_OPTIONS, "Options", "The label of the options line"),
+    launcher_line(
+        LAUNCHER_PICK_OPTIONS,
+        "Window, sound and controls.",
+        "Help for the options line",
+    ),
     launcher(
-        LAUNCHER_CONTROLS,
-        "Controls",
-        "The label of the controls line",
+        LAUNCHER_KEYBOARD,
+        "Keyboard",
+        "The line of the keyboard's keys, and that screen's heading",
+    ),
+    launcher(
+        LAUNCHER_GAMEPAD,
+        "Gamepad",
+        "The line of the gamepad's buttons, and that screen's heading",
+    ),
+    launcher(
+        LAUNCHER_NO_GAMEPAD,
+        "none connected",
+        "The gamepad line without a gamepad",
+    ),
+    launcher(
+        LAUNCHER_WINDOW,
+        "Window size",
+        "The line of the window's size",
+    ),
+    launcher(
+        LAUNCHER_FULLSCREEN,
+        "Fullscreen",
+        "The line that fills the screen",
+    ),
+    launcher(
+        LAUNCHER_FILTER,
+        "Filter",
+        "The line of how the picture is scaled",
+    ),
+    launcher(
+        LAUNCHER_SHARP,
+        "sharp",
+        "Scaled by whole multiples, square pixels",
+    ),
+    launcher(LAUNCHER_SMOOTH, "smooth", "Scaled to fill, blended pixels"),
+    launcher(LAUNCHER_ON, "on", "A setting that is on"),
+    launcher(LAUNCHER_OFF, "off", "A setting that is off"),
+    launcher(LAUNCHER_VOLUME, "Volume", "The line of the sound's volume"),
+    launcher_line(
+        LAUNCHER_OPTIONS_HELP,
+        "Left/Right: change   X: choose   Z: back",
+        "The options screen's help",
+    ),
+    launcher_line(
+        LAUNCHER_PRESS_PAD,
+        "Press a button for {button}. Esc cancels.",
+        "Waiting for a gamepad button; {button} is the pad's button",
     ),
     launcher(
         LAUNCHER_KEYS_DEFAULT,
@@ -131,11 +215,6 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         LAUNCHER_KEYS_CUSTOM,
         "your keys",
         "The controls line once a key was changed",
-    ),
-    launcher_line(
-        LAUNCHER_PICK_CONTROLS,
-        "Choose the keys of the buttons.",
-        "Help for the controls line",
     ),
     launcher_line(
         LAUNCHER_CONTROLS_HELP,
@@ -149,8 +228,8 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
     ),
     launcher(
         LAUNCHER_DEFAULT_KEYS,
-        "Default keys",
-        "The line that gives every button its default key",
+        "Defaults",
+        "The line that gives every button its default key or gamepad button",
     ),
     launcher(
         LAUNCHER_BACK,
@@ -161,6 +240,22 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
     launcher(LAUNCHER_DOWN, "Down", "The pad's down; up to 40 pixels"),
     launcher(LAUNCHER_LEFT, "Left", "The pad's left; up to 40 pixels"),
     launcher(LAUNCHER_RIGHT, "Right", "The pad's right; up to 40 pixels"),
+    launcher(
+        LAUNCHER_QUIT_QUESTION,
+        "Quit Re:Zoids Saga?",
+        "The question before closing, asked on Esc",
+    ),
+    launcher(
+        LAUNCHER_QUIT_UNSAVED,
+        "Progress not saved will be lost.",
+        "Under the question while the game plays",
+    ),
+    launcher(
+        LAUNCHER_YES,
+        "Yes",
+        "The answer that closes; up to 60 pixels",
+    ),
+    launcher(LAUNCHER_NO, "No", "The answer that stays; up to 60 pixels"),
     launcher_line(
         LAUNCHER_SUBTITLE,
         "A free port of Zoids Saga (GBA)",

@@ -182,6 +182,9 @@ pub enum Event {
     /// A key went down, by the backend's code for it, for choosing the
     /// keys of the buttons.
     Key(u32),
+    /// A gamepad's button went down, by the backend's code for it, for
+    /// choosing the gamepad's buttons.
+    Pad(u32),
 }
 
 /// A failure of the platform backend.

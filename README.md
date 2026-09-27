@@ -53,21 +53,29 @@ cargo build
 
 Run the launcher without arguments to get its own screen, **Re:Zoids Saga**: choose your
 ROM and, optionally, a translation (`.po`) in the system's file dialog, then Play (arrows
-move, X chooses, Z clears the translation, Return plays). Controls opens the keys of the
-pad's ten buttons: choose one and press its new key (Esc cancels; a key another button had
-swaps with it), or take the defaults back; the game plays with them from then on. The
+move, X chooses, Z clears the translation, Return plays). Options holds the window's size
+(×1 to ×6), fullscreen, the filter (sharp keeps whole multiples of the screen, smooth
+fills the window blending the pixels), the volume, and the buttons: Keyboard and Gamepad
+open the keys or gamepad buttons of the pad's ten buttons, where you choose one and press
+its new key or button (Esc cancels; one another button had swaps with it), or take the
+defaults back. Any gamepad connected plays: its D-pad or left stick moves, its right face
+button is A, the bottom one B, Start is START, Back is SELECT and the shoulders L and R,
+unless chosen otherwise. The game plays with these options from then on, also when given a
+ROM on the command line. The
 launcher tells whether the ROM is a verified dump, speaks the chosen translation's
 language (English without one), and remembers its choices in the user's settings folder (`launcher.cfg` under
 `re-zoids-saga/launcher`, where SDL keeps a program's preferences: Application Support
 on macOS, `~/.local/share` on Linux, AppData on Windows). Giving a ROM on the command
-line skips the screen, as below.
+line skips the screen, as below. Esc on the launcher's screen, or while the game plays,
+asks before closing (No is chosen at first; Esc again stays), and the game waits while it
+asks.
 
 ```bash
 cargo run -p launcher
 ```
 
 Play from the publisher logo through the title, the name entry and the opening into the
-first room (arrows move, holding Z while moving runs, X = A, Z = B, Return = START and opens the pause menu, Backspace = SELECT, A = L, S = R, Esc quits; F10 turns a debugging mode on and off: the roaming enemies are intangible, so the player walks through them without battles, and the protagonist's attacks beat whatever they hit); the title's オプション opens the Zoid and character guides (see [docs/guide.md](docs/guide.md)); music and sound effects play through the default audio device; the pause menu's セーブ and the title's つづきから use a `.sav` file next to the ROM, in the original's format, so saves move between this port, emulators and the cartridge (`--save <file.sav>` picks another file, see [docs/formats/save.md](docs/formats/save.md)); unlike the original, the port keeps four save slots, which both ask for: slot 1 is that `.sav` and slot n the same name with `.n` before the extension (`game.2.sav`), each a save an emulator loads (`--slots <n>` sets how many, 1 to 9; `--slots 1` is the original's single save); `--translation <file.po>` shows a downloaded translation and `--export-template <file.pot>` writes the template translators start from (see [docs/translation.md](docs/translation.md));
+first room (arrows move, holding Z while moving runs, X = A, Z = B, Return = START and opens the pause menu, Backspace = SELECT, A = L, S = R, Esc asks whether to quit; F10 turns a debugging mode on and off: the roaming enemies are intangible, so the player walks through them without battles, and the protagonist's attacks beat whatever they hit); the title's オプション opens the Zoid and character guides (see [docs/guide.md](docs/guide.md)); music and sound effects play through the default audio device; the pause menu's セーブ and the title's つづきから use a `.sav` file next to the ROM, in the original's format, so saves move between this port, emulators and the cartridge (`--save <file.sav>` picks another file, see [docs/formats/save.md](docs/formats/save.md)); unlike the original, the port keeps four save slots, which both ask for: slot 1 is that `.sav` and slot n the same name with `.n` before the extension (`game.2.sav`), each a save an emulator loads (`--slots <n>` sets how many, 1 to 9; `--slots 1` is the original's single save); `--translation <file.po>` shows a downloaded translation and `--export-template <file.pot>` writes the template translators start from (see [docs/translation.md](docs/translation.md));
 the port's story ends with chapter 1: on reaching Sand Colony the game thanks the player, offers to save and goes back to the title (see [docs/events.md](docs/events.md));
 `--room` skips straight to the first room; a `<table>_<index>` string id shows that
 script in its box instead; `--dump frame.ppm` writes a frame instead of opening a window

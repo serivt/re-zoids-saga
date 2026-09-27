@@ -1,16 +1,33 @@
 //! What the launcher remembers between runs: the ROM and the translation
-//! last played and the keys chosen for the buttons, one `key=value` line
-//! each, in the user's settings folder.
+//! last played, the window, the sound and the keys and gamepad buttons
+//! chosen for the pad's buttons, one `key=value` line each, in the user's
+//! settings folder.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use platform::Button;
+use platform_sdl3::Filter;
 
 const ROM_KEY: &str = "rom";
 const TRANSLATION_KEY: &str = "translation";
-/// A button's key: `key.<button>=<key name>`.
+/// A button's key: `key.<button>=<key name>`, and its gamepad button:
+/// `pad.<button>=<gamepad button name>`.
 const BUTTON_PREFIX: &str = "key.";
+const PAD_PREFIX: &str = "pad.";
+const SCALE_KEY: &str = "scale";
+const FULLSCREEN_KEY: &str = "fullscreen";
+const FILTER_KEY: &str = "filter";
+const VOLUME_KEY: &str = "volume";
+const SHARP: &str = "sharp";
+const SMOOTH: &str = "smooth";
+/// The window's size in multiples of the screen, its default and the
+/// sound's volume in percent.
+pub const SCALES: std::ops::RangeInclusive<u32> = 1..=6;
+/// See [`SCALES`].
+pub const DEFAULT_SCALE: u32 = 3;
+/// See [`SCALES`].
+pub const FULL_VOLUME: u8 = 100;
 /// The settings folder's organization and program names, and the file in
 /// it.
 pub const ORGANIZATION: &str = "re-zoids-saga";
@@ -20,7 +37,7 @@ pub const APP: &str = "launcher";
 pub const FILE_NAME: &str = "launcher.cfg";
 
 /// The launcher's remembered choices.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
     /// The ROM last played.
     pub rom: Option<PathBuf>,
@@ -29,6 +46,39 @@ pub struct Settings {
     /// The keys the player chose for buttons, by the backend's names; the
     /// others keep their defaults.
     pub keys: Vec<(Button, String)>,
+    /// The gamepad buttons the player chose, by the backend's names.
+    pub pad_buttons: Vec<(Button, String)>,
+    /// The window's size in multiples of the screen.
+    pub scale: u32,
+    /// Whether the game fills the screen.
+    pub fullscreen: bool,
+    /// How the screen is scaled up.
+    pub filter: Filter,
+    /// The sound's volume, in percent.
+    pub volume: u8,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            rom: None,
+            translation: None,
+            keys: Vec::new(),
+            pad_buttons: Vec::new(),
+            scale: DEFAULT_SCALE,
+            fullscreen: false,
+            filter: Filter::Sharp,
+            volume: FULL_VOLUME,
+        }
+    }
+}
+
+/// Sets `button`'s entry of `map` to `value`.
+fn bind(map: &mut Vec<(Button, String)>, button: Button, value: &str) {
+    if !value.is_empty() {
+        map.retain(|(bound, _)| *bound != button);
+        map.push((button, value.to_owned()));
+    }
 }
 
 impl Settings {
@@ -42,16 +92,30 @@ impl Settings {
             };
             let key = key.trim();
             if let Some(button) = key.strip_prefix(BUTTON_PREFIX).and_then(Button::from_name) {
-                if !value.is_empty() {
-                    settings.keys.retain(|(bound, _)| *bound != button);
-                    settings.keys.push((button, value.to_owned()));
-                }
+                bind(&mut settings.keys, button, value);
                 continue;
             }
-            let value = (!value.is_empty()).then(|| PathBuf::from(value));
+            if let Some(button) = key.strip_prefix(PAD_PREFIX).and_then(Button::from_name) {
+                bind(&mut settings.pad_buttons, button, value);
+                continue;
+            }
+            let path = (!value.is_empty()).then(|| PathBuf::from(value));
             match key {
-                ROM_KEY => settings.rom = value,
-                TRANSLATION_KEY => settings.translation = value,
+                ROM_KEY => settings.rom = path,
+                TRANSLATION_KEY => settings.translation = path,
+                SCALE_KEY => {
+                    if let Some(scale) = value.parse().ok().filter(|scale| SCALES.contains(scale)) {
+                        settings.scale = scale;
+                    }
+                }
+                FULLSCREEN_KEY => settings.fullscreen = value == "1",
+                FILTER_KEY if value == SMOOTH => settings.filter = Filter::Smooth,
+                FILTER_KEY => settings.filter = Filter::Sharp,
+                VOLUME_KEY => {
+                    if let Ok(volume) = value.parse::<u8>() {
+                        settings.volume = volume.min(FULL_VOLUME);
+                    }
+                }
                 _ => {}
             }
         }
@@ -72,8 +136,22 @@ impl Settings {
             path(&self.rom),
             path(&self.translation)
         );
+        let filter = match self.filter {
+            Filter::Sharp => SHARP,
+            Filter::Smooth => SMOOTH,
+        };
+        let _ = writeln!(
+            text,
+            "{SCALE_KEY}={}\n{FULLSCREEN_KEY}={}\n{FILTER_KEY}={filter}\n{VOLUME_KEY}={}",
+            self.scale,
+            u8::from(self.fullscreen),
+            self.volume
+        );
         for (button, key) in &self.keys {
             let _ = writeln!(text, "{BUTTON_PREFIX}{}={key}", button.name());
+        }
+        for (button, pad_button) in &self.pad_buttons {
+            let _ = writeln!(text, "{PAD_PREFIX}{}={pad_button}", button.name());
         }
         text
     }
@@ -109,6 +187,11 @@ mod tests {
                 (Button::A, "Space".to_owned()),
                 (Button::Up, "W".to_owned()),
             ],
+            pad_buttons: vec![(Button::B, "a".to_owned())],
+            scale: 4,
+            fullscreen: true,
+            filter: Filter::Smooth,
+            volume: 70,
         };
         assert_eq!(Settings::parse(&settings.to_text()), settings);
         let read = Settings::parse("# notes\ntranslation=es.po\nrom=a=b.gba\nother=1\n");
@@ -117,5 +200,10 @@ mod tests {
         assert_eq!(Settings::parse(""), Settings::default());
         let keys = Settings::parse("key.b=Q\nkey.b=E\nkey.turbo=T\nkey.a=\n").keys;
         assert_eq!(keys, [(Button::B, "E".to_owned())]);
+        let odd = Settings::parse("scale=40\nvolume=250\nfilter=blurry\nfullscreen=yes\n");
+        assert_eq!(
+            (odd.scale, odd.volume, odd.filter, odd.fullscreen),
+            (DEFAULT_SCALE, FULL_VOLUME, Filter::Sharp, false)
+        );
     }
 }
