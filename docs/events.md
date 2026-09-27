@@ -539,14 +539,13 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
 | 17, `mq0164` | `0x080110C8` | The corridor (above) | `0x12C`, `0x12D` |
 | 23, `mq0192` | `0x080113A8` | The space-time transfer device and story battle 1 (above); its task warps to map 48 and runs that map's scene | `0x12E` |
 | 48, `md0288` | `0x08012948` | The throne room's flashback and the landing past the Red River (map 30) (above); the chapter ends with the warp to map 31, Sand Colony, in area 2 | `0x143` |
-| 27, Dr. T's lab | `0x08009108` | The Zoid lab (kind 2 of the shops): revival, and the repair when it closes (see [shop.md](shop.md)) | |
+| 27, Dr. T's lab | `0x08009108` | The Zoid lab (kind 2 of the shops): revival, development, pilot change and sale, and the repair when it closes (see [shop.md](shop.md)) | |
 
 ## Not modeled yet
 
 - The fighting in battles, and the story battles (`0x08008D28`); the roaming enemies,
   meeting them, the battle screen's opening, its menu and retreating are described in
   [combat.md](combat.md).
-- The Zoid lab's development, pilot change and sale (see [shop.md](shop.md)).
 - Dr. T in the other areas: whether the party has the Zoids `0x90` or `0x8F`, and the
   game-state byte `+0x3320` (flags `0x140`, `0x141`).
 - The field's per-frame hooks (RAM `0x02000000`, `0x02000004`), which the world map's

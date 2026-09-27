@@ -25,8 +25,8 @@ and its conversations, the throne-room cutscene, the gate, the Zoid choice in th
 event, the drive across the world map, and Arcana's arrival (the soldiers, Roman and the
 room above the bar), its townsfolk, Dr. T and the teachers of deck commands, with the
 original timing (see [docs/events.md](docs/events.md)). The town's item and armaments
-shops buy and sell (see [docs/shop.md](docs/shop.md)); Dr. T's Zoid lab is not
-implemented yet. The throne
+shops buy and sell, and Dr. T's Zoid lab revives, develops Zoids from Zi data, changes
+pilots and buys Zoids back (see [docs/shop.md](docs/shop.md)). The throne
 room's two battle scenes play as in the original, shots included (see
 [docs/battle.md](docs/battle.md)). The world map's enemies roam and chase the party;
 meeting one opens the battle screen with its messages and menu, from which the party
