@@ -65,7 +65,9 @@ const MOUNTS: usize = 6;
 const MOUNT_Y: usize = 0xE;
 const PIECE_LEN: usize = 20;
 const PIECES_END: u16 = 0xFFFF;
-const PIECES_MAX: usize = 16;
+/// The most pieces a frame can have: the drawer (`0x08000560`) reads them
+/// until the end marker, into OAM's 128 entries.
+const PIECES_MAX: usize = 128;
 
 /// What a staged battle scene shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
