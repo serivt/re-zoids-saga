@@ -20,6 +20,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crashed the port, is named and refused, and so is any other dump or game; Play stays
   off and the command line stops with the same message.
 
+### Added
+
+- The story of chapter 4, with its events, conversations, story battles, shops,
+  teachers and Dr. T's lines outside the first area.
+
+### Changed
+
+- The demo ends at the start of chapter 5.
+
+### Fixed
+
+- Characters sharing a palette slot with another object show the colors the original
+  shows.
+
 ## [0.1.0] - 2026-09-27
 
 The first playable demo of *Zoids Saga* (Japan, Rev 1): the story from the title

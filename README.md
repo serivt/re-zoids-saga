@@ -13,10 +13,10 @@ legally obtained copy of the game.
 
 ## Status
 
-A playable demo of *Zoids Saga*: from the title through the first three chapters, with
+A playable demo of *Zoids Saga*: from the title through the first four chapters, with
 the towns, their shops and Zoid labs, battles against roaming and story enemies, the
 pause menu, saves compatible with the original and translations. The story stops at the
-start of chapter 4, where the game thanks the player and offers to save.
+start of chapter 5, where the game thanks the player and offers to save.
 
 ## Play
 
