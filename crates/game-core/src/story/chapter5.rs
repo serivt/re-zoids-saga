@@ -1101,10 +1101,6 @@ const TO_CHAPTER_6: &[Op] = &[
     Op::End,
 ];
 
-/// Where the port's story stops: chapter 6's first map once the final is
-/// won.
-pub(super) const STORY_END: (usize, u16) = (CHAPTER_6_START, MAIN_WINS[4]);
-
 const SOUTH_FIGHTS: [&[Op]; 5] = [
     fight!(10, &SOUTH_LOST, SOUTH_WINS[0], SOUTH_WON_0),
     fight!(11, &SOUTH_LOST, SOUTH_WINS[1], SOUTH_WON_1),

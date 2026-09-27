@@ -622,10 +622,84 @@ formation cut to three and its units given 9999 hit points on both sides. Every
 interval that no key bounds is equal but for the loads and the staged scenes' first
 shots (see [battle.md](battle.md)).
 
+## Chapter 6
+
+Source of knowledge: own reading of the area's map handlers (`0x0801B284` to
+`0x0801BF90`), the tasks and field hooks they install, the objects' code and the
+routines named below; checked against a reference emulator with saves patched to each
+scene's flags, as the earlier chapters'. Implemented in
+`crates/game-core/src/story/chapter6.rs`.
+
+Area 6 is maps 176 to 216: the plains (176), a Zoid map with the portal; the town below
+Miletos castle (177), the castle's grounds (178) and hall (179); Hagen City (182), its
+bar (183), the Zoid institute's gate (186) and hall (188); the ruins (194, whose scene
+loads their copy 216); Gray Colony (195); the hidden lab's door (198), passage (199) and
+rooms (200); and the Emperor's castle and the kingdom's base again (205 to 215). The
+chapter's story:
+
+| Where | Handler | Condition | What happens | Sets |
+|---|---|---|---|---|
+| 205 | `0x0801BF40` | not `0x194` | The characters of group 5 are met (`0x080099F0`); the opening (task `0x0801C028`): Blood and Obscura report (`0x18D`), Gale is sent for the Death Saurer's data (`0x18E`, `0x18F`); the soldiers sense the device (213, `0x190`); Jack brings the news (214, `0x191`) | `0x194` |
+| 176 | `0x0801B284` | `0x194`, not `0x195` | The portal brings the Gustav (task `0x0801C35C`, `0x193`); return point 16 | `0x195` |
+| 177 | `0x0801B584` | `0x195`, not `0x196` | The view sweeps the festive streets, two pixels a frame for 192 frames (task `0x0801C47C`, `0x194`) | `0x196` |
+| 177 | | not `0x19C` | The hook `0x0801B618` (x `0x98` to `0xD8`, y `0x60`): to song 6 the party spots Gale (task `0x0801C4E0`, `0x19A` to `0x19C`) and follows him to the castle's grounds (178, `0x19D`) | `0x19C` |
+| 179 | `0x0801B680` | `0x19C`, not `0x19D` | The hook `0x0801B6B4`: from the west doorway (x `0x28`, y `0x30` to `0x50`, task `0x0801C684`) or the east one (x `0x1B8`, task `0x0801CA80`, which keeps the map's song) the party walks to the throne, where Rosso's band attacks Rudolph (`0x19E`), a shot strikes Rosso twice (sound `0x7D`, `0x19F`) and the band carries the boy off (`0x1A0`, `0x1A1`); on the plains the party wonders about him (`0x1A2`) | `0x19D` |
+| 182 | `0x08006BAC` on (objects) | | Hagen City's people: `0x1A3` to `0x1AA` until `0x19D`, `0x36C` to `0x373` after | |
+| 183 | `0x0801B7A8` | `0x19D`, not `0x19E` | Stinger sizes the party up in the bar (task `0x0801CE90`, `0x1AB`, `0x1AC`) | `0x19E` |
+| 176 | | `0x19E`, not `0x19F` | The hook `0x0801B45C` (x up to `0x280` on y `0x140`, or (`0x280`, `0x180`)): the ambush (task `0x0801D328`): the plains load again around the party, gas bursts around it from three helpers (`0x0801D500`, `0x0801D52C`, `0x0801D558`, `0x08016CA8` near the player's cell) while it wonders (`0x1B0`), Stinger drives up (`0x1B1`, `0x1B2`) and story battle 26 follows (hook `0x0801D42C`); won, she gets away (`0x1B3`) | `0x19F` |
+| 183 | | `0x19F`, not `0x1A0` | Stinger caught in the bar (task `0x0801D1C8`, `0x1AD` to `0x1AF`) | `0x1A0` |
+| 176 | | `0x19F`, not `0x1A1` | The hook `0x0801B4C4` (`0x360`, `0xA0`): the wrecked Iron Kongs, to the danger song (task `0x0801D594`, `0x1B4`) | `0x1A1` |
+| 194 | `0x0801BA40` | `0x1A1`, not `0x1A2` | Rosso's band in the ruins (task `0x0801D5E4`): Rosso and Viola hurt (`0x1B5`, `0x1B6`); Rosso asks to come along (`0x1B7`): taken, they join (`0x1B8`, lists 22 and 23, flag `0x1A4`), refused, they leave (`0x1B9`, `0x1BA`); further in, too late (`0x1BB`) | `0x1A2` |
+| 176 | | `0x1A2`, not `0x1A3` | The hook `0x0801B524` (`0x2C0`, `0xE0`): Raven's attack (task `0x0801D9A0`): blasts beyond the ridge (`0x1BC`), battle scene 20, the Wolves blow up (`0x1BD`, `0x1BE`); with Rosso, he gives a Zi data (`0x5B`) and leaves with Viola (`0x1BF`), else the beam flashes (`0x1C1`); the agent flees; to song 5 the view sweeps to Van facing Raven (`0x1C2`, `0x1C3`), battle scenes 4 and 5, `0x1C4`, `0x1C5`, battle scene 6, Fiene cries out (`0x1C6`) and Dr. D comes (`0x1C7`) | `0x1A3` |
+| 195 | `0x0801BAB8` | `0x1A3`, not `0x1A5` | Gray Colony talks of a lab in the mountains (task `0x0801DF24`, `0x1C8`) | `0x1A5` |
+| 198 | `0x0801BB40` | `0x1A5`, not `0x1A6` | To the danger song the view climbs to the lab (task `0x0801DF6C`, `0x1CE`); before `0x1A5`, the party backs off to the plains (task `0x0801DFF8`, `0x1CD`) | `0x1A6` |
+| 199, 200 | `0x0801BC04`, `0x0801BE94` | | The guards (objects 4 and 5 of 199, 1 to 5 of 200) look every frame (`0x0801BC2C`, see [field.md](field.md), Guards); a guard that sees the player stops, the player turns to it and the party is put out at the door (task `0x0801BD9C`, `0x1CF`) | |
+| 200 | | `0x1A6`, not `0x1A7` | The hook `0x0801BED8` (`0xE8`, `0x60`): the wrecked room (task `0x0801E20C`): a scientist tells of the Death Saurer (`0x1D0` to `0x1D2`; `0x08011EAC` moves an object a pixel a frame) | `0x1A7` |
+| 176 | | `0x1A7`, not `0x1A8` | To the enemy's song Raven finds Gale (task `0x0801E044`, `0x1D3`, `0x1D4`), battle scene 7 (Gale's smoke), and Gale calls Jack to Hagen City's institute as Raven chases him (task `0x0801E0F8`, `0x1D5` to `0x1D8`) | `0x1A8` |
+| 186 | `0x0801B8C4` | `0x1A8`, not `0x1A9` | The party walks into the institute (task `0x0801E48C`, `0x1DA`); from then on the gate's soldier is gone | `0x1A9` |
+| 188 | `0x0801B960` | `0x1A9`, not `0x1AA` | The hall loads where the party stands with Prozen; the hook `0x0801B9B8` (`0x78`, `0xB0`): Prozen shows the Death Saurer's prototype and leaves (task `0x0801E5E8`, `0x1DB` to `0x1DE`); on the plains story battle 27 (hook `0x0801E7BC`) | `0x1AA` |
+| 176 | | `0x1AA`, not `0x19B` | Gale comes (`0x0801E848`, `0x1DF`, `0x1E0`), the first time with Van and Irvine (`0x1E1`, lists 24 and 25, flag `0x19A`); story battle 28 (hook `0x0801E970`); won, they part (task `0x0801E9E0`, `0x1E2` to `0x1E5`, lists 24 and 25 leave) and the hook `0x0801EAA8` warps to map 225, chapter 7's first | `0x19B` |
+
+Raven's beam flashes the field white (`0x0801D93C`, `0x0801D968`): a callback sets
+`BLDCNT` to `0xBE`, every layer brightened toward white, and `BLDY` rises a level every
+other frame to 16 while the beam's sound (`0x81`) plays, then falls back to 0; the task
+waits for it. The staged scenes run through `0x08012040`, which plays the Liger's song,
+the scene or the `0xFF`-ended list of scenes, and the song that played before (see
+[battle.md](battle.md)).
+
+The hooks at `0x0801B45C`, `0x0801B4C4` and `0x0801B524` set bit 1 of the field's state
+halfword (`0x02000008`), so no roaming enemy meets the party while their scenes run;
+the wrecks' task clears it, and otherwise the next map's handler does: every handler
+starts with `0x0800BEE4`, which clears the halfword, or `0x0800802C`, which clears it
+unless its bit 0 is set.
+
+The teachers use `0x08012090`: deck commands 23 and 8 (`0x08006B98`, `0x08006CD4`), and
+3 (`0x080094A4` through `0x08009430`). The keepers (`0x080092AC` on): item shops 9 to
+12, armaments shops 17 to 19, and the labs 11 and 20.
+
+What the chapter needed of the engine: the enemies kept away (`Op::Calm`), the white
+flash (`Op::Whiten`), the guards' sight (`Op::IfSeen`, `Op::FaceSeenGuard`), objects
+placed and glided relative to the player's cell (`Op::PlaceNearPlayer`,
+`Op::GlideNearPlayer`), animations stopped at their end (`Op::Once`), and a staged
+scene's reaction line.
+
+Checked against the original, scene by scene from patched saves: the opening, the
+arrival, the town's view, Gale's sighting, both ways into the castle's hall, both bar
+scenes, the ambush to Stinger's battle (her escape on each side's own run, the battle
+lasting longer in the port), the wrecks, Rosso's band, Raven's
+attack with and without Rosso in the party, Gray Colony, the lab's door both ways, the
+wrecked room, a guard's catch, Raven and Gale, the institute, Prozen and the prototype's
+battle, and Gale's battle to chapter 7's first map, with the enemies' hit points kept at
+1 in the original and the protagonist overpowered in the port, the units given 9999 hit
+points on both sides for Stinger's battle. Every interval that no key bounds is equal
+but for the loads, the staged scenes' first shots, and the guards' wandering after a
+continue (the random numbers' state then differs, see [field.md](field.md)); a guard
+sees the player on the frame after it stands, as in the original.
+
 ## The end of the demo (a port feature)
 
-Source of knowledge: this project's own design. The port's story stops where chapter 5
-does, in chapter 6's first map (205) once the colosseum's final is won (flag `0x18E`).
+Source of knowledge: this project's own design. The port's story stops where chapter 6
+does, in chapter 7's first map (225) once Gale is beaten (flag `0x19B`).
 When
 the player walks freely there in full light (after the scene's fade in, or after
 continuing a save made there), the game waits a second and ends the demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the
@@ -693,10 +767,10 @@ Story battles 10–24 and 32 are not called with a constant: they come from else
   takes it away. The chapter's way into map 23 does not need it: the corridor (17)
   leads through maps 18, 19 and 21 to map 23's left entrance, (0, 3), where its
   handler stands the player; map 20 is the factory's other door, from the world map.
-- Chapters 2 to 5: the time the original's loader takes for each map (the cutscene
+- Chapters 2 to 6: the time the original's loader takes for each map (the cutscene
   loads and warps of Sand Colony, the deserts, the ruins and the later chapters' Zoid
   maps take 10 to 30 frames longer than the port's estimate, see "Chapter 2" to
-  "Chapter 5" above), and the page turns of a message under keys pressed every other frame, which
+  "Chapter 6" above), and the page turns of a message under keys pressed every other frame, which
   the original takes two frames longer to accept.
 - A portal's wait for the cell below it to clear before it brings someone out (see
   [field.md](field.md), Portals).
