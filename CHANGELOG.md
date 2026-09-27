@@ -26,10 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   teachers and Dr. T's lines outside the first area.
 - The story of chapter 5: the colosseum's three tournaments with their regulations and
   arena, and the final's staged battle scenes.
+- The story of chapter 6, with the hidden lab's guards, Raven's white flash and the
+  staged battle scenes whose target speaks its own line.
 
 ### Changed
 
-- The demo ends at the start of chapter 6.
+- The demo ends at the start of chapter 7.
 
 ### Fixed
 
