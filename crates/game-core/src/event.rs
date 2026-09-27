@@ -853,6 +853,16 @@ impl Events {
         self.tasks.get(slot).is_some_and(Option::is_some)
     }
 
+    /// Whether `program`, run as a handler the game called directly (see
+    /// [`Events::run_now`]), is still running.
+    #[must_use]
+    pub fn runs_handler(&self, program: &'static [Op]) -> bool {
+        self.tasks[IMMEDIATE]
+            .as_ref()
+            .and_then(|task| task.frames.first())
+            .is_some_and(|frame| std::ptr::eq(frame.program, program))
+    }
+
     /// Starts `program` in `slot`, replacing what runs there.
     pub fn spawn(&mut self, slot: usize, program: &'static [Op]) {
         // The original's load runs within the task's own call: a map's
@@ -2334,6 +2344,21 @@ mod tests {
         assert_eq!(host.log, ["dialogue 40", "music 3"]);
         assert!(!events.holding());
         assert_eq!(events.update_hold(false, &mut host), HoldStep::Free);
+    }
+
+    const SEARCHING: &[Op] = &[Op::Sound(0x48), Op::Wait(2), Op::Sound(1)];
+
+    #[test]
+    fn a_handler_runs_until_its_last_wait_ends() {
+        let mut events = Events::new();
+        let mut host = Host::default();
+        events.run_now(SEARCHING, &mut host);
+        assert!(events.runs_handler(SEARCHING));
+        assert!(!events.runs_handler(SHOPPING));
+        events.update(&mut host);
+        assert!(events.runs_handler(SEARCHING));
+        events.update(&mut host);
+        assert!(!events.runs_handler(SEARCHING));
     }
 
     const SHOPPING: &[Op] = &[

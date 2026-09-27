@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Searching a chest freezes the field until its reward is announced, as in the
+  original: pressing A again no longer starts the search over, which kept a player who
+  pressed A repeatedly from ever getting the reward.
 - Music and sound effects mix as the original's sound driver does: the sampled channels'
   buffer equals the driver's byte for byte (interpolation, volumes, wrapping, reverb),
   notes take channels by the driver's priorities, vibrato has its full depth, and the

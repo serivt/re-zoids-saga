@@ -1282,6 +1282,9 @@ impl<'rom> Game<'rom> {
         }
     }
 
+    /// A frame on the field. While a chest is searched no actor moves,
+    /// animates or reads the keys: the search waits within the player's
+    /// update (`0x0800B938`) until the reward.
     fn update_field(&mut self, input: Input) -> Result<(), GameError> {
         if self.field.is_none() {
             return Ok(());
@@ -1346,7 +1349,11 @@ impl<'rom> Game<'rom> {
             return Ok(());
         }
         self.update_events(|events, host| events.update_watch(host))?;
-        let event = self.field.as_mut().and_then(|field| field.update(input));
+        let event = if self.events.runs_handler(story::CHEST) {
+            None
+        } else {
+            self.field.as_mut().and_then(|field| field.update(input))
+        };
         if let Some(field) = self.field.as_mut() {
             AreaObjects::record(&mut self.state, field);
             for sound in field.take_sounds() {

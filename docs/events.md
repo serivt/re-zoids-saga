@@ -154,8 +154,12 @@ core (a byte each, `0xFF` for none) and two unused bytes.
 Opening one plays sound `0x46` for `tb00` or `0x48` for `tb01` and switches the chest to
 its open animation (1). After 30 frames it sets the flag and runs the reward routine
 (`0x080376A8`): dialogue `0x1F` opens the message box, the one reward the chest gives is
-announced, and dialogue `0x22` closes it. The routine checks the fields in this order and
-gives the first one there:
+announced, and dialogue `0x22` closes it. The 30 frames are waited within the player's
+update (`0x0800B938` calls `0x0805EF90` with `0x1E`), so nothing on the field moves or
+animates and the keys go unread until the reward: pressing A again does not search the
+chest a second time. Checked against a reference emulator with A pressed every other
+frame at a chest of map 157: the party and the chest match picture for picture through
+the wait. The routine checks the fields in this order and gives the first one there:
 
 | Reward | What it adds | Message |
 |---|---|---|
