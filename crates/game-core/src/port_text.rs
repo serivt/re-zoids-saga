@@ -73,8 +73,10 @@ pub const LAUNCHER_PICK_ROM: &str = "port/launcher/pick-rom";
 pub const LAUNCHER_PICK_TRANSLATION: &str = "port/launcher/pick-translation";
 /// The ROM is the known release.
 pub const LAUNCHER_ROM_VERIFIED: &str = "port/launcher/rom-verified";
-/// The ROM is the game but not the known dump.
-pub const LAUNCHER_ROM_UNVERIFIED: &str = "port/launcher/rom-unverified";
+/// The ROM is the game's first release, which the port does not play.
+pub const LAUNCHER_ROM_FIRST_RELEASE: &str = "port/launcher/rom-first-release";
+/// The ROM is the game but not the known dump, which the port does not play.
+pub const LAUNCHER_ROM_UNSUPPORTED: &str = "port/launcher/rom-unsupported";
 /// The ROM is not a game the port plays.
 pub const LAUNCHER_ROM_OTHER: &str = "port/launcher/rom-other";
 /// The ROM cannot be opened or identified.
@@ -316,9 +318,14 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         "The ROM is the known release",
     ),
     launcher_line(
-        LAUNCHER_ROM_UNVERIFIED,
-        "Zoids Saga, but not a verified dump.",
-        "The ROM looks like the game but is not the known dump",
+        LAUNCHER_ROM_FIRST_RELEASE,
+        "Original release: the port needs Rev 1.",
+        "The ROM is the game's first release (Rev 0), which the port does not play",
+    ),
+    launcher_line(
+        LAUNCHER_ROM_UNSUPPORTED,
+        "Unknown dump: the port needs Rev 1.",
+        "The ROM looks like the game but is not the known dump, which the port does not play",
     ),
     launcher_line(
         LAUNCHER_ROM_OTHER,

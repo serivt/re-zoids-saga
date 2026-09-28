@@ -75,6 +75,10 @@ and the architecture, rules and project structure in [AGENTS.md](AGENTS.md).
 |---|---|---|---|
 | Zoids Saga (Rev 1) | Japan | `ATZJ` | `70bb546a7d00126d452c1d2c1ccddafb2cb91b37` |
 
+Only this dump plays. The first release, Zoids Saga (Japan) without "Rev 1", keeps its
+data at other addresses and retouches texts and records, so the launcher names it and
+refuses it, as it refuses any other dump or game.
+
 ## License
 
 GPL-3.0-only. See [LICENSE](LICENSE). The game's ROM, BIOS images, saves and any content

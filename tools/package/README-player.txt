@@ -4,6 +4,8 @@ Re:Zoids Saga
 A free, native port of Zoids Saga (Game Boy Advance, Japan). This package
 holds only the program: no part of the game comes with it. You need your
 own copy of the Zoids Saga ROM (Japan, Rev 1), dumped from your cartridge.
+The first release (without "Rev 1") and other dumps are not supported: the
+launcher tells you so and does not start them.
 
 This demo plays the first three chapters, from the title to the party's
 return from the Mount Ossa fortress.

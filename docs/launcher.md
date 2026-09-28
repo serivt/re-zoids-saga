@@ -6,8 +6,10 @@ Source of knowledge: this project's own design. Implemented in `apps/launcher`.
 
 Run without arguments, the launcher shows its own screen, **Re:Zoids Saga**: choose your
 ROM and, optionally, a translation (`.po`) in the system's file dialog, then Play (arrows
-move, X chooses, Z clears the translation, Return plays). It tells whether the ROM is a
-verified dump and speaks the chosen translation's language (English without one). The
+move, X chooses, Z clears the translation, Return plays). Only the verified dump,
+Zoids Saga (Japan, Rev 1), plays: for the first release (Rev 0), another dump of the
+game or another game it says so and Play stays off, and the command line refuses them
+the same way. It speaks the chosen translation's language (English without one). The
 port's version shows in the top right corner.
 
 Options holds:

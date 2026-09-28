@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use extraction::Title;
+use extraction::{Identification, IdentifyError, Title};
 use game_core::port_text::{
     LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_BACK, LAUNCHER_CONTROLS_HELP,
     LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_FILTER, LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD,
@@ -24,10 +24,11 @@ use game_core::port_text::{
     LAUNCHER_PAGE_UNOPENED, LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM,
     LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY, LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD,
     LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT, LAUNCHER_ROM,
-    LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNVERIFIED, LAUNCHER_ROM_VERIFIED,
-    LAUNCHER_SHARP, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TRANSLATION,
-    LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE,
-    LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WINDOW, default_text,
+    LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
+    LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SHARP, LAUNCHER_SMOOTH,
+    LAUNCHER_SUBTITLE, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_READ,
+    LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_VERSION,
+    LAUNCHER_VOLUME, LAUNCHER_WINDOW, default_text,
 };
 use game_core::{TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -166,33 +167,56 @@ const BUTTON_ROWS: usize = 5;
 const DEFAULTS_ENTRY: usize = Button::ALL.len();
 const BACK_ENTRY: usize = DEFAULTS_ENTRY + 1;
 
-/// What the chosen ROM is.
+/// What the chosen ROM is. Only the verified dump of Zoids Saga (Japan,
+/// Rev 1) plays: every table the port reads sits where that release keeps
+/// it, and the first release (Rev 0) keeps its data elsewhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RomKind {
+pub enum RomKind {
     Verified,
-    Unverified,
+    FirstRelease,
+    Unsupported,
     Other,
     Unreadable,
 }
 
 impl RomKind {
-    /// Identifies the ROM at `path`.
+    /// Identifies the ROM at `path`: another game's header makes it
+    /// [`Self::Other`], a file without a valid header [`Self::Unreadable`].
     fn of(path: &Path) -> Self {
-        let identification = std::fs::read(path)
-            .ok()
-            .and_then(|bytes| extraction::identify(&bytes).ok());
-        match identification {
-            Some(found) if found.title == Title::Saga && found.known_release.is_some() => {
-                Self::Verified
-            }
-            Some(found) if found.title == Title::Saga => Self::Unverified,
-            Some(_) => Self::Other,
-            None => Self::Unreadable,
+        match std::fs::read(path).map(|bytes| extraction::identify(&bytes)) {
+            Ok(Ok(found)) => Self::identified(&found),
+            Ok(Err(IdentifyError::UnsupportedGame { .. })) => Self::Other,
+            Ok(Err(_)) | Err(_) => Self::Unreadable,
         }
     }
 
-    fn playable(self) -> bool {
-        matches!(self, Self::Verified | Self::Unverified)
+    /// What an identified ROM is.
+    pub fn identified(found: &Identification) -> Self {
+        if found.title != Title::Saga {
+            Self::Other
+        } else if found.known_release.is_some() {
+            Self::Verified
+        } else if found.header.version == 0 {
+            Self::FirstRelease
+        } else {
+            Self::Unsupported
+        }
+    }
+
+    /// Whether the port plays it.
+    pub fn playable(self) -> bool {
+        self == Self::Verified
+    }
+
+    /// The key of the port's message that tells what it is.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Verified => LAUNCHER_ROM_VERIFIED,
+            Self::FirstRelease => LAUNCHER_ROM_FIRST_RELEASE,
+            Self::Unsupported => LAUNCHER_ROM_UNSUPPORTED,
+            Self::Other => LAUNCHER_ROM_OTHER,
+            Self::Unreadable => LAUNCHER_ROM_UNREADABLE,
+        }
     }
 }
 
@@ -1016,15 +1040,7 @@ impl Front {
                 Some((_, kind)) if LINES[self.line] == Line::Play && kind.playable() => {
                     (self.text(LAUNCHER_READY), GOOD)
                 }
-                Some((_, kind)) => {
-                    let key = match kind {
-                        RomKind::Verified => LAUNCHER_ROM_VERIFIED,
-                        RomKind::Unverified => LAUNCHER_ROM_UNVERIFIED,
-                        RomKind::Other => LAUNCHER_ROM_OTHER,
-                        RomKind::Unreadable => LAUNCHER_ROM_UNREADABLE,
-                    };
-                    (self.text(key), kind_color(*kind))
-                }
+                Some((_, kind)) => (self.text(kind.message()), kind_color(*kind)),
             },
             Line::Translation => match &self.translation {
                 Some((_, Some(translation))) => (
@@ -1155,8 +1171,7 @@ fn line_index(line: Line) -> usize {
 fn kind_color(kind: RomKind) -> Rgb {
     match kind {
         RomKind::Verified => GOOD,
-        RomKind::Unverified => WARNING,
-        RomKind::Other | RomKind::Unreadable => BAD,
+        RomKind::FirstRelease | RomKind::Unsupported | RomKind::Other | RomKind::Unreadable => BAD,
     }
 }
 
@@ -1319,6 +1334,41 @@ mod tests {
             .iter()
             .position(|shown| *shown == setting)
             .expect("listed")
+    }
+
+    /// A header-only image with `game_code` and software version `version`.
+    fn synthetic_rom(name: &str, game_code: [u8; 4], version: u8) -> PathBuf {
+        use formats::rom_header::{HEADER_LEN, complement};
+        let mut rom = vec![0u8; HEADER_LEN + 16];
+        rom[0xA0..0xA4].copy_from_slice(b"TEST");
+        rom[0xAC..0xB0].copy_from_slice(&game_code);
+        rom[0xB0..0xB2].copy_from_slice(b"DA");
+        rom[0xB2] = 0x96;
+        rom[0xBC] = version;
+        rom[0xBD] = complement(&rom);
+        let path = scratch(name);
+        std::fs::write(&path, rom).expect("writable");
+        path
+    }
+
+    #[test]
+    fn only_the_verified_dump_plays() {
+        let kind =
+            |name, code: &[u8; 4], version| RomKind::of(&synthetic_rom(name, *code, version));
+        assert_eq!(kind("rev0.gba", b"ATZJ", 0), RomKind::FirstRelease);
+        assert_eq!(kind("rev1.gba", b"ATZJ", 1), RomKind::Unsupported);
+        assert_eq!(kind("fuzors.gba", b"BZFJ", 0), RomKind::Other);
+        assert_eq!(kind("other.gba", b"AXYZ", 0), RomKind::Other);
+        for kind in [
+            RomKind::FirstRelease,
+            RomKind::Unsupported,
+            RomKind::Other,
+            RomKind::Unreadable,
+        ] {
+            assert!(!kind.playable());
+            assert!(default_text(kind.message()).is_some());
+        }
+        assert!(RomKind::Verified.playable());
     }
 
     #[test]

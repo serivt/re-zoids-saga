@@ -88,6 +88,13 @@ fn main() -> Result<()> {
     let identification = extraction::identify(&rom)
         .with_context(|| format!("cannot identify ROM {}", rom_path.display()))?;
     print_identification(&identification);
+    let kind = front::RomKind::identified(&identification);
+    if !kind.playable() {
+        bail!(
+            "{}",
+            game_core::port_text::default_text(kind.message()).unwrap_or_default()
+        );
+    }
     let title = identification.title.to_string();
     if let Some(string_id) = &options.string_id {
         let frame = render_string(&rom, identification.title, string_id)?;
@@ -95,9 +102,6 @@ fn main() -> Result<()> {
             Some(path) => write_ppm(path, &frame),
             None => show(&title, &frame),
         };
-    }
-    if identification.title != Title::Saga {
-        bail!("the field is only implemented for {}", Title::Saga);
     }
     if let Some((path, scopes)) = &options.template {
         return export_template(&rom, path, scopes);
@@ -257,7 +261,7 @@ fn print_identification(identification: &Identification) {
             "Dump:       verified ({} rev {})",
             release.region, release.version
         ),
-        None => println!("Dump:       not a validated dump; behavior may differ"),
+        None => println!("Dump:       not the supported dump"),
     }
 }
 
