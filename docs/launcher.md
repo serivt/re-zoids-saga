@@ -5,8 +5,20 @@ Source of knowledge: this project's own design. Implemented in `apps/launcher`.
 ## Its screen
 
 Run without arguments, the launcher shows its own screen, **Re:Zoids Saga**: choose your
-ROM and, optionally, a translation (`.po`) in the system's file dialog, then Play (arrows
-move, X chooses, Z clears the translation, Return plays). Only the verified dump,
+ROM in the system's file dialog and, optionally, a translation, then Play (arrows move, X
+chooses, Z clears the translation, Return plays; a touch or a click chooses the line
+under it).
+
+The Translation line opens a screen of its own: *From a file...* opens a PO file in the
+system's dialog, and below it every language the translations' repository offers
+([re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations),
+listed in its `po/languages.json`) downloads that language's PO file, checks that it
+reads, keeps it in the launcher's settings folder as `<code>.po` and chooses it; a
+language already kept says *downloaded*, and choosing it again downloads the latest
+corrections. This is the only time the launcher goes online, and only when asked: it
+fetches the list when the screen opens and a file when a language is chosen, over HTTPS
+from `raw.githubusercontent.com`, and sends nothing else. Without a connection the
+screen says so and a file can still be opened. Only the verified dump,
 Zoids Saga (Japan, Rev 1), plays: for the first release (Rev 0), another dump of the
 game or another game it says so and Play stays off, and the command line refuses them
 the same way. It speaks the chosen translation's language (English without one). The

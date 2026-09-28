@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arena, and the final's staged battle scenes.
 - The story of chapter 6, with the hidden lab's guards, Raven's white flash and the
   staged battle scenes whose target speaks its own line.
+- **Translations to download.** The launcher's Translation line opens a screen that
+  lists the languages of the translations' repository and downloads the one chosen,
+  keeping it for offline play (choosing it again brings the latest corrections), or
+  opens a PO file as before. The launcher goes online only then, when asked.
+- **Android.** An APK to install directly (it is not in any store): the same launcher
+  and game on SDL3 for Android, with an on-screen pad around the game's screen in either
+  orientation, taps on the launcher's lines, the whole screen, and the ROM and the
+  translation copied from Android's file dialog into the app. Built with
+  `tools/package/android.sh`.
+- **Taps and clicks on the launcher.** A touch or a click chooses the line under it; the
+  desktop can show the on-screen pad with `--touch`.
 
 ### Changed
 

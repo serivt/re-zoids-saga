@@ -32,8 +32,10 @@ Japanese alongside and checking the files.
    beside a translation to edit it with any PO editor, and `tools/strip_source.py`
    takes it out again before the file is committed; `tools/check.py` refuses Japanese
    in a published file.
-3. A player downloads the PO file of their language from that repository and starts
-   the game with it:
+3. A player downloads their language from the launcher's Translation screen, which
+   lists the languages of that repository's `po/languages.json` and keeps the one chosen
+   (see [launcher.md](launcher.md)), or downloads the PO file by hand and starts the game
+   with it:
 
    ```bash
    launcher baserom.gba --translation es.po

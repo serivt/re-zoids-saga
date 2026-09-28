@@ -38,7 +38,10 @@ Linux    Unpack the folder anywhere and run ./re-zoids-saga. It needs a
 The launcher
 ------------
 
-Choose your ROM and, if you like, a translation (.po file), then Play.
+Choose your ROM and, if you like, a translation, then Play. The
+Translation line downloads a language from the translations' site, or
+opens a .po file you already have; the launcher only goes online when you
+ask it to download one.
 Options holds the window's size, fullscreen, the filter, the volume, and
 the keys and gamepad buttons. Your choices are remembered.
 
