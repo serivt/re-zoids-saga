@@ -29,7 +29,9 @@ start of chapter 4, where the game thanks the player and offers to save.
      so the first time right-click it and choose Open (on recent versions, System
      Settings › Privacy & Security › Open Anyway).
    - **Windows:** unzip the folder anywhere and run `re-zoids-saga.exe`. If SmartScreen
-     warns, choose More info › Run anyway.
+     warns, choose More info › Run anyway. If Microsoft Defender removes the download
+     as a threat, it is a false alarm about a new unsigned program: in Windows Security
+     › Virus & threat protection › Protection history, choose Allow on device.
    - **Linux:** unpack the folder anywhere and run `./re-zoids-saga`.
 3. Choose your Zoids Saga ROM (Japan, Rev 1) and, optionally, a translation (`.po`,
    from [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations)),

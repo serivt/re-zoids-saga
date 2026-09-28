@@ -68,7 +68,7 @@ fn main() -> Result<()> {
         return write_ppm(path, &frame);
     }
     if options.rom_path.is_none() {
-        let mut shown = Sdl3Display::open(
+        let mut shown = open_window(
             front::PROJECT_NAME,
             SCREEN_WIDTH,
             SCREEN_HEIGHT,
@@ -142,6 +142,20 @@ fn main() -> Result<()> {
         }
         None => play(display, &mut game, &settings.unwrap_or_else(saved_settings)),
     }
+}
+
+/// The window's icon (`assets/icons`, see `tools/package/icons.py`).
+const ICON: &[u8] = include_bytes!("../../../assets/icons/re-zoids-saga-128.rgba");
+const ICON_SIDE: u32 = 128;
+
+/// Opens the window, with the project's icon; a missing icon is only
+/// reported.
+fn open_window(title: &str, width: usize, height: usize, scale: u32) -> Result<Sdl3Display> {
+    let mut display = Sdl3Display::open(title, width, height, scale)?;
+    if let Err(error) = display.set_icon(ICON, ICON_SIDE) {
+        eprintln!("Icon:       {error}");
+    }
+    Ok(display)
 }
 
 /// The settings the launcher's screen remembered, or the defaults.
@@ -279,7 +293,7 @@ fn render_string(rom: &[u8], title: Title, string_id: &str) -> Result<Frame> {
 }
 
 fn show(title: &str, frame: &Frame) -> Result<()> {
-    let mut display = Sdl3Display::open(title, frame.width(), frame.height(), WINDOW_SCALE)?;
+    let mut display = open_window(title, frame.width(), frame.height(), WINDOW_SCALE)?;
     loop {
         if display
             .poll_events()
@@ -305,7 +319,7 @@ fn play(
     let mut display = if let Some(display) = display {
         display
     } else {
-        let mut display = Sdl3Display::open(
+        let mut display = open_window(
             front::PROJECT_NAME,
             SCREEN_WIDTH,
             SCREEN_HEIGHT,

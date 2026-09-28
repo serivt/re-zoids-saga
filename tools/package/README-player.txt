@@ -20,7 +20,11 @@ macOS    Drag "Re Zoids Saga" to Applications and open it. The app is not
 
 Windows  Unzip the folder anywhere and run re-zoids-saga.exe. The program
          is not signed, so Windows may show "Windows protected your PC":
-         choose "More info", then "Run anyway".
+         choose "More info", then "Run anyway". If Microsoft Defender
+         removes the download or the program as a threat, it is a false
+         alarm about a new unsigned program: open Windows Security >
+         Virus & threat protection > Protection history, and choose
+         "Allow on device".
 
 Linux    Unpack the folder anywhere and run ./re-zoids-saga. It needs a
          desktop with X11 or Wayland; the file dialog uses the desktop's

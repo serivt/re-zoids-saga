@@ -15,6 +15,7 @@ use sdl3::event::Event as SdlEvent;
 use sdl3::keyboard::{Keycode, Scancode};
 use sdl3::pixels::PixelFormat;
 use sdl3::render::{ScaleMode, TextureCreator, WindowCanvas};
+use sdl3::surface::Surface;
 use sdl3::sys::render::{
     SDL_LOGICAL_PRESENTATION_INTEGER_SCALE, SDL_LOGICAL_PRESENTATION_LETTERBOX,
 };
@@ -114,6 +115,32 @@ impl Sdl3Display {
 }
 
 impl Sdl3Display {
+    /// Gives the window the icon `rgba`: `side` by `side` pixels, 8-bit
+    /// RGBA, rows top to bottom.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlatformError`] when the pixels do not make a square of
+    /// `side`, or SDL cannot take them.
+    pub fn set_icon(&mut self, rgba: &[u8], side: u32) -> Result<(), PlatformError> {
+        let pitch = side * 4;
+        let length = usize::try_from(pitch * side).map_err(backend_error)?;
+        if rgba.len() != length {
+            return Err(backend_error(format!(
+                "an icon of {} bytes is not {side} by {side} RGBA pixels",
+                rgba.len()
+            )));
+        }
+        let mut pixels = rgba.to_vec();
+        let surface = Surface::from_data(&mut pixels, side, side, pitch, PixelFormat::RGBA32)
+            .map_err(backend_error)?;
+        if self.canvas.window_mut().set_icon(surface) {
+            Ok(())
+        } else {
+            Err(backend_error("the window refused its icon"))
+        }
+    }
+
     /// Opens the default playback device for interleaved stereo 16-bit
     /// samples at `rate` hertz; the backend converts to what the device
     /// wants.

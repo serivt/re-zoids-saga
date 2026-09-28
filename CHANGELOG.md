@@ -64,5 +64,5 @@ systems; link-cable play is not implemented.
   protagonist).
 - **Packaged builds** for macOS (universal disk image), Windows and Linux that run
   without SDL3 installed, which GitHub Actions attaches to each published release.
-
-[0.1.0]: https://github.com/serivt/re-zoids-saga/releases/tag/v0.1.0
+  They carry the project's icon (the app, the Windows program and every window), and
+  the Windows program its version information.

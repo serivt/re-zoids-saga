@@ -41,7 +41,22 @@ instructions.
 The programs are not signed by an identified developer: macOS asks to confirm the
 first opening (right-click, Open), and Windows SmartScreen asks to run anyway. The
 players' instructions explain both. Removing the warnings needs an Apple Developer
-ID with notarization and a Windows code-signing certificate.
+ID with notarization and a Windows code-signing certificate. Unsigned programs with
+little reputation can also be flagged by antivirus heuristics (Microsoft Defender's
+`...!ml` detections): such a false positive is reported to Microsoft through its file
+submission page, and the version information (see below) makes it less likely.
+
+## The icon
+
+The project's icon is `assets/icons/re-zoids-saga.png` (original art made for this
+project, committed like the Latin font). `python3 tools/package/icons.py` builds the
+rest from it: `re-zoids-saga.ico` (16 to 256 pixels), `re-zoids-saga.icns` (16 to 512
+pixels, with macOS's `iconutil`; the master is not enlarged) and
+`re-zoids-saga-128.rgba`, the raw pixels every window of the launcher gets at run time
+(`Sdl3Display::set_icon`). The Windows program embeds the `.ico` together with its
+version information (product, description, version, license and original file name,
+the file's Details tab) through `apps/launcher/build.rs`, which does nothing for other
+targets; the macOS app carries the `.icns` in its bundle.
 
 ## Releases
 
@@ -50,4 +65,6 @@ scripts on GitHub's runners (macOS 14, Windows, Ubuntu 22.04). Publishing a
 GitHub release, with its tag (`v0.1.0`), title, notes and prerelease mark written
 by hand, builds the packages from the release's tag and attaches them to it; the
 workflow runs as it is at that tag's commit. Running the workflow by hand only
-keeps the packages as the run's artifacts.
+keeps the packages as the run's artifacts. Every package goes with a
+`<package>.sha256` file, its SHA-256 checksum in the format `shasum -a 256 -c` and
+`sha256sum -c` check, among the artifacts and the release's files alike.

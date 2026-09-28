@@ -16,6 +16,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 lipo -create -output "$APP/Contents/MacOS/$EXECUTABLE" \
     "target/${TARGETS[0]}/release/launcher" \
     "target/${TARGETS[1]}/release/launcher"
+cp assets/icons/re-zoids-saga.icns "$APP/Contents/Resources/$EXECUTABLE.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -26,6 +27,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundleDisplayName</key><string>$APP_NAME</string>
     <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
     <key>CFBundleExecutable</key><string>$EXECUTABLE</string>
+    <key>CFBundleIconFile</key><string>$EXECUTABLE</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>${VERSION#v}</string>
     <key>CFBundleVersion</key><string>${VERSION#v}</string>
