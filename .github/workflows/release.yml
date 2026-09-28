@@ -1,8 +1,8 @@
 # Builds the packages players download, for macOS, Windows and Linux, with
-# the scripts in tools/package. Publishing a GitHub release (its tag, title,
-# notes and prerelease mark written by hand) builds them from the release's
-# tag and attaches them to it; running the workflow by hand only keeps them
-# as the run's artifacts.
+# the scripts in tools/package, each with a .sha256 file holding its SHA-256
+# checksum. Publishing a GitHub release (its tag, title, notes and prerelease
+# mark written by hand) builds them from the release's tag and attaches them
+# to it; running the workflow by hand only keeps them as the run's artifacts.
 
 name: Release
 
@@ -75,6 +75,20 @@ jobs:
         shell: pwsh
         run: tools/package/windows.ps1 $env:VERSION
 
+      - name: Checksum
+        shell: bash
+        working-directory: dist
+        run: |
+          for package in *.dmg *.zip *.tar.gz; do
+            [[ -e "$package" ]] || continue
+            if command -v sha256sum > /dev/null; then
+              sha256sum "$package" > "$package.sha256"
+            else
+              shasum -a 256 "$package" > "$package.sha256"
+            fi
+            cat "$package.sha256"
+          done
+
       - uses: actions/upload-artifact@v7
         with:
           name: package-${{ matrix.name }}
@@ -82,6 +96,7 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.tar.gz
+            dist/*.sha256
           if-no-files-found: error
 
   release:

@@ -23,7 +23,9 @@ start of chapter 4, where the game thanks the player and offers to save.
 1. Download the package for your system from the
    [Releases](https://github.com/serivt/re-zoids-saga/releases) page: a disk image for
    macOS, a zip for Windows, an archive for Linux (x86-64, glibc 2.34 or later). Nothing
-   else needs installing.
+   else needs installing. Each package has a `.sha256` file beside it with its SHA-256
+   checksum, to check the download (`shasum -a 256 -c <file>.sha256`, or
+   `Get-FileHash <file>` in PowerShell).
 2. Start it:
    - **macOS:** drag *Re Zoids Saga* to Applications and open it. The app is not signed,
      so the first time right-click it and choose Open (on recent versions, System
@@ -31,7 +33,10 @@ start of chapter 4, where the game thanks the player and offers to save.
    - **Windows:** unzip the folder anywhere and run `re-zoids-saga.exe`. If SmartScreen
      warns, choose More info › Run anyway. If Microsoft Defender removes the download
      as a threat, it is a false alarm about a new unsigned program: in Windows Security
-     › Virus & threat protection › Protection history, choose Allow on device.
+     › Virus & threat protection › Protection history, choose Allow on device. We are
+     working on it (signing the program and reporting the false alarm to Microsoft);
+     meanwhile you can also build the program yourself from the source, see
+     [Build and run](#build-and-run).
    - **Linux:** unpack the folder anywhere and run `./re-zoids-saga`.
 3. Choose your Zoids Saga ROM (Japan, Rev 1) and, optionally, a translation (`.po`,
    from [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations)),
