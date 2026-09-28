@@ -5,20 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.1] - 2026-09-28
-
-### Fixed
-
-- **Sound volume.** The sound played about 20 dB below its level: the mix's full
-  range filled only a tenth of the output's. It now spans the whole range, as the
-  hardware's output does, so the loudest songs peak just under full scale.
-
-### Changed
-
-- **Supported ROM.** The launcher plays only the verified dump of Zoids Saga (Japan,
-  Rev 1). The first release (Rev 0), which keeps its data at other addresses and
-  crashed the port, is named and refused, and so is any other dump or game; Play stays
-  off and the command line stops with the same message.
+## [Unreleased]
 
 ### Added
 
@@ -46,6 +33,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Characters sharing a palette slot with another object show the colors the original
   shows.
 - Weapons whose effects have large frames show their shots.
+
+## [0.1.1] - 2026-09-28
+
+### Fixed
+
+- **Sound volume.** The sound played about 20 dB below its level: the mix's full
+  range filled only a tenth of the output's. It now spans the whole range, as the
+  hardware's output does, so the loudest songs peak just under full scale.
+
+### Changed
+
+- **Supported ROM.** The launcher plays only the verified dump of Zoids Saga (Japan,
+  Rev 1). The first release (Rev 0), which keeps its data at other addresses and
+  crashed the port, is named and refused, and so is any other dump or game; Play stays
+  off and the command line stops with the same message.
 
 ## [0.1.0] - 2026-09-27
 
