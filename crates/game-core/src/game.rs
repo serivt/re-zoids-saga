@@ -52,7 +52,7 @@ use crate::translation::{
     DIALOGUE_TABLE, ITEM_TABLE, NAME_TABLE, PART_TABLE, PAUSE_MENU_TABLE, Translation,
     TranslationExtension,
 };
-use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows};
+use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows, TRANSLATED_PLAYER_NAME};
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
 const TALK_START_DELAY: u32 = 3;
@@ -638,7 +638,8 @@ impl<'rom> Game<'rom> {
 
     /// Shows the messages `translation` covers in place of the ROM's text.
     /// Fits the windows to it first; returns the messages no window can
-    /// hold.
+    /// hold. A player who still carries the default name takes its Latin
+    /// form, [`TRANSLATED_PLAYER_NAME`], which the name entry then offers.
     ///
     /// # Errors
     ///
@@ -651,6 +652,8 @@ impl<'rom> Game<'rom> {
         self.extensions
             .borrow_mut()
             .insert(Box::new(TranslationExtension::new(translation)));
+        self.player_name = translated_name(&self.player_name).to_owned();
+        self.windows.set_player_name(&self.player_name);
         Ok(problems)
     }
 
@@ -1731,6 +1734,16 @@ fn show_opened_chests(field: &mut Field, windows: &ScriptWindows<'_>) {
 
 /// Writes the party's level, experience and money into the game-state
 /// block, where a battle reads them and adds its winnings.
+/// The name the player carries once a translation is set: the default
+/// becomes [`TRANSLATED_PLAYER_NAME`], a name entered or loaded stays.
+fn translated_name(name: &str) -> &str {
+    if name == DEFAULT_PLAYER_NAME {
+        TRANSLATED_PLAYER_NAME
+    } else {
+        name
+    }
+}
+
 fn store_party(state: &mut [u8], party: &Party) {
     if let Ok(mut progress) = Progress::read(state) {
         progress.level = u8::try_from(party.level).unwrap_or(u8::MAX);
@@ -2310,9 +2323,16 @@ fn start_dialogue(
 
 #[cfg(test)]
 mod tests {
-    use super::{Party, store_party, take_party};
+    use super::{DEFAULT_PLAYER_NAME, Party, store_party, take_party, translated_name};
     use formats::Progress;
     use formats::progress::{ProgressError, STATE_LEN};
+
+    #[test]
+    fn a_translation_gives_the_default_name_its_latin_form() {
+        assert_eq!(translated_name(DEFAULT_PLAYER_NAME), "Atory");
+        assert_eq!(translated_name("Iñigo"), "Iñigo");
+        assert_eq!(translated_name("Atory"), "Atory");
+    }
 
     #[test]
     fn a_battles_winnings_reach_the_party() -> Result<(), ProgressError> {

@@ -76,6 +76,10 @@ A translation may have any number of pages; SELECT cycles them. The label window
 grows to the left for longer labels. Characters the player picks are stored as
 written, so the name prints and draws through the same rules as any text.
 
+The name entry starts from the player's name, アトレー by default. With a translation the
+default becomes its Latin form, **Atory**, so a player who keeps it reads it in their
+language; a name entered or loaded from a save stays as it is.
+
 ## The port's own messages
 
 What the port adds to the game (the save slots, see [menu.md](menu.md), and the end of

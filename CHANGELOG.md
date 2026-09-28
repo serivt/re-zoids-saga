@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- With a translation, the prince's default name is Atory, the Latin form of アトレー.
 - Translations are published in
   [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations),
   keyed by message and without the ROM's Japanese text, where anyone can suggest

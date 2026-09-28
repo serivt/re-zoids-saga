@@ -20,6 +20,9 @@ use crate::{FrameStyle, ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
 /// Name the player carries when none was entered.
 pub const DEFAULT_PLAYER_NAME: &str = "アトレー";
+/// Name the player carries when none was entered and the game plays in a
+/// translation: [`DEFAULT_PLAYER_NAME`] in Latin letters.
+pub const TRANSLATED_PLAYER_NAME: &str = "Atory";
 const WINDOWS: usize = 8;
 const TILE: usize = 8;
 const LINE_HEIGHT: usize = 16;

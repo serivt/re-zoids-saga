@@ -41,4 +41,4 @@ pub use sprite::draw_sprite;
 pub use text::{TextMetrics, TextPainter};
 pub use translation::{AlphabetPage, Scope, Translation, TranslationError, TranslationExtension};
 pub use window::{DIALOGUE_TEXT_AREA, FrameStyle, WindowPainter};
-pub use windows::{DEFAULT_PLAYER_NAME, ScriptWindows, TextLayout, Window};
+pub use windows::{DEFAULT_PLAYER_NAME, ScriptWindows, TRANSLATED_PLAYER_NAME, TextLayout, Window};
