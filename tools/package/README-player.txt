@@ -26,7 +26,9 @@ Windows  Unzip the folder anywhere and run re-zoids-saga.exe. The program
          removes the download or the program as a threat, it is a false
          alarm about a new unsigned program: open Windows Security >
          Virus & threat protection > Protection history, and choose
-         "Allow on device".
+         "Allow on device". You can check the download on VirusTotal
+         (www.virustotal.com): every engine but Defender's heuristic
+         finds it clean.
 
 Linux    Unpack the folder anywhere and run ./re-zoids-saga. It needs a
          desktop with X11 or Wayland; the file dialog uses the desktop's

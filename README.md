@@ -33,9 +33,11 @@ start of chapter 4, where the game thanks the player and offers to save.
    - **Windows:** unzip the folder anywhere and run `re-zoids-saga.exe`. If SmartScreen
      warns, choose More info › Run anyway. If Microsoft Defender removes the download
      as a threat, it is a false alarm about a new unsigned program: in Windows Security
-     › Virus & threat protection › Protection history, choose Allow on device. We are
-     working on it (signing the program and reporting the false alarm to Microsoft);
-     meanwhile you can also build the program yourself from the source, see
+     › Virus & threat protection › Protection history, choose Allow on device. You can
+     check the download on [VirusTotal](https://www.virustotal.com/): every engine but
+     Defender's machine-learning heuristic finds it clean. We are working on it
+     (signing the program and reporting the false alarm to Microsoft); meanwhile you
+     can also build the program yourself from the source, see
      [Build and run](#build-and-run).
    - **Linux:** unpack the folder anywhere and run `./re-zoids-saga`.
 3. Choose your Zoids Saga ROM (Japan, Rev 1) and, optionally, a translation (`.po`,
