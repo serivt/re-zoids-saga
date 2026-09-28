@@ -3,6 +3,7 @@
 //! [`run`] is the whole program: the desktop's executable passes it the
 //! command line, Android's library an empty one.
 
+mod download;
 mod front;
 mod quit;
 mod settings;

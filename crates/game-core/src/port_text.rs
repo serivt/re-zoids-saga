@@ -71,6 +71,27 @@ pub const LAUNCHER_NO_TRANSLATION: &str = "port/launcher/no-translation";
 pub const LAUNCHER_PICK_ROM: &str = "port/launcher/pick-rom";
 /// The help for the translation line.
 pub const LAUNCHER_PICK_TRANSLATION: &str = "port/launcher/pick-translation";
+/// The translation's screen: its heading is [`LAUNCHER_TRANSLATION`]; the
+/// line that opens a file, what a language's line shows once downloaded,
+/// the help of the main screen's translation line, and the screen's
+/// statuses and help.
+pub const LAUNCHER_FROM_FILE: &str = "port/launcher/from-file";
+/// See [`LAUNCHER_FROM_FILE`].
+pub const LAUNCHER_DOWNLOADED: &str = "port/launcher/downloaded";
+/// See [`LAUNCHER_FROM_FILE`].
+pub const LAUNCHER_CHOOSE_TRANSLATION: &str = "port/launcher/choose-translation";
+/// See [`LAUNCHER_FROM_FILE`].
+pub const LAUNCHER_LOOKING_UP: &str = "port/launcher/looking-up";
+/// See [`LAUNCHER_FROM_FILE`].
+pub const LAUNCHER_OFFLINE: &str = "port/launcher/offline";
+/// See [`LAUNCHER_FROM_FILE`].
+pub const LAUNCHER_DOWNLOADS: &str = "port/launcher/downloads";
+/// See [`LAUNCHER_FROM_FILE`].
+pub const LAUNCHER_DOWNLOADING: &str = "port/launcher/downloading";
+/// See [`LAUNCHER_FROM_FILE`].
+pub const LAUNCHER_DOWNLOAD_FAILED: &str = "port/launcher/download-failed";
+/// See [`LAUNCHER_FROM_FILE`].
+pub const LAUNCHER_TRANSLATION_HELP: &str = "port/launcher/translation-help";
 /// The ROM is the known release.
 pub const LAUNCHER_ROM_VERIFIED: &str = "port/launcher/rom-verified";
 /// The ROM is the game's first release, which the port does not play.
@@ -311,6 +332,51 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         LAUNCHER_PICK_TRANSLATION,
         "Choose a translation file (.po), or none.",
         "Help for the translation's line",
+    ),
+    launcher(
+        LAUNCHER_FROM_FILE,
+        "From a file...",
+        "The translation screen's line that opens a PO file",
+    ),
+    launcher(
+        LAUNCHER_DOWNLOADED,
+        "downloaded",
+        "Beside a language already downloaded, which choosing downloads again",
+    ),
+    launcher_line(
+        LAUNCHER_CHOOSE_TRANSLATION,
+        "Download a translation, or open a file.",
+        "Help for the translation's line of the main screen",
+    ),
+    launcher_line(
+        LAUNCHER_LOOKING_UP,
+        "Looking for translations online...",
+        "While the list of languages downloads",
+    ),
+    launcher_line(
+        LAUNCHER_OFFLINE,
+        "The translations cannot be reached online.",
+        "The list of languages could not be downloaded",
+    ),
+    launcher_line(
+        LAUNCHER_DOWNLOADS,
+        "Downloads it from the translations' site.",
+        "Help for a language's line",
+    ),
+    launcher_line(
+        LAUNCHER_DOWNLOADING,
+        "Downloading {name}...",
+        "While a translation downloads; {name} is the language's name",
+    ),
+    launcher_line(
+        LAUNCHER_DOWNLOAD_FAILED,
+        "The download failed.",
+        "A translation could not be downloaded",
+    ),
+    launcher_line(
+        LAUNCHER_TRANSLATION_HELP,
+        "X: choose   Z: back",
+        "The translation screen's help",
     ),
     launcher_line(
         LAUNCHER_ROM_VERIFIED,

@@ -1,6 +1,8 @@
 //! The launcher's own screen, shown when no ROM is given on the command
 //! line: the project's name and version, the ROM and the translation to
-//! play with, chosen in the system's file dialog, the options (the
+//! play with (the ROM chosen in the system's file dialog; the translation
+//! downloaded from the translations' repository or opened likewise), the
+//! options (the
 //! keyboard's keys, the gamepad's buttons, the window, the filter and the
 //! volume), the screen about the port (its version, license and the
 //! project's pages, opened in the web browser), and the lines that start
@@ -16,17 +18,19 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use extraction::{Identification, IdentifyError, Title};
 use game_core::port_text::{
-    LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_BACK, LAUNCHER_CONTROLS_HELP,
-    LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_FILTER, LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD,
-    LAUNCHER_HELP, LAUNCHER_KEYBOARD, LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LEFT,
-    LAUNCHER_LICENSE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM, LAUNCHER_NO_TRANSLATION, LAUNCHER_OFF,
-    LAUNCHER_ON, LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP,
-    LAUNCHER_PAGE_UNOPENED, LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM,
-    LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY, LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD,
-    LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT, LAUNCHER_ROM,
-    LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
+    LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_BACK, LAUNCHER_CHOOSE_TRANSLATION,
+    LAUNCHER_CONTROLS_HELP, LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED,
+    LAUNCHER_DOWNLOADED, LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS, LAUNCHER_FILTER,
+    LAUNCHER_FROM_FILE, LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD, LAUNCHER_HELP, LAUNCHER_KEYBOARD,
+    LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LEFT, LAUNCHER_LICENSE,
+    LAUNCHER_LOOKING_UP, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM, LAUNCHER_NO_TRANSLATION,
+    LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON, LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS,
+    LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED, LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_OPTIONS,
+    LAUNCHER_PICK_ROM, LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY, LAUNCHER_PRESS_KEY,
+    LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT,
+    LAUNCHER_ROM, LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
     LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SHARP, LAUNCHER_SMOOTH,
-    LAUNCHER_SUBTITLE, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_READ,
+    LAUNCHER_SUBTITLE, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ,
     LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_VERSION,
     LAUNCHER_VOLUME, LAUNCHER_WINDOW, default_text,
 };
@@ -37,6 +41,7 @@ use platform_sdl3::{
     pad_button_label, pad_button_name,
 };
 
+use crate::download::{Answer, Download, Language};
 use crate::quit::QuitPrompt;
 use crate::settings::{FULL_VOLUME, SCALES, Settings};
 
@@ -228,6 +233,9 @@ enum Screen {
     Options(usize),
     /// The screen about the port, with the line under the cursor.
     About(usize),
+    /// Where the translation comes from: a file, or a language to
+    /// download; with the line under the cursor.
+    Translations(usize),
     /// The keys or the gamepad buttons of the pad's buttons, the entry
     /// under the cursor, and whether it waits for the button's new one.
     Bindings {
@@ -265,6 +273,13 @@ pub struct Front {
     /// Where the screen was last touched or clicked, until a frame takes
     /// it as the line under it chosen.
     tapped: Option<(i32, i32)>,
+    /// The languages the translations' repository offers, once asked for:
+    /// `None` until they arrive, or why they could not be read.
+    languages: Option<Result<Vec<Language>, String>>,
+    /// The download running, if any, and the language it brings.
+    download: Option<(Download, Option<String>)>,
+    /// Why the last translation asked for could not be downloaded.
+    download_failure: Option<String>,
     line: usize,
     screen: Screen,
     choosing: Option<(Line, FileChoice)>,
@@ -311,6 +326,9 @@ impl Front {
             caught: false,
             quitting: None,
             tapped: None,
+            languages: None,
+            download: None,
+            download_failure: None,
             unopened: false,
             line: 0,
             screen: Screen::Main,
@@ -429,7 +447,7 @@ impl Front {
                         device.options()
                     };
                 }
-                (Event::Back, Screen::Options(_) | Screen::About(_)) => {
+                (Event::Back, Screen::Options(_) | Screen::About(_) | Screen::Translations(_)) => {
                     self.screen = Screen::Main;
                 }
                 (Event::Back, Screen::Main) if self.choosing.is_none() => {
@@ -508,11 +526,13 @@ impl Front {
             }
             return Ok(Step::Stay);
         }
+        self.take_download();
         if let Some((x, y)) = tapped {
             pressed = pressed.union(self.tap(x, y));
         }
         match self.screen {
             Screen::Main => return self.update_main(display, pressed),
+            Screen::Translations(line) => self.update_translations(display, line, pressed)?,
             Screen::Options(line) => self.update_options(line, pressed),
             Screen::About(line) => self.update_about(line, pressed),
             Screen::Bindings {
@@ -572,8 +592,112 @@ impl Front {
                 self.screen = Screen::About(line);
                 chosen
             }
+            Screen::Translations(_) => {
+                let count = self.translation_entries().len();
+                let Some(line) = row_at(y, OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, count) else {
+                    return Input::default();
+                };
+                self.screen = Screen::Translations(line);
+                chosen
+            }
             Screen::Bindings { .. } => Input::default(),
         }
+    }
+
+    /// Starts reading the languages the translations' repository offers,
+    /// unless they are already here or on their way.
+    fn look_up(&mut self) {
+        if !matches!(self.languages, Some(Ok(_))) && self.download.is_none() {
+            self.languages = None;
+            self.download = Some((Download::languages(), None));
+        }
+    }
+
+    /// Takes the answer of the download running, once it has finished: the
+    /// languages, or the translation now kept, which becomes the chosen one
+    /// and brings the main screen back.
+    fn take_download(&mut self) {
+        let Some(answer) = self
+            .download
+            .as_ref()
+            .and_then(|(download, _)| download.answer())
+        else {
+            return;
+        };
+        self.download = None;
+        match answer {
+            Answer::Languages(languages) => self.languages = Some(languages),
+            Answer::Kept(Ok(path)) => {
+                self.take_translation(path);
+                self.screen = Screen::Main;
+                self.line = line_index(Line::Translation);
+            }
+            Answer::Kept(Err(reason)) => self.download_failure = Some(reason),
+        }
+    }
+
+    /// The lines of the translation's screen.
+    fn translation_entries(&self) -> Vec<Entry> {
+        let languages = match &self.languages {
+            Some(Ok(languages)) => languages.as_slice(),
+            _ => &[],
+        };
+        std::iter::once(Entry::File)
+            .chain(languages.iter().cloned().map(Entry::Language))
+            .chain(std::iter::once(Entry::Back))
+            .collect()
+    }
+
+    /// The translation's screen: up and down move, X opens the system's
+    /// dialog, downloads a language (again, when it is already kept) or
+    /// goes back, and so does Z.
+    fn update_translations(
+        &mut self,
+        display: &Sdl3Display,
+        line: usize,
+        pressed: Input,
+    ) -> Result<()> {
+        if pressed.is_held(Button::B) {
+            self.screen = Screen::Main;
+            return Ok(());
+        }
+        let entries = self.translation_entries();
+        let mut line = line.min(entries.len() - 1);
+        if pressed.is_held(Button::Up) {
+            line = line.saturating_sub(1);
+        }
+        if pressed.is_held(Button::Down) {
+            line = (line + 1).min(entries.len() - 1);
+        }
+        self.screen = Screen::Translations(line);
+        if !pressed.is_held(Button::A) {
+            return Ok(());
+        }
+        match &entries[line] {
+            Entry::File => {
+                let location = self
+                    .translation
+                    .as_ref()
+                    .and_then(|(path, _)| path.parent())
+                    .or_else(|| self.rom.as_ref().and_then(|(path, _)| path.parent()));
+                let choice = display.choose_file(&TRANSLATION_FILTERS, location)?;
+                self.choosing = Some((Line::Translation, choice));
+                self.screen = Screen::Main;
+            }
+            Entry::Language(language) if self.download.is_none() => {
+                self.download_failure = None;
+                match kept_folder() {
+                    Some(folder) => {
+                        let download = Download::translation(language.clone(), folder);
+                        self.download = Some((download, Some(language.name.clone())));
+                    }
+                    None => self.download_failure = Some("no settings folder".to_owned()),
+                }
+            }
+            Entry::Language(_) => {}
+            Entry::Back => self.screen = Screen::Main,
+        }
+        Ok(())
     }
 
     fn update_main(&mut self, display: &Sdl3Display, pressed: Input) -> Result<Step> {
@@ -600,13 +724,9 @@ impl Front {
                 self.choosing = Some((Line::Rom, choice));
             }
             Line::Translation => {
-                let location = self
-                    .translation
-                    .as_ref()
-                    .and_then(|(path, _)| path.parent())
-                    .or_else(|| self.rom.as_ref().and_then(|(path, _)| path.parent()));
-                let choice = display.choose_file(&TRANSLATION_FILTERS, location)?;
-                self.choosing = Some((Line::Translation, choice));
+                self.screen = Screen::Translations(0);
+                self.download_failure = None;
+                self.look_up();
             }
             Line::Options => self.screen = Screen::Options(0),
             Line::About => {
@@ -779,6 +899,13 @@ impl Front {
                 self.draw_options(frame, line);
                 self.centered(frame, HELP_Y, &self.text(LAUNCHER_OPTIONS_HELP), DIM);
             }
+            Screen::Translations(line) => {
+                self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_TRANSLATION), DIM);
+                self.draw_translations(frame, line);
+                let (status, color) = self.translation_status(line);
+                self.centered(frame, STATUS_Y, &status, color);
+                self.centered(frame, HELP_Y, &self.text(LAUNCHER_TRANSLATION_HELP), DIM);
+            }
             Screen::About(line) => {
                 self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_ABOUT), DIM);
                 self.draw_about(frame, line);
@@ -891,6 +1018,51 @@ impl Front {
                 .setting_value(*setting)
                 .map(|(value, value_color)| (value_x, value, value_color));
             self.draw_line(frame, (y, is_selected, color), &labels[index], value);
+        }
+    }
+
+    /// The translation's screen: the line that opens a file, a line per
+    /// language offered (marked when already kept), and the way back.
+    fn draw_translations(&self, frame: &mut Frame, selected: usize) {
+        let folder = kept_folder();
+        for (index, entry) in self.translation_entries().iter().enumerate() {
+            let y = OPTIONS_FIRST_LINE_Y + index * OPTION_LINE_HEIGHT;
+            let is_selected = index == selected;
+            let color = if is_selected { TEXT } else { DIM };
+            let (label, value) = match entry {
+                Entry::File => (self.text(LAUNCHER_FROM_FILE), None),
+                Entry::Language(language) => {
+                    let kept = folder
+                        .as_deref()
+                        .is_some_and(|folder| language.kept_in(folder).is_file());
+                    let value = kept.then(|| (self.text(LAUNCHER_DOWNLOADED), GOOD));
+                    (language.name.clone(), value)
+                }
+                Entry::Back => (self.text(LAUNCHER_BACK), None),
+            };
+            let value = value.map(|(text, value_color)| (LANGUAGE_VALUE_X, text, value_color));
+            self.draw_line(frame, (y, is_selected, color), &label, value);
+        }
+    }
+
+    /// The translation's screen's status: what the download is doing, or
+    /// what the line under the cursor does.
+    fn translation_status(&self, line: usize) -> (String, Rgb) {
+        if let Some((_, Some(name))) = &self.download {
+            return (
+                self.text(LAUNCHER_DOWNLOADING).replace("{name}", name),
+                WARNING,
+            );
+        }
+        if self.download_failure.is_some() {
+            return (self.text(LAUNCHER_DOWNLOAD_FAILED), BAD);
+        }
+        match (&self.languages, self.translation_entries().get(line)) {
+            (None, _) => (self.text(LAUNCHER_LOOKING_UP), DIM),
+            (Some(Err(_)), _) => (self.text(LAUNCHER_OFFLINE), BAD),
+            (_, Some(Entry::File)) => (self.text(LAUNCHER_PICK_TRANSLATION), DIM),
+            (_, Some(Entry::Language(_))) => (self.text(LAUNCHER_DOWNLOADS), DIM),
+            _ => (String::new(), DIM),
         }
     }
 
@@ -1108,7 +1280,7 @@ impl Front {
                     GOOD,
                 ),
                 Some((_, None)) => (self.text(LAUNCHER_TRANSLATION_UNREADABLE), BAD),
-                None => (self.text(LAUNCHER_PICK_TRANSLATION), DIM),
+                None => (self.text(LAUNCHER_CHOOSE_TRANSLATION), DIM),
             },
         }
     }
@@ -1274,6 +1446,25 @@ fn po_language(text: &str) -> Option<String> {
         .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
         .collect();
     (!code.is_empty()).then_some(code)
+}
+
+/// A line of the translation's screen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Entry {
+    /// Opens a PO file in the system's dialog.
+    File,
+    /// Downloads a language from the translations' repository.
+    Language(Language),
+    /// Back to the main screen.
+    Back,
+}
+
+/// Where a language's line shows that it is already kept.
+const LANGUAGE_VALUE_X: usize = 140;
+
+/// The launcher's own folder, where downloaded translations are kept.
+fn kept_folder() -> Option<PathBuf> {
+    platform_sdl3::preferences_dir(crate::settings::ORGANIZATION, crate::settings::APP).ok()
 }
 
 /// Android shows the app on the whole screen, over its status and
@@ -1719,6 +1910,57 @@ mod tests {
         let y = i32::try_from(top + 2).unwrap_or_default();
         assert_eq!(front.tap(x, y), press(Button::A));
         assert_eq!(front.screen, Screen::About(2));
+    }
+
+    #[test]
+    fn the_translation_screen_lists_a_file_the_languages_and_the_way_back() {
+        let mut front = Front::new(&Settings::default());
+        front.screen = Screen::Translations(0);
+        assert_eq!(front.translation_entries(), [Entry::File, Entry::Back]);
+        assert_eq!(
+            front.translation_status(0).0,
+            front.text(LAUNCHER_LOOKING_UP)
+        );
+        let language = |code: &str, name: &str| Language {
+            code: code.to_owned(),
+            name: name.to_owned(),
+            file: format!("po/{code}.po"),
+        };
+        front.languages = Some(Ok(vec![
+            language("en", "English"),
+            language("es", "Español"),
+        ]));
+        let entries = front.translation_entries();
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[2], Entry::Language(language("es", "Español")));
+        assert_eq!(
+            front.translation_status(0).0,
+            front.text(LAUNCHER_PICK_TRANSLATION)
+        );
+        assert_eq!(
+            front.translation_status(1).0,
+            front.text(LAUNCHER_DOWNLOADS)
+        );
+        front.download_failure = Some("offline".to_owned());
+        assert_eq!(
+            front.translation_status(1).0,
+            front.text(LAUNCHER_DOWNLOAD_FAILED)
+        );
+        front.download_failure = None;
+        front.languages = Some(Err("offline".to_owned()));
+        assert_eq!(front.translation_entries(), [Entry::File, Entry::Back]);
+        assert_eq!(front.translation_status(0).0, front.text(LAUNCHER_OFFLINE));
+        assert_eq!(front.translation_status(1).0, front.text(LAUNCHER_OFFLINE));
+        let x = i32::try_from(LABEL_X).unwrap_or_default();
+        let y = middle_of(OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, 1);
+        assert_eq!(front.tap(x, y), press(Button::A));
+        assert_eq!(front.screen, Screen::Translations(1));
+        assert!(!front.events(&[Event::Back]));
+        assert_eq!(front.screen, Screen::Main);
+        let mut frame = Frame::new(240, 160, Rgb::default());
+        front.screen = Screen::Translations(0);
+        front.draw(&mut frame);
+        assert_eq!(frame.pixel(0, 0), Some(BACKDROP_TOP));
     }
 
     #[test]

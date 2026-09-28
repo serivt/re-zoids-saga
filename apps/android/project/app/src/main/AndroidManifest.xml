@@ -22,8 +22,11 @@
         android:name="android.hardware.type.pc"
         android:required="false" />
 
-    <!-- Opening the project's pages from the launcher's About screen asks
-         the browser; the app itself never goes online. -->
+    <!-- The launcher downloads a translation when the player asks for one;
+         nothing else goes online. Opening the project's pages from the
+         About screen asks the browser. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
