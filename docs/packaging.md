@@ -46,7 +46,8 @@ ID with notarization and a Windows code-signing certificate.
 ## Releases
 
 [.github/workflows/release.yml](../.github/workflows/release.yml) runs the three
-scripts on GitHub's runners (macOS 14, Windows, Ubuntu 22.04). Pushing a tag `v*`
-publishes the packages as a GitHub release, a prerelease when the tag has a
-suffix (`v0.1.0-demo`); running the workflow by hand only keeps them as the run's
-artifacts.
+scripts on GitHub's runners (macOS 14, Windows, Ubuntu 22.04). Publishing a
+GitHub release, with its tag (`v0.1.0`), title, notes and prerelease mark written
+by hand, builds the packages from the release's tag and attaches them to it; the
+workflow runs as it is at that tag's commit. Running the workflow by hand only
+keeps the packages as the run's artifacts.

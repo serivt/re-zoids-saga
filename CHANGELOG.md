@@ -63,6 +63,6 @@ systems; link-cable play is not implemented.
   version. F10 turns on a debugging aid (intangible roaming enemies, an overpowered
   protagonist).
 - **Packaged builds** for macOS (universal disk image), Windows and Linux that run
-  without SDL3 installed, published by GitHub Actions from `v*` tags.
+  without SDL3 installed, which GitHub Actions attaches to each published release.
 
 [0.1.0]: https://github.com/serivt/re-zoids-saga/releases/tag/v0.1.0
