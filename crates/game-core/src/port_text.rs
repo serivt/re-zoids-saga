@@ -88,6 +88,27 @@ pub const LAUNCHER_READY: &str = "port/launcher/ready";
 /// The launcher's controls.
 pub const LAUNCHER_HELP: &str = "port/launcher/help";
 
+/// The label of the launcher's line to the screen about the port, and its
+/// help.
+pub const LAUNCHER_ABOUT: &str = "port/launcher/about";
+/// See [`LAUNCHER_ABOUT`].
+pub const LAUNCHER_PICK_ABOUT: &str = "port/launcher/pick-about";
+/// The about screen's lines: the version, the license, the project's and
+/// the translations' pages, their help and its controls.
+pub const LAUNCHER_VERSION: &str = "port/launcher/version";
+/// See [`LAUNCHER_VERSION`].
+pub const LAUNCHER_LICENSE: &str = "port/launcher/license";
+/// See [`LAUNCHER_VERSION`].
+pub const LAUNCHER_PROJECT_PAGE: &str = "port/launcher/project-page";
+/// See [`LAUNCHER_VERSION`].
+pub const LAUNCHER_TRANSLATIONS_PAGE: &str = "port/launcher/translations-page";
+/// See [`LAUNCHER_VERSION`].
+pub const LAUNCHER_OPENS_PAGE: &str = "port/launcher/opens-page";
+/// See [`LAUNCHER_VERSION`].
+pub const LAUNCHER_PAGE_UNOPENED: &str = "port/launcher/page-unopened";
+/// See [`LAUNCHER_VERSION`].
+pub const LAUNCHER_ABOUT_HELP: &str = "port/launcher/about-help";
+
 /// The label of the launcher's options line, and its help.
 pub const LAUNCHER_OPTIONS: &str = "port/launcher/options";
 /// See [`LAUNCHER_OPTIONS`].
@@ -320,6 +341,51 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         "The file could not be opened or parsed",
     ),
     launcher_line(LAUNCHER_READY, "Ready to play.", "Help for the play line"),
+    launcher(
+        LAUNCHER_ABOUT,
+        "About",
+        "The line to the screen with the version, the license and the project's pages",
+    ),
+    launcher_line(
+        LAUNCHER_PICK_ABOUT,
+        "Version, license and the project's pages.",
+        "Help for the about line",
+    ),
+    launcher(
+        LAUNCHER_VERSION,
+        "Version",
+        "The label of the port's version on the about screen",
+    ),
+    launcher(
+        LAUNCHER_LICENSE,
+        "License",
+        "The label of the port's license on the about screen",
+    ),
+    launcher(
+        LAUNCHER_PROJECT_PAGE,
+        "Project on GitHub",
+        "The line of the port's repository, whose address follows on the next line",
+    ),
+    launcher(
+        LAUNCHER_TRANSLATIONS_PAGE,
+        "Translations on GitHub",
+        "The line of the translations' repository, whose address follows on the next line",
+    ),
+    launcher_line(
+        LAUNCHER_OPENS_PAGE,
+        "Opens the page in your web browser.",
+        "Help for a page's line on the about screen",
+    ),
+    launcher_line(
+        LAUNCHER_PAGE_UNOPENED,
+        "The web browser could not be opened.",
+        "The page could not be opened",
+    ),
+    launcher_line(
+        LAUNCHER_ABOUT_HELP,
+        "X: open   Z: back",
+        "The about screen's help",
+    ),
     launcher_line(
         LAUNCHER_HELP,
         "Arrows: move   X: choose   Z: clear",

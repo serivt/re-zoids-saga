@@ -7,7 +7,8 @@ Source of knowledge: this project's own design. Implemented in `apps/launcher`.
 Run without arguments, the launcher shows its own screen, **Re:Zoids Saga**: choose your
 ROM and, optionally, a translation (`.po`) in the system's file dialog, then Play (arrows
 move, X chooses, Z clears the translation, Return plays). It tells whether the ROM is a
-verified dump and speaks the chosen translation's language (English without one).
+verified dump and speaks the chosen translation's language (English without one). The
+port's version shows in the top right corner.
 
 Options holds:
 
@@ -18,6 +19,10 @@ Options holds:
 - the buttons: Keyboard and Gamepad list the pad's ten buttons, where you choose one and
   press its new key or button (Esc cancels; a button that had it swaps with it), or take
   the defaults back.
+
+About shows the version and the license, and the project's pages: the port's repository
+and the translations' ([re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations)),
+which X opens in the web browser.
 
 The game plays with these options from then on, also when given a ROM on the command
 line. The choices are remembered in `launcher.cfg` under `re-zoids-saga/launcher` in the
@@ -51,6 +56,7 @@ A ROM on the command line skips the launcher's screen and plays from the publish
 
 | Option | Effect |
 |---|---|
+| `--version` | Prints the port's version and quits |
 | `--save <file.sav>` | The save file; by default the ROM's name with `.sav`, next to it (see [formats/save.md](formats/save.md)) |
 | `--slots <n>` | How many save slots, 1 to 9 (4 by default; 1 is the original's single save) |
 | `--translation <file.po>` | Shows a translation (see [translation.md](translation.md)) |

@@ -1,8 +1,10 @@
 //! The launcher's own screen, shown when no ROM is given on the command
-//! line: the project's name, the ROM and the translation to play with,
-//! chosen in the system's file dialog, the options (the keyboard's keys,
-//! the gamepad's buttons, the window, the filter and the volume), and the
-//! lines that start the game or quit.
+//! line: the project's name and version, the ROM and the translation to
+//! play with, chosen in the system's file dialog, the options (the
+//! keyboard's keys, the gamepad's buttons, the window, the filter and the
+//! volume), the screen about the port (its version, license and the
+//! project's pages, opened in the web browser), and the lines that start
+//! the game or quit.
 //!
 //! It is drawn with this project's Latin font and colors alone, since no
 //! ROM has been read yet. Its texts are English until a translation is
@@ -14,21 +16,23 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use extraction::Title;
 use game_core::port_text::{
-    LAUNCHER_BACK, LAUNCHER_CONTROLS_HELP, LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_FILTER,
-    LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD, LAUNCHER_HELP, LAUNCHER_KEYBOARD, LAUNCHER_KEYS_CUSTOM,
-    LAUNCHER_KEYS_DEFAULT, LAUNCHER_LEFT, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM,
-    LAUNCHER_NO_TRANSLATION, LAUNCHER_OFF, LAUNCHER_ON, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP,
-    LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM, LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY,
-    LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT,
-    LAUNCHER_ROM, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNVERIFIED,
-    LAUNCHER_ROM_VERIFIED, LAUNCHER_SHARP, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE,
-    LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_UP,
-    LAUNCHER_VOLUME, LAUNCHER_WINDOW, default_text,
+    LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_BACK, LAUNCHER_CONTROLS_HELP,
+    LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_FILTER, LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD,
+    LAUNCHER_HELP, LAUNCHER_KEYBOARD, LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LEFT,
+    LAUNCHER_LICENSE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM, LAUNCHER_NO_TRANSLATION, LAUNCHER_OFF,
+    LAUNCHER_ON, LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP,
+    LAUNCHER_PAGE_UNOPENED, LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM,
+    LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY, LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD,
+    LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT, LAUNCHER_ROM,
+    LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNVERIFIED, LAUNCHER_ROM_VERIFIED,
+    LAUNCHER_SHARP, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TRANSLATION,
+    LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE,
+    LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WINDOW, default_text,
 };
 use game_core::{TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
 use platform_sdl3::{
-    FileChoice, Filter, KeyMap, Sdl3Display, default_keys, default_pad_buttons, key_name,
+    FileChoice, Filter, KeyMap, Sdl3Display, default_keys, default_pad_buttons, key_name, open_url,
     pad_button_label, pad_button_name,
 };
 
@@ -37,6 +41,15 @@ use crate::settings::{FULL_VOLUME, SCALES, Settings};
 
 /// The project's name, never translated.
 pub const PROJECT_NAME: &str = "Re:Zoids Saga";
+/// The port's version, the workspace's.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The port's license, the workspace's.
+const LICENSE: &str = env!("CARGO_PKG_LICENSE");
+/// The project's pages: the port's repository and the translations'.
+const PROJECT_URL: &str = "https://github.com/serivt/re-zoids-saga";
+const TRANSLATIONS_URL: &str = "https://github.com/serivt/re-zoids-saga-translations";
+/// What the pages' addresses show, their site left out to fit the panel.
+const SITE_PREFIX: &str = "https://github.com/";
 const ROM_FILTERS: [(&str, &str); 1] = [("Game Boy Advance ROM", "gba")];
 const TRANSLATION_FILTERS: [(&str, &str); 1] = [("Translation (PO)", "po")];
 /// Pixels kept clear along every edge of the screen.
@@ -46,15 +59,21 @@ const TITLE_Y: usize = 10;
 const SUBTITLE_Y: usize = 32;
 const PANEL: (usize, usize, usize, usize) = (MARGIN, 46, 240 - 2 * MARGIN, 82);
 const FIRST_LINE_Y: usize = 53;
-const LINE_HEIGHT: usize = 14;
+const LINE_HEIGHT: usize = 12;
 const OPTIONS_FIRST_LINE_Y: usize = 51;
 const OPTION_LINE_HEIGHT: usize = 10;
+/// Rows the about screen's page lines skip, their address below them.
+const PAGE_ROWS: usize = 2;
+/// How far a page's address sits right of its label.
+const ADDRESS_INDENT: usize = 8;
 const KEY_LINE_HEIGHT: usize = 11;
 const CURSOR_X: usize = MARGIN + 6;
 const LABEL_X: usize = MARGIN + 14;
 const VALUE_GAP: usize = 8;
 const COLUMN_WIDTH: usize = 102;
 const STATUS_Y: usize = 134;
+/// The version's row, top right.
+const VERSION_Y: usize = MARGIN;
 const HELP_Y: usize = 144;
 const VOLUME_STEP: u8 = 10;
 const ELLIPSIS: &str = "...";
@@ -88,17 +107,29 @@ enum Line {
     Rom,
     Translation,
     Options,
+    About,
     Play,
     Quit,
 }
 
-const LINES: [Line; 5] = [
+const LINES: [Line; 6] = [
     Line::Rom,
     Line::Translation,
     Line::Options,
+    Line::About,
     Line::Play,
     Line::Quit,
 ];
+
+/// The lines of the about screen the cursor stops on, top to bottom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Page {
+    Project,
+    Translations,
+    Back,
+}
+
+const PAGES: [Page; 3] = [Page::Project, Page::Translations, Page::Back];
 
 /// The lines of the options screen, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +202,8 @@ enum Screen {
     Main,
     /// The options, with the line under the cursor.
     Options(usize),
+    /// The screen about the port, with the line under the cursor.
+    About(usize),
     /// The keys or the gamepad buttons of the pad's buttons, the entry
     /// under the cursor, and whether it waits for the button's new one.
     Bindings {
@@ -203,6 +236,8 @@ pub struct Front {
     caught: bool,
     /// The question asked before closing, while open.
     quitting: Option<QuitPrompt>,
+    /// Whether the last page asked for could not be opened.
+    unopened: bool,
     line: usize,
     screen: Screen,
     choosing: Option<(Line, FileChoice)>,
@@ -248,6 +283,7 @@ impl Front {
             gamepads: Vec::new(),
             caught: false,
             quitting: None,
+            unopened: false,
             line: 0,
             screen: Screen::Main,
             choosing: None,
@@ -365,7 +401,9 @@ impl Front {
                         device.options()
                     };
                 }
-                (Event::Back, Screen::Options(_)) => self.screen = Screen::Main,
+                (Event::Back, Screen::Options(_) | Screen::About(_)) => {
+                    self.screen = Screen::Main;
+                }
                 (Event::Back, Screen::Main) if self.choosing.is_none() => {
                     self.quitting = match self.quitting {
                         Some(_) => None,
@@ -440,6 +478,7 @@ impl Front {
         match self.screen {
             Screen::Main => return self.update_main(display, pressed),
             Screen::Options(line) => self.update_options(line, pressed),
+            Screen::About(line) => self.update_about(line, pressed),
             Screen::Bindings {
                 device,
                 entry,
@@ -483,6 +522,10 @@ impl Front {
                 self.choosing = Some((Line::Translation, choice));
             }
             Line::Options => self.screen = Screen::Options(0),
+            Line::About => {
+                self.unopened = false;
+                self.screen = Screen::About(0);
+            }
             Line::Play if self.playable() => return Ok(Step::Play),
             Line::Play => {}
             Line::Quit => return Ok(Step::Quit),
@@ -527,6 +570,36 @@ impl Front {
             }
             Setting::Back if chosen => self.screen = Screen::Main,
             _ => {}
+        }
+    }
+
+    /// The about screen: up and down move, X opens a page in the web
+    /// browser or goes back, and so does Z.
+    fn update_about(&mut self, line: usize, pressed: Input) {
+        if pressed.is_held(Button::B) {
+            self.screen = Screen::Main;
+            return;
+        }
+        let previous = line;
+        let mut line = line;
+        if pressed.is_held(Button::Up) {
+            line = line.saturating_sub(1);
+        }
+        if pressed.is_held(Button::Down) {
+            line = (line + 1).min(PAGES.len() - 1);
+        }
+        if line != previous {
+            self.unopened = false;
+        }
+        self.screen = Screen::About(line);
+        if !pressed.is_held(Button::A) {
+            return;
+        }
+        match PAGES[line] {
+            Page::Back => self.screen = Screen::Main,
+            page => {
+                self.unopened = page.url().is_some_and(|url| open_url(url).is_err());
+            }
         }
     }
 
@@ -599,6 +672,12 @@ impl Front {
             TITLE_COLOR,
             TITLE_SCALE,
         );
+        let version = format!("v{VERSION}");
+        let version_x = frame
+            .width()
+            .saturating_sub(MARGIN + self.metrics.plain_width(&version, 1));
+        self.metrics
+            .draw_plain(frame, (version_x, VERSION_Y), &version, DIM, 1);
         draw_panel(frame, PANEL);
         match self.screen {
             Screen::Main => {
@@ -612,6 +691,17 @@ impl Front {
                 self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_OPTIONS), DIM);
                 self.draw_options(frame, line);
                 self.centered(frame, HELP_Y, &self.text(LAUNCHER_OPTIONS_HELP), DIM);
+            }
+            Screen::About(line) => {
+                self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_ABOUT), DIM);
+                self.draw_about(frame, line);
+                let (status, color) = match PAGES[line] {
+                    Page::Back => (String::new(), DIM),
+                    _ if self.unopened => (self.text(LAUNCHER_PAGE_UNOPENED), BAD),
+                    _ => (self.text(LAUNCHER_OPENS_PAGE), DIM),
+                };
+                self.centered(frame, STATUS_Y, &status, color);
+                self.centered(frame, HELP_Y, &self.text(LAUNCHER_ABOUT_HELP), DIM);
             }
             Screen::Bindings {
                 device,
@@ -692,6 +782,7 @@ impl Front {
                     let (value, value_color) = self.value(*line);
                     (labels[index].clone(), Some((value_x, value, value_color)))
                 }
+                Line::About => (self.text(LAUNCHER_ABOUT), None),
                 Line::Play => (self.text(LAUNCHER_PLAY), None),
                 Line::Quit => (self.text(LAUNCHER_QUIT), None),
             };
@@ -713,6 +804,55 @@ impl Front {
                 .setting_value(*setting)
                 .map(|(value, value_color)| (value_x, value, value_color));
             self.draw_line(frame, (y, is_selected, color), &labels[index], value);
+        }
+    }
+
+    /// The about screen: the version and the license, then each page's
+    /// line with its address below it, and the way back.
+    fn draw_about(&self, frame: &mut Frame, selected: usize) {
+        let facts = [
+            (self.text(LAUNCHER_VERSION), VERSION),
+            (self.text(LAUNCHER_LICENSE), LICENSE),
+        ];
+        let labels: Vec<String> = facts.iter().map(|(label, _)| label.clone()).collect();
+        let value_x = self.value_column(&labels);
+        let mut y = OPTIONS_FIRST_LINE_Y;
+        for (label, value) in &facts {
+            self.draw_line(
+                frame,
+                (y, false, DIM),
+                label,
+                Some((value_x, (*value).to_owned(), TEXT)),
+            );
+            y += OPTION_LINE_HEIGHT;
+        }
+        y += OPTION_LINE_HEIGHT / 5;
+        for (index, page) in PAGES.iter().enumerate() {
+            let is_selected = index == selected;
+            let color = if is_selected { TEXT } else { DIM };
+            self.draw_line(
+                frame,
+                (y, is_selected, color),
+                &self.text(page.label()),
+                None,
+            );
+            if let Some(url) = page.url() {
+                let address = url.strip_prefix(SITE_PREFIX).unwrap_or(url);
+                let x = LABEL_X + ADDRESS_INDENT;
+                let room = (PANEL.0 + PANEL.2).saturating_sub(x + MARGIN);
+                let address = self.fitted(address, room);
+                let address_color = if is_selected { GOOD } else { DIM };
+                self.metrics.draw_plain(
+                    frame,
+                    (x, y + OPTION_LINE_HEIGHT),
+                    &address,
+                    address_color,
+                    1,
+                );
+                y += PAGE_ROWS * OPTION_LINE_HEIGHT;
+            } else {
+                y += OPTION_LINE_HEIGHT;
+            }
         }
     }
 
@@ -870,6 +1010,7 @@ impl Front {
     fn status(&self) -> (String, Rgb) {
         match LINES[self.line] {
             Line::Options => (self.text(LAUNCHER_PICK_OPTIONS), DIM),
+            Line::About => (self.text(LAUNCHER_PICK_ABOUT), DIM),
             Line::Rom | Line::Play | Line::Quit => match &self.rom {
                 None => (self.text(LAUNCHER_PICK_ROM), WARNING),
                 Some((_, kind)) if LINES[self.line] == Line::Play && kind.playable() => {
@@ -917,6 +1058,25 @@ impl Front {
             cut.pop();
         }
         format!("{cut}{ELLIPSIS}")
+    }
+}
+
+impl Page {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Project => LAUNCHER_PROJECT_PAGE,
+            Self::Translations => LAUNCHER_TRANSLATIONS_PAGE,
+            Self::Back => LAUNCHER_BACK,
+        }
+    }
+
+    /// The page this line opens, if it opens one.
+    fn url(self) -> Option<&'static str> {
+        match self {
+            Self::Project => Some(PROJECT_URL),
+            Self::Translations => Some(TRANSLATIONS_URL),
+            Self::Back => None,
+        }
     }
 }
 
@@ -1276,5 +1436,34 @@ mod tests {
         );
         front.update_options(volume, press(Button::B));
         assert_eq!(front.screen, Screen::Main);
+    }
+
+    #[test]
+    fn the_about_screen_lists_the_pages_and_goes_back() {
+        let mut front = Front::new(&Settings::default());
+        assert_eq!(LINES[line_index(Line::About)], Line::About);
+        front.screen = Screen::About(0);
+        front.update_about(0, press(Button::Down));
+        assert_eq!(front.screen, Screen::About(1));
+        front.update_about(1, press(Button::Down));
+        front.update_about(2, press(Button::Down));
+        assert_eq!(front.screen, Screen::About(2));
+        assert_eq!(PAGES[2].url(), None);
+        assert_eq!(
+            PAGES.map(Page::url)[..2],
+            [Some(PROJECT_URL), Some(TRANSLATIONS_URL)]
+        );
+        front.update_about(2, press(Button::A));
+        assert_eq!(front.screen, Screen::Main);
+        front.screen = Screen::About(1);
+        front.update_about(1, press(Button::B));
+        assert_eq!(front.screen, Screen::Main);
+        front.screen = Screen::About(0);
+        assert!(!front.events(&[Event::Back]));
+        assert_eq!(front.screen, Screen::Main);
+        let mut frame = Frame::new(240, 160, Rgb::default());
+        front.screen = Screen::About(1);
+        front.draw(&mut frame);
+        assert_eq!(frame.pixel(0, 0), Some(BACKDROP_TOP));
     }
 }

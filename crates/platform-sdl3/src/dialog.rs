@@ -1,5 +1,6 @@
-//! The system's own dialogs, through SDL3: choosing a file, and the
-//! folder where a program keeps its settings for the user.
+//! The system's own dialogs, through SDL3: choosing a file, the folder
+//! where a program keeps its settings for the user, and opening a web page
+//! in the user's browser.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
@@ -68,4 +69,13 @@ impl Sdl3Display {
 /// Returns [`PlatformError`] when the system has none.
 pub fn preferences_dir(organization: &str, app: &str) -> Result<PathBuf, PlatformError> {
     sdl3::filesystem::get_pref_path(organization, app).map_err(backend_error)
+}
+
+/// Opens `url` in the user's web browser.
+///
+/// # Errors
+///
+/// Returns [`PlatformError`] when the system cannot open it.
+pub fn open_url(url: &str) -> Result<(), PlatformError> {
+    sdl3::url::open_url(url).map_err(backend_error)
 }

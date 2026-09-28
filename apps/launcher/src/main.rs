@@ -24,7 +24,7 @@ use platform_sdl3::{FileStorage, Sdl3Display, preferences_dir, slot_path};
 
 /// The function key that turns the debugging mode on or off.
 const DEBUG_KEY: u8 = 10;
-const USAGE: &str = "usage: launcher [<rom-path> [string-id]] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--slots <n>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a ROM the launcher shows its own screen to choose the ROM, a translation and the options (keys, gamepad buttons, window size, fullscreen, filter, volume), remembered in the user's settings folder, which the game given a ROM here plays with too; without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R by default, or the keys chosen in the launcher's options, and any gamepad: its D-pad or left stick moves, its right face button is A, the bottom one B, Start, Back = Select and the shoulders L and R, unless chosen otherwise; Esc asks whether to quit; F10 turns a debugging mode on and off: the roaming enemies are intangible, to walk through them without battles, and the protagonist's attacks beat what they hit); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --slots sets the save slots (4 by default, 1 for the original's single save): slot 1 is that .sav and slot n the same name with .n before the extension, each a save an emulator can load; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, part, dialogue, system, zoid-guide, character-guide), and the port's own messages (port), by default the title, the name entry, dialogue 30-41 and the port's messages";
+const USAGE: &str = "usage: launcher [<rom-path> [string-id]] [--version] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--slots <n>] [--translation <file.po>] [--export-template <file.pot> [table[:first-last]...]]\n  without a ROM the launcher shows its own screen to choose the ROM, a translation and the options (keys, gamepad buttons, window size, fullscreen, filter, volume), remembered in the user's settings folder, which the game given a ROM here plays with too; without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R by default, or the keys chosen in the launcher's options, and any gamepad: its D-pad or left stick moves, its right face button is A, the bottom one B, Start, Back = Select and the shoulders L and R, unless chosen otherwise; Esc asks whether to quit; F10 turns a debugging mode on and off: the roaming enemies are intangible, to walk through them without battles, and the protagonist's attacks beat what they hit); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --slots sets the save slots (4 by default, 1 for the original's single save): slot 1 is that .sav and slot n the same name with .n before the extension, each a save an emulator can load; --version prints the port's version; --translation shows the messages of a PO file; --export-template writes the PO template of the given tables (title, name-entry, pause-menu, dialogue, battle, battle-text, battle-menu, battle-label, item, name, part, system, zoid-guide, character-guide), and the port's own messages (port), by default the title, the name entry, dialogue 30-41 and the port's messages";
 const DEFAULT_TEMPLATE_SCOPES: [&str; 4] = ["title", "name-entry", "dialogue:30-41", "port"];
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_MAP: usize = extraction::saga::FIRST_ROOM_MAP;
@@ -53,6 +53,10 @@ impl Extension for StorageReport {
 
 fn main() -> Result<()> {
     let mut options = Options::parse()?;
+    if options.version {
+        println!("{} {}", front::PROJECT_NAME, front::VERSION);
+        return Ok(());
+    }
     let mut display = None;
     let mut settings = None;
     if options.rom_path.is_none()
@@ -167,6 +171,7 @@ struct Options {
     room: bool,
     translation: Option<PathBuf>,
     template: Option<(PathBuf, Vec<String>)>,
+    version: bool,
 }
 
 impl Options {
@@ -182,10 +187,12 @@ impl Options {
         let mut room = false;
         let mut translation = None;
         let mut template = None;
+        let mut version = false;
         while let Some(arg) = args.next() {
             match arg.to_str() {
                 Some("--dump") => dump_path = Some(args.next().map(PathBuf::from).context(USAGE)?),
                 Some("--room") => room = true,
+                Some("--version") => version = true,
                 Some("--save") => save_path = Some(args.next().map(PathBuf::from).context(USAGE)?),
                 Some("--slots") => {
                     slots = args
@@ -218,6 +225,7 @@ impl Options {
             room,
             translation,
             template,
+            version,
         })
     }
 }

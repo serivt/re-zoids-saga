@@ -5,7 +5,7 @@ mod dialog;
 mod pad;
 mod storage;
 
-pub use dialog::{FileChoice, preferences_dir};
+pub use dialog::{FileChoice, open_url, preferences_dir};
 pub use pad::{default_pad_buttons, pad_button_label, pad_button_name};
 pub use storage::{FileStorage, slot_path};
 

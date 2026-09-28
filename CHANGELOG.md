@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The launcher shows the port's version, and an About screen with the license and
+  links to the project's and the translations' repositories, which open in the web
+  browser; `--version` prints the version.
+
 ### Changed
 
 - Translations are published in
