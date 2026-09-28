@@ -31,7 +31,8 @@ start of chapter 4, where the game thanks the player and offers to save.
    - **Windows:** unzip the folder anywhere and run `re-zoids-saga.exe`. If SmartScreen
      warns, choose More info › Run anyway.
    - **Linux:** unpack the folder anywhere and run `./re-zoids-saga`.
-3. Choose your Zoids Saga ROM (Japan, Rev 1) and, optionally, a translation (`.po`),
+3. Choose your Zoids Saga ROM (Japan, Rev 1) and, optionally, a translation (`.po`,
+   from [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations)),
    then Play. Saves are kept next to the ROM, in the original's `.sav` format.
 
 Default keys: arrows move, X = A, Z = B, Return = START, Backspace = SELECT, A = L,

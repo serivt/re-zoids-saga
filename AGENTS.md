@@ -61,14 +61,15 @@ Core architectural rules:
 
 Localization is a first-class subsystem, not an afterthought:
 
-- Translations live outside this repository, on the project's Weblate, as gettext PO
-  files. Every message is keyed by a stable ID (script table, string index and the
-  message's offset in the string, e.g. `dialogue/40/0x2e`); see
+- Translations live outside this repository, in
+  [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations),
+  as gettext PO files. Every message is keyed by a stable ID (script table, string
+  index and the message's offset in the string, e.g. `dialogue/40/0x2e`); see
   [docs/translation.md](docs/translation.md).
-- The translation template is generated from the player's own ROM by the launcher
-  (`--export-template`) and uploaded to Weblate; the original Japanese text is
-  copyrighted ROM content and is never committed, neither as a template nor inside a
-  PO file.
+- The translation template is generated from each translator's own ROM by the
+  launcher (`--export-template`); the original Japanese text is copyrighted ROM
+  content and is never committed or published, neither as a template nor inside a PO
+  file (published PO files repeat the key as their `msgid`).
 - Players download the PO file of their language and hand it to the launcher
   (`--translation`); messages it covers replace the ROM's text at run time, the rest
   stays Japanese.
@@ -160,7 +161,7 @@ Placement rules:
 - **`crates/games/*` crates stay thin.** Anything used by more than one title moves down into `game-core`. A game crate holds only title-specific behavior, data schemas, and wiring.
 - **`apps/*` are composition roots.** Binaries wire crates together and hold no game or engine logic of their own.
 - **`crates/extraction` owns the ROM-to-database pipeline as a library.** The launcher calls it at load time; `extractor-cli` is only a development wrapper around it. Extraction must be fast enough for a first-launch experience and idempotent, so cached databases can be invalidated purely by ROM hash and extractor version.
-- **No translation data is committed.** Templates and PO files live on Weblate and on players' machines; the repository holds only the exporter and the loader. Original Japanese text is copyrighted ROM content: it is produced by extraction on the user's machine and is never committed.
+- **No translation data is committed.** PO files live in the translations repository and on players' machines, templates only on translators' machines; the repository holds only the exporter and the loader. Original Japanese text is copyrighted ROM content: it is produced by extraction on the user's machine and is never committed.
 - **`data/` is always gitignored.** Nothing derived from a ROM enters version control — including test fixtures, which must be synthetic. End users never see this directory; their extracted data lives in the OS user-data directory managed by the launcher.
 - **New code follows [docs/extensibility.md](docs/extensibility.md):** game logic reads data through a provider by stable identifier, behavior flows through events and hooks, and the engine's own features use the same contracts a mod would.
 - Dependency direction is strictly downward: `apps → games → game-core → (gba-runtime, localization, extraction, formats) → platform`. A crate importing from a layer above it is an architecture violation.

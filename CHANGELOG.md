@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Translations are published in
+  [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations),
+  keyed by message and without the ROM's Japanese text, where anyone can suggest
+  corrections.
+
 ## [0.1.0] - 2026-09-27
 
 The first playable demo of *Zoids Saga* (Japan, Rev 1), from the title through the end

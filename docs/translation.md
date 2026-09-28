@@ -1,32 +1,39 @@
 # Translations
 
 Source of knowledge: the script tables the port already runs (see
-[formats/script-text.md](formats/script-text.md)) and the gettext PO format Weblate
-speaks. Implemented in `crates/game-core/src/translation.rs`, hooked into the script
-runner (`script.rs`) and the launcher.
+[formats/script-text.md](formats/script-text.md)) and the gettext PO format.
+Implemented in `crates/game-core/src/translation.rs`, hooked into the script runner
+(`script.rs`) and the launcher.
 
-Translations live outside this repository. The Japanese text is copyrighted ROM
-content, so nothing derived from it is committed: the translation template is
-generated from a player's own ROM, uploaded to the project's Weblate, and the PO
-files translators produce are downloaded by each player and handed to the launcher.
+Translations live outside this repository, in
+[re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations).
+The Japanese text is copyrighted ROM content, so nothing derived from it is published:
+the PO files there hold each message's key and translation only (their `msgid`
+repeats the key), and the Japanese template is generated from each translator's own
+ROM. That repository's README and tools cover correcting a line, translating with the
+Japanese alongside and checking the files.
 
 ## Workflow
 
-1. A maintainer exports the template from their ROM:
+1. A translator exports the template from their own ROM:
 
    ```bash
    launcher baserom.gba --export-template zoids-saga.pot
    ```
 
    By default it covers the title menu, the name entry, dialogue strings 30–41 (the
-   helpers every conversation shares and the opening) and the port's own messages. Any tables and ranges can be
-   named instead: `title`, `name-entry`, `pause-menu`, `part` (the parts' names),
-   `dialogue` or `dialogue:30-41`,
-   the guides' `system`, `zoid-guide` and `character-guide` (see [guide.md](guide.md)),
+   helpers every conversation shares and the opening) and the port's own messages.
+   Any tables and ranges can be named instead: `title`, `name-entry`, `pause-menu`,
+   `dialogue` or `dialogue:30-41`, the battles' `battle`, `battle-text`,
+   `battle-menu` and `battle-label`, `item`, `name`, `part` (the parts' names), the
+   guides' `system`, `zoid-guide` and `character-guide` (see [guide.md](guide.md)),
    and `port`, the port's own messages (see below).
-2. The template is uploaded to Weblate as the source of a gettext component; every
-   language is a PO file with the same keys.
-3. A player downloads the PO file of their language and starts the game with it:
+2. The translations repository's `tools/add_source.py` puts the template's Japanese
+   beside a translation to edit it with any PO editor, and `tools/strip_source.py`
+   takes it out again before the file is committed; `tools/check.py` refuses Japanese
+   in a published file.
+3. A player downloads the PO file of their language from that repository and starts
+   the game with it:
 
    ```bash
    launcher baserom.gba --translation es.po
@@ -38,8 +45,9 @@ files translators produce are downloaded by each player and handed to the launch
 ## Keys and markers
 
 Each message is keyed by its script table, string index and the message's offset from
-the start of the string, e.g. `dialogue/40/0x2e` in `msgctxt`; the Japanese text is the
-`msgid`. A string can hold several messages (one per text box) and the key stays
+the start of the string, e.g. `dialogue/40/0x2e` in `msgctxt`. The loader reads only
+`msgctxt` and `msgstr`: in a template the `msgid` is the Japanese text, in a published
+translation it repeats the key. A string can hold several messages (one per text box) and the key stays
 valid however the script branches.
 
 Inside the text:

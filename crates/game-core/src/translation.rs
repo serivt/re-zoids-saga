@@ -1,11 +1,12 @@
 //! Translations kept outside the repository: a gettext PO file the player
-//! downloads (from the project's Weblate) and hands to the launcher, keyed
-//! by script table, string index and the message's offset in the string.
+//! downloads (from the project's translations repository) and hands to the
+//! launcher, keyed by script table, string index and the message's offset
+//! in the string.
 //!
 //! The Japanese text is copyrighted ROM content, so the translation
-//! template is generated from the player's own ROM by [`template`] rather
-//! than shipped; the PO files translators produce hold that text as their
-//! source strings and stay out of this repository too.
+//! template is generated from the translator's own ROM by [`template`]
+//! rather than shipped; published PO files repeat each key as their
+//! `msgid`, and only `msgctxt` and `msgstr` are read.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
