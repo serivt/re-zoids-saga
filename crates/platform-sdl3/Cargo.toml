@@ -12,6 +12,7 @@ sdl3-sys = { version = "0.7.1", optional = true }
 
 [features]
 static-sdl = ["dep:sdl3-sys", "sdl3-sys/build-from-source-static"]
+shared-sdl = ["dep:sdl3-sys", "sdl3-sys/build-from-source"]
 
 [lints]
 workspace = true

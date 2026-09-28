@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The version comes from the workspace's Cargo.toml, so the APK and the
+// desktop builds always agree.
+def cargoVersion = file('../../../../Cargo.toml').readLines()
+    .find { it.startsWith('version = ') }
+    .replaceAll(/version = "(.*)"/, '$1')
+def versionParts = cargoVersion.tokenize('.').collect { it as int }
+
+android {
+    namespace = "io.github.serivt.rezoidssaga"
+    compileSdk = 35
+    defaultConfig {
+        applicationId = "io.github.serivt.rezoidssaga"
+        minSdk = 21
+        targetSdk = 35
+        versionCode = versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
+        versionName = cargoVersion
+    }
+    signingConfigs {
+        release {
+            def keystore = System.getenv('ANDROID_KEYSTORE')
+            if (keystore) {
+                storeFile = file(keystore)
+                storePassword = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias = System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword = System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled = false
+            if (System.getenv('ANDROID_KEYSTORE')) {
+                signingConfig = signingConfigs.release
+            }
+        }
+    }
+    lint {
+        abortOnError = false
+    }
+}

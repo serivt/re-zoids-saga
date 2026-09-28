@@ -267,6 +267,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "re-zoids-saga-android"
+version = "0.1.1"
+dependencies = [
+ "launcher",
+ "platform-sdl3",
+]
+
+[[package]]
 name = "rpkg-config"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,18 @@
+[package]
+name = "re-zoids-saga-android"
+description = "The Android app's native library: SDL's Java activity loads it and it runs the launcher."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "main"
+crate-type = ["cdylib"]
+
+[dependencies]
+launcher.workspace = true
+platform-sdl3 = { workspace = true, features = ["shared-sdl"] }
+
+[lints]
+workspace = true

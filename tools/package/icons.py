@@ -5,7 +5,8 @@
 Writes, next to it: re-zoids-saga.ico (Windows: 16 to 256 pixels),
 re-zoids-saga.icns (macOS: 16 to 512 pixels, never enlarged) and
 re-zoids-saga-128.rgba (the window's icon: 128x128 pixels, 8-bit RGBA rows,
-top to bottom). Needs Pillow, and macOS's iconutil for the .icns.
+top to bottom); and the Android app's launcher icons (48 to 192 pixels, one
+per screen density). Needs Pillow, and macOS's iconutil for the .icns.
 """
 
 import subprocess
@@ -14,8 +15,11 @@ from pathlib import Path
 
 from PIL import Image
 
-FOLDER = Path(__file__).resolve().parents[2] / "assets" / "icons"
+ROOT = Path(__file__).resolve().parents[2]
+FOLDER = ROOT / "assets" / "icons"
 WINDOW = 128
+ANDROID_RES = ROOT / "apps" / "android" / "project" / "app" / "src" / "main" / "res"
+ANDROID_DENSITIES = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 
 
 def main():
@@ -36,6 +40,10 @@ def main():
                         str(FOLDER / "re-zoids-saga.icns")], check=True)
     window = master.resize((WINDOW, WINDOW), Image.LANCZOS)
     (FOLDER / f"re-zoids-saga-{WINDOW}.rgba").write_bytes(window.tobytes())
+    for density, size in ANDROID_DENSITIES.items():
+        folder = ANDROID_RES / f"mipmap-{density}"
+        folder.mkdir(parents=True, exist_ok=True)
+        master.resize((size, size), Image.LANCZOS).save(folder / "ic_launcher.png")
 
 
 main()

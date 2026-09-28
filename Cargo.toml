@@ -12,6 +12,7 @@ members = [
     "crates/games/legacy",
     "crates/games/fuzors",
     "apps/launcher",
+    "apps/android",
     "apps/extractor-cli",
 ]
 
@@ -32,6 +33,7 @@ game-core = { path = "crates/game-core" }
 game-saga = { path = "crates/games/saga" }
 game-legacy = { path = "crates/games/legacy" }
 game-fuzors = { path = "crates/games/fuzors" }
+launcher = { path = "apps/launcher" }
 
 [workspace.lints.rust]
 unsafe_code = "warn"

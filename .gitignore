@@ -12,3 +12,11 @@
 # Local development state
 .DS_Store
 __pycache__/
+
+# Android build output: the native libraries are copied in by
+# tools/package/android.sh
+/apps/android/project/.gradle/
+/apps/android/project/build/
+/apps/android/project/app/build/
+/apps/android/project/app/src/main/jniLibs/
+/apps/android/project/local.properties
