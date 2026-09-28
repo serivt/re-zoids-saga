@@ -27,9 +27,16 @@ const SAMPLED_CHANNELS: usize = 8;
 const SONG_ENTRY_SIZE: usize = 8;
 const MIDDLE_KEY: f64 = 60.0;
 const CONCERT_KEY: f64 = 69.0;
-const SAMPLED_GAIN: i32 = 24;
+/// A direct-sound channel at full volume puts its byte ×4 on the 10-bit
+/// output; the programmable channels keep four times the sampled mix's
+/// weight.
+const SAMPLED_SCALE: i32 = 4;
 const MASTER_VOLUME_STEPS: i32 = 16;
-const PSG_GAIN: i32 = 96;
+const PSG_SCALE: i32 = 16;
+/// The 10-bit output's range around its bias, where the hardware clips.
+const OUTPUT_LIMIT: i32 = 512;
+/// The 10-bit output's full range fills the 16-bit samples.
+const OUTPUT_GAIN: i32 = 64;
 const WAVE_PATTERN_SIZE: usize = 16;
 const REVERB_APPLIES: u8 = 0x80;
 const REVERB_DELAY_FRAMES: usize = 3;
@@ -431,7 +438,9 @@ impl<'rom> SoundEngine<'rom> {
             self.sampled[index] = i8::try_from(sampled).unwrap_or(0);
             self.history[(REVERB_DELAY_FRAMES - 1) * SAMPLES_PER_FRAME + index] =
                 self.sampled[index];
-            let value = (sampled * SAMPLED_GAIN + psg * PSG_GAIN).clamp(-32768, 32767);
+            let value = (sampled * SAMPLED_SCALE + psg * PSG_SCALE)
+                .clamp(-OUTPUT_LIMIT, OUTPUT_LIMIT - 1)
+                * OUTPUT_GAIN;
             let value = i16::try_from(value).unwrap_or(0);
             self.output[index * 2] = value;
             self.output[index * 2 + 1] = value;
@@ -491,7 +500,7 @@ mod tests {
         assert_eq!(frame.len(), SAMPLES_PER_FRAME * 2);
         assert_eq!(
             i32::from(frame[0]),
-            100 * 126 / 255 * 15 / 16 * SAMPLED_GAIN
+            100 * 126 / 255 * 15 / 16 * SAMPLED_SCALE * OUTPUT_GAIN
         );
         assert_eq!(frame[0], frame[1]);
         assert!(frame[63 * 2] != 0 && frame[64 * 2] == 0);

@@ -71,6 +71,12 @@ vibrato) / 12)` with the vibrato a triangle of ±modulation / 256 semitones afte
 LFO delay. Reverb adds to every sample the one the buffer held three frames earlier
 times the song's reverb value over 256.
 
+The mix goes out the way the hardware's 10-bit output takes it: the sampled byte ×4
+(a direct-sound channel at full volume) plus the programmable channels, clipped to
+±512 around the bias, and that range spans the whole 16-bit sample. The loudest songs
+peak just under full scale (song 129 at −0.1 dBFS, most music between −15 and
+−30 dBFS on average); the launcher's volume only scales it down.
+
 ## Verified
 
 The driver's sound channel records, read every frame during the title, show the
