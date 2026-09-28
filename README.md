@@ -3,9 +3,9 @@
 A FOSS native runtime for preserving *Zoids Saga* (Game Boy Advance, Japan), written in
 Rust.
 
-The game is reimplemented as a native, cross-platform application (Windows, macOS,
-Linux and eventually Android) with a modern localization layer (Japanese, English,
-Spanish), while preserving the original gameplay behavior.
+The game is *re*implemented, hence the *Re:* in its name, as a native, cross-platform
+application (Windows, macOS, Linux and eventually Android) with a modern localization
+layer (Japanese, English, Spanish), while preserving the original gameplay behavior.
 
 This is **not** an emulator and **not** a ROM hack. The original ROM is never modified
 or redistributed: it is used exclusively as a data source. You must provide your own
