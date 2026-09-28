@@ -168,6 +168,14 @@ impl Input {
             held: self.held | button.bit(),
         }
     }
+
+    /// The buttons held in this input or in `other`.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            held: self.held | other.held,
+        }
+    }
 }
 
 /// Something the person did to the display.
@@ -237,6 +245,8 @@ mod tests {
         assert!(input.is_held(Button::A));
         assert!(!input.is_held(Button::Right));
         assert_eq!(Input::default().held, 0);
+        let both = input.union(Input::default().with(Button::B));
+        assert!(both.is_held(Button::Left) && both.is_held(Button::A) && both.is_held(Button::B));
     }
 
     #[test]

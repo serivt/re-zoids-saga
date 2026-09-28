@@ -4,6 +4,7 @@
 mod dialog;
 mod pad;
 mod storage;
+mod touch;
 
 pub use dialog::{FileChoice, open_url, preferences_dir};
 pub use pad::{default_pad_buttons, pad_button_label, pad_button_name};
@@ -14,10 +15,11 @@ use sdl3::audio::{AudioFormat, AudioSpec, AudioStreamOwner};
 use sdl3::event::Event as SdlEvent;
 use sdl3::keyboard::{Keycode, Scancode};
 use sdl3::pixels::PixelFormat;
-use sdl3::render::{ScaleMode, TextureCreator, WindowCanvas};
+use sdl3::render::{BlendMode, ScaleMode, TextureCreator, WindowCanvas};
 use sdl3::surface::Surface;
 use sdl3::sys::render::{
-    SDL_LOGICAL_PRESENTATION_INTEGER_SCALE, SDL_LOGICAL_PRESENTATION_LETTERBOX,
+    SDL_LOGICAL_PRESENTATION_DISABLED, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
+    SDL_LOGICAL_PRESENTATION_LETTERBOX,
 };
 use sdl3::video::{WindowContext, WindowPos};
 use sdl3::{EventPump, Sdl};
@@ -52,11 +54,13 @@ pub enum Filter {
 
 /// A window backed by SDL3 that shows frames of a fixed size, scaled up
 /// with nearest-neighbor sampling unless a smooth filter is chosen, and
-/// reads the keyboard and every gamepad connected.
+/// reads the keyboard, every gamepad connected and, with the on-screen pad
+/// on, the fingers on a touch screen.
 pub struct Sdl3Display {
     sdl: Sdl,
     keys: Vec<(Scancode, Button)>,
     pads: Option<pad::Pads>,
+    touch: Option<touch::TouchPad>,
     filter: Filter,
     canvas: WindowCanvas,
     texture_creator: TextureCreator<WindowContext>,
@@ -104,6 +108,7 @@ impl Sdl3Display {
             sdl,
             keys: DEFAULT_KEYS.to_vec(),
             pads,
+            touch: None,
             filter: Filter::Sharp,
             canvas,
             texture_creator,
@@ -180,8 +185,10 @@ impl AudioOut for Sdl3Audio {
     }
 }
 
-impl Display for Sdl3Display {
-    fn present(&mut self, frame: &Frame) -> Result<(), PlatformError> {
+impl Sdl3Display {
+    /// Draws `frame`, and the on-screen pad when it is on, without showing
+    /// them yet.
+    fn draw(&mut self, frame: &Frame) -> Result<(), PlatformError> {
         if frame.width() != self.frame_width || frame.height() != self.frame_height {
             return Err(backend_error(format!(
                 "frame is {}x{}, display expects {}x{}",
@@ -206,10 +213,72 @@ impl Display for Sdl3Display {
         texture
             .update(None, &frame.to_rgb24(), frame.width() * BYTES_PER_PIXEL)
             .map_err(backend_error)?;
+        self.canvas.set_draw_color(sdl3::pixels::Color::BLACK);
         self.canvas.clear();
-        self.canvas
-            .copy(&texture, None, None)
+        let held = self.input();
+        if let Some(touch) = self.touch.as_mut() {
+            touch.fit(self.canvas.output_size().map_err(backend_error)?);
+            self.canvas
+                .copy(&texture, None, touch.screen())
+                .map_err(backend_error)?;
+            touch.draw(&mut self.canvas, held).map_err(backend_error)?;
+        } else {
+            self.canvas
+                .copy(&texture, None, None)
+                .map_err(backend_error)?;
+        }
+        Ok(())
+    }
+
+    /// Shows `frame` like [`Display::present`] and returns what the window
+    /// shows, in its own pixels: for screenshots and the tests that
+    /// compare them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlatformError`] when the backend cannot draw or read back.
+    pub fn present_captured(&mut self, frame: &Frame) -> Result<Frame, PlatformError> {
+        self.draw(frame)?;
+        let surface = self
+            .canvas
+            .read_pixels(None)
+            .and_then(|surface| surface.convert_format(PixelFormat::RGB24))
             .map_err(backend_error)?;
+        let (width, height) = (surface.width() as usize, surface.height() as usize);
+        let pitch = surface.pitch() as usize;
+        let mut captured = Frame::new(width, height, platform::Rgb::default());
+        surface.with_lock(|pixels| {
+            for y in 0..height {
+                for x in 0..width {
+                    let at = y * pitch + x * BYTES_PER_PIXEL;
+                    captured.set_pixel(
+                        x,
+                        y,
+                        platform::Rgb::new(pixels[at], pixels[at + 1], pixels[at + 2]),
+                    );
+                }
+            }
+        });
+        self.canvas.present();
+        Ok(captured)
+    }
+
+    /// Resizes the window to `width` by `height` pixels.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlatformError`] when the window cannot change.
+    pub fn set_window_size(&mut self, width: u32, height: u32) -> Result<(), PlatformError> {
+        self.canvas
+            .window_mut()
+            .set_size(width, height)
+            .map_err(backend_error)
+    }
+}
+
+impl Display for Sdl3Display {
+    fn present(&mut self, frame: &Frame) -> Result<(), PlatformError> {
+        self.draw(frame)?;
         self.canvas.present();
         Ok(())
     }
@@ -217,13 +286,21 @@ impl Display for Sdl3Display {
     fn input(&self) -> Input {
         let keys = self.event_pump.keyboard_state();
         let pads = self.pads.as_ref().map(pad::Pads::input).unwrap_or_default();
+        let touch = self
+            .touch
+            .as_ref()
+            .map(touch::TouchPad::input)
+            .unwrap_or_default();
         self.keys
             .iter()
             .filter(|(scancode, _)| keys.is_scancode_pressed(*scancode))
-            .fold(pads, |input, (_, button)| input.with(*button))
+            .fold(pads.union(touch), |input, (_, button)| input.with(*button))
     }
 
     fn poll_events(&mut self) -> Vec<Event> {
+        if let Some(touch) = self.touch.as_mut() {
+            touch.start_events();
+        }
         let events: Vec<SdlEvent> = self.event_pump.poll_iter().collect();
         events
             .into_iter()
@@ -242,6 +319,30 @@ impl Display for Sdl3Display {
                 }
                 SdlEvent::GamepadButtonDown { button, .. } => {
                     Some(Event::Pad(pad::pad_code(button)))
+                }
+                SdlEvent::FingerDown {
+                    finger_id, x, y, ..
+                }
+                | SdlEvent::FingerMotion {
+                    finger_id, x, y, ..
+                } => {
+                    if let Some(touch) = self.touch.as_mut() {
+                        touch.finger(finger_id, Some((x, y)));
+                    }
+                    None
+                }
+                SdlEvent::FingerUp { finger_id, .. }
+                | SdlEvent::FingerCanceled { finger_id, .. } => {
+                    if let Some(touch) = self.touch.as_mut() {
+                        touch.finger(finger_id, None);
+                    }
+                    None
+                }
+                SdlEvent::AppWillEnterBackground { .. } => {
+                    if let Some(touch) = self.touch.as_mut() {
+                        touch.release();
+                    }
+                    None
                 }
                 SdlEvent::Quit { .. } => Some(Event::Quit),
                 SdlEvent::KeyDown {
@@ -295,13 +396,7 @@ impl Sdl3Display {
     ) -> Result<(), PlatformError> {
         self.filter = filter;
         let (width, height) = (dimension(self.frame_width)?, dimension(self.frame_height)?);
-        let presentation = match filter {
-            Filter::Sharp => SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
-            Filter::Smooth => SDL_LOGICAL_PRESENTATION_LETTERBOX,
-        };
-        self.canvas
-            .set_logical_size(width, height, presentation)
-            .map_err(backend_error)?;
+        self.present_frames()?;
         let window = self.canvas.window_mut();
         window.set_fullscreen(fullscreen).map_err(backend_error)?;
         if !fullscreen {
@@ -312,6 +407,43 @@ impl Sdl3Display {
             window.set_position(WindowPos::Centered, WindowPos::Centered);
         }
         Ok(())
+    }
+
+    /// Shows the on-screen pad for touch screens, or hides it. With it the
+    /// frame fills the window's height in landscape, or its width at the
+    /// top in portrait, and the controls sit around it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlatformError`] when the renderer cannot change.
+    pub fn set_touch_pad(&mut self, on: bool) -> Result<(), PlatformError> {
+        self.touch = on.then(|| touch::TouchPad::new((self.frame_width, self.frame_height)));
+        self.canvas.set_blend_mode(if on {
+            BlendMode::Blend
+        } else {
+            BlendMode::None
+        });
+        self.present_frames()
+    }
+
+    /// Whether the on-screen pad is shown.
+    #[must_use]
+    pub fn has_touch_pad(&self) -> bool {
+        self.touch.is_some()
+    }
+
+    /// Lets SDL scale the frame to the window, unless the on-screen pad
+    /// places it itself.
+    fn present_frames(&mut self) -> Result<(), PlatformError> {
+        let (width, height) = (dimension(self.frame_width)?, dimension(self.frame_height)?);
+        let presentation = match (self.touch.is_some(), self.filter) {
+            (true, _) => SDL_LOGICAL_PRESENTATION_DISABLED,
+            (false, Filter::Sharp) => SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
+            (false, Filter::Smooth) => SDL_LOGICAL_PRESENTATION_LETTERBOX,
+        };
+        self.canvas
+            .set_logical_size(width, height, presentation)
+            .map_err(backend_error)
     }
 
     /// Gives the buttons the keys of `map`; a button it leaves out or

@@ -2,8 +2,10 @@
 
 pub mod audio;
 pub mod storage;
+pub mod touch;
 pub mod video;
 
 pub use audio::AudioOut;
 pub use storage::{SaveStorage, StorageError};
+pub use touch::TouchLayout;
 pub use video::{Button, Display, Event, Frame, Input, PlatformError, Rgb};
