@@ -6,7 +6,7 @@ mod pad;
 mod storage;
 mod touch;
 
-pub use dialog::{FileChoice, open_url, preferences_dir};
+pub use dialog::{FileChoice, open_url, preferences_dir, read_file};
 pub use pad::{default_pad_buttons, pad_button_label, pad_button_name};
 pub use storage::{FileStorage, slot_path};
 
@@ -14,6 +14,7 @@ use platform::{AudioOut, Button, Display, Event, Frame, Input, PlatformError};
 use sdl3::audio::{AudioFormat, AudioSpec, AudioStreamOwner};
 use sdl3::event::Event as SdlEvent;
 use sdl3::keyboard::{Keycode, Scancode};
+use sdl3::mouse::MouseButton;
 use sdl3::pixels::PixelFormat;
 use sdl3::render::{BlendMode, ScaleMode, TextureCreator, WindowCanvas};
 use sdl3::surface::Surface;
@@ -305,6 +306,16 @@ impl Display for Sdl3Display {
         events
             .into_iter()
             .filter_map(|event| match event {
+                SdlEvent::MouseButtonDown {
+                    mouse_btn: MouseButton::Left,
+                    ..
+                } if self.touch.is_none() => match event.get_converted_coords(&self.canvas) {
+                    Some(SdlEvent::MouseButtonDown { x, y, .. }) => Some(Event::Pointer {
+                        x: pixel(x),
+                        y: pixel(y),
+                    }),
+                    _ => None,
+                },
                 SdlEvent::GamepadAdded { which, .. } => {
                     if let Some(pads) = self.pads.as_mut() {
                         pads.add(which);
@@ -499,6 +510,13 @@ fn function_key(keycode: Keycode) -> Option<u8> {
     ];
     let index = KEYS.iter().position(|&key| key == keycode)?;
     u8::try_from(index + 1).ok()
+}
+
+/// A position in the frame, in whole pixels (a pointer outside it gives a
+/// negative or too large one).
+#[allow(clippy::cast_possible_truncation)]
+fn pixel(position: f32) -> i32 {
+    position.floor() as i32
 }
 
 fn dimension(pixels: usize) -> Result<u32, PlatformError> {

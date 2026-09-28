@@ -386,7 +386,7 @@ fn play(
                         }
                     );
                 }
-                Event::FunctionKey(_) | Event::Key(_) | Event::Pad(_) => {}
+                Event::FunctionKey(_) | Event::Key(_) | Event::Pad(_) | Event::Pointer { .. } => {}
             }
         }
         let input = display.input();

@@ -262,6 +262,9 @@ pub struct Front {
     quitting: Option<QuitPrompt>,
     /// Whether the last page asked for could not be opened.
     unopened: bool,
+    /// Where the screen was last touched or clicked, until a frame takes
+    /// it as the line under it chosen.
+    tapped: Option<(i32, i32)>,
     line: usize,
     screen: Screen,
     choosing: Option<(Line, FileChoice)>,
@@ -307,6 +310,7 @@ impl Front {
             gamepads: Vec::new(),
             caught: false,
             quitting: None,
+            tapped: None,
             unopened: false,
             line: 0,
             screen: Screen::Main,
@@ -450,6 +454,7 @@ impl Front {
                         waiting: true,
                     },
                 ) => self.caught(Device::Gamepad, entry, pad_button_name(code)),
+                (Event::Pointer { x, y }, _) => self.tapped = Some((x, y)),
                 _ => {}
             }
         }
@@ -471,11 +476,12 @@ impl Front {
 
     /// A frame of the buttons, or of a dialog's answer while one is open.
     fn update(&mut self, display: &Sdl3Display, input: Input) -> Result<Step> {
-        let pressed = Button::ALL
+        let mut pressed = Button::ALL
             .into_iter()
             .filter(|&button| input.is_held(button) && !self.previous.is_held(button))
             .fold(Input::default(), Input::with);
         self.previous = input;
+        let tapped = self.tapped.take();
         if std::mem::take(&mut self.caught) {
             return Ok(Step::Stay);
         }
@@ -492,12 +498,18 @@ impl Front {
                 let line = *line;
                 self.choosing = None;
                 match (line, answer) {
-                    (Line::Rom, Some(path)) => self.take_rom(path),
-                    (Line::Translation, Some(path)) => self.take_translation(path),
+                    (Line::Rom, Some(path)) => self.take_rom(keep(path, KEPT_ROM)),
+                    (Line::Translation, Some(path)) => {
+                        let name = kept_translation_name(&path);
+                        self.take_translation(keep(path, &name));
+                    }
                     _ => {}
                 }
             }
             return Ok(Step::Stay);
+        }
+        if let Some((x, y)) = tapped {
+            pressed = pressed.union(self.tap(x, y));
         }
         match self.screen {
             Screen::Main => return self.update_main(display, pressed),
@@ -511,6 +523,57 @@ impl Front {
             Screen::Bindings { .. } => {}
         }
         Ok(Step::Stay)
+    }
+
+    /// A touch or a click at (`x`, `y`) of the frame: the line under it
+    /// becomes the selected one and is chosen, as X does; on the window's
+    /// size and the volume, the left half of the screen lowers them and the
+    /// right half raises them. Returns the buttons it stands for.
+    fn tap(&mut self, x: i32, y: i32) -> Input {
+        let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
+            return Input::default();
+        };
+        if !(PANEL.0..PANEL.0 + PANEL.2).contains(&x) {
+            return Input::default();
+        }
+        let chosen = Input::default().with(Button::A);
+        match self.screen {
+            Screen::Main => {
+                let Some(line) = row_at(y, FIRST_LINE_Y, LINE_HEIGHT, LINES.len()) else {
+                    return Input::default();
+                };
+                self.line = line;
+                chosen
+            }
+            Screen::Options(_) => {
+                let Some(line) =
+                    row_at(y, OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, SETTINGS.len())
+                else {
+                    return Input::default();
+                };
+                self.screen = Screen::Options(line);
+                match SETTINGS[line] {
+                    Setting::Window | Setting::Volume if x < SCREEN_MIDDLE => {
+                        Input::default().with(Button::Left)
+                    }
+                    Setting::Window | Setting::Volume => Input::default().with(Button::Right),
+                    _ => chosen,
+                }
+            }
+            Screen::About(_) => {
+                let Some(line) = about_rows().iter().position(|&(top, rows)| {
+                    (top..top + rows * OPTION_LINE_HEIGHT).contains(&(y + 1))
+                }) else {
+                    return Input::default();
+                };
+                if Screen::About(line) != self.screen {
+                    self.unopened = false;
+                }
+                self.screen = Screen::About(line);
+                chosen
+            }
+            Screen::Bindings { .. } => Input::default(),
+        }
     }
 
     fn update_main(&mut self, display: &Sdl3Display, pressed: Input) -> Result<Step> {
@@ -850,8 +913,7 @@ impl Front {
             );
             y += OPTION_LINE_HEIGHT;
         }
-        y += OPTION_LINE_HEIGHT / 5;
-        for (index, page) in PAGES.iter().enumerate() {
+        for ((index, page), (y, _)) in PAGES.iter().enumerate().zip(about_rows()) {
             let is_selected = index == selected;
             let color = if is_selected { TEXT } else { DIM };
             self.draw_line(
@@ -873,9 +935,6 @@ impl Front {
                     address_color,
                     1,
                 );
-                y += PAGE_ROWS * OPTION_LINE_HEIGHT;
-            } else {
-                y += OPTION_LINE_HEIGHT;
             }
         }
     }
@@ -1164,6 +1223,92 @@ impl Device {
     }
 }
 
+/// The name the ROM is kept under in the app's own folder, when the
+/// system's dialog hands it over as a document (see [`keep`]).
+const KEPT_ROM: &str = "rom.gba";
+const KEPT_TRANSLATION: &str = "translation";
+const CONTENT_SCHEME: &str = "content://";
+
+/// The file to use for `path`, chosen in the system's dialog: a document
+/// Android hands over as a `content://` URI is copied once into the app's
+/// own folder under `name`, and that copy is read and remembered from then
+/// on, as the URI stops working when the app closes; any other path is used
+/// as it is. A copy that fails leaves the URI, which then reads as
+/// unreadable.
+fn keep(path: PathBuf, name: &str) -> PathBuf {
+    if !path.to_string_lossy().starts_with(CONTENT_SCHEME) {
+        return path;
+    }
+    let copied =
+        platform_sdl3::preferences_dir(crate::settings::ORGANIZATION, crate::settings::APP)
+            .ok()
+            .and_then(|folder| {
+                let bytes = platform_sdl3::read_file(&path).ok()?;
+                let kept = folder.join(name);
+                std::fs::write(&kept, bytes).ok()?;
+                Some(kept)
+            });
+    copied.unwrap_or(path)
+}
+
+/// The name a translation handed over as a document is kept under: its
+/// language (`Language: es` in the PO header gives `es.po`), so the
+/// Translation line still says which it is.
+fn kept_translation_name(path: &Path) -> String {
+    let language = platform_sdl3::read_file(path)
+        .ok()
+        .and_then(|bytes| po_language(&String::from_utf8_lossy(&bytes)));
+    format!(
+        "{}.po",
+        language.unwrap_or_else(|| KEPT_TRANSLATION.to_owned())
+    )
+}
+
+/// The language code of a PO file's header, if it has one made of letters,
+/// digits, `-` and `_` only.
+fn po_language(text: &str) -> Option<String> {
+    let start = text.find("Language:")? + "Language:".len();
+    let code: String = text[start..]
+        .trim_start()
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .collect();
+    (!code.is_empty()).then_some(code)
+}
+
+/// Android shows the app on the whole screen, over its status and
+/// navigation bars, whatever the settings say.
+const ALWAYS_FULLSCREEN: bool = cfg!(target_os = "android");
+/// The middle of the screen, which splits a tap on a value into lower and
+/// raise.
+const SCREEN_MIDDLE: usize = 120;
+/// The facts the about screen shows above its pages.
+const ABOUT_FACTS: usize = 2;
+
+/// The row of a list whose first row's text starts at `first`, `height`
+/// pixels apart, that pixel row `y` falls in (from a pixel above each
+/// text), if one of its `count` rows.
+fn row_at(y: usize, first: usize, height: usize, count: usize) -> Option<usize> {
+    let row = (y + 1).checked_sub(first)? / height;
+    (row < count).then_some(row)
+}
+
+/// Where each page's line of the about screen starts and how many rows
+/// it takes (with its address below it), after the version and the
+/// license.
+fn about_rows() -> Vec<(usize, usize)> {
+    let mut y = OPTIONS_FIRST_LINE_Y + ABOUT_FACTS * OPTION_LINE_HEIGHT + OPTION_LINE_HEIGHT / 5;
+    PAGES
+        .iter()
+        .map(|page| {
+            let rows = if page.url().is_some() { PAGE_ROWS } else { 1 };
+            let top = y;
+            y += rows * OPTION_LINE_HEIGHT;
+            (top, rows)
+        })
+        .collect()
+}
+
 fn line_index(line: Line) -> usize {
     LINES.iter().position(|shown| *shown == line).unwrap_or(0)
 }
@@ -1223,7 +1368,8 @@ fn remember(front: &Front, settings_path: Option<&Path>) {
 pub fn apply(display: &mut Sdl3Display, settings: &Settings) -> Result<()> {
     display.set_keys(&settings.keys);
     display.set_pad_buttons(&settings.pad_buttons);
-    display.set_video(settings.scale, settings.fullscreen, settings.filter)?;
+    let fullscreen = settings.fullscreen || ALWAYS_FULLSCREEN;
+    display.set_video(settings.scale, fullscreen, settings.filter)?;
     Ok(())
 }
 
@@ -1246,7 +1392,8 @@ fn display_changed(before: &Settings, after: &Settings) -> bool {
 
 /// Shows the screen until the player starts the game, with what they
 /// chose, or leaves (`None`); the options chosen take hold in `display` at
-/// once, and every choice is remembered in `settings_path` when the game
+/// once, and every choice is remembered in `settings_path` as soon as it
+/// is made (Android may close the app at any moment) and when the game
 /// starts or the launcher closes.
 ///
 /// # Errors
@@ -1274,6 +1421,9 @@ pub fn run(display: &mut Sdl3Display, settings_path: Option<&Path>) -> Result<Op
         let current = front.settings();
         if display_changed(&applied, &current) {
             apply(display, &current)?;
+        }
+        if current != applied {
+            remember(&front, settings_path);
         }
         applied = current;
         match step {
@@ -1369,6 +1519,26 @@ mod tests {
             assert!(default_text(kind.message()).is_some());
         }
         assert!(RomKind::Verified.playable());
+    }
+
+    #[test]
+    fn a_path_that_is_not_a_document_is_used_as_it_is() {
+        let path = PathBuf::from("/games/zoids.gba");
+        assert_eq!(keep(path.clone(), KEPT_ROM), path);
+    }
+
+    #[test]
+    fn a_kept_translation_is_named_after_its_language() {
+        assert_eq!(
+            po_language("msgid \"\"\nmsgstr \"\"\n\"Language: es\\n\"\n"),
+            Some("es".to_owned())
+        );
+        assert_eq!(
+            po_language("\"Language: pt_BR\\n\""),
+            Some("pt_BR".to_owned())
+        );
+        assert_eq!(po_language("\"Language: \\n\""), None);
+        assert_eq!(po_language("no header"), None);
     }
 
     #[test]
@@ -1515,5 +1685,46 @@ mod tests {
         front.screen = Screen::About(1);
         front.draw(&mut frame);
         assert_eq!(frame.pixel(0, 0), Some(BACKDROP_TOP));
+    }
+
+    /// The pixel row in the middle of row `row` of a list.
+    fn middle_of(first: usize, height: usize, row: usize) -> i32 {
+        i32::try_from(first + row * height + height / 2).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_tap_selects_and_chooses_the_line_under_it() {
+        let mut front = Front::new(&Settings::default());
+        let x = i32::try_from(LABEL_X).unwrap_or_default();
+        let options = line_index(Line::Options);
+        let pressed = front.tap(x, middle_of(FIRST_LINE_Y, LINE_HEIGHT, options));
+        assert_eq!(front.line, options);
+        assert_eq!(pressed, press(Button::A));
+        assert_eq!(front.tap(x, 2), Input::default(), "above the list");
+        assert_eq!(front.tap(-4, 60), Input::default(), "outside the panel");
+        assert_eq!(front.line, options);
+
+        front.screen = Screen::Options(0);
+        let volume = line_of(Setting::Volume);
+        let y = middle_of(OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, volume);
+        assert_eq!(front.tap(40, y), press(Button::Left));
+        assert_eq!(front.tap(200, y), press(Button::Right));
+        assert_eq!(front.screen, Screen::Options(volume));
+        let back = line_of(Setting::Back);
+        let y = middle_of(OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, back);
+        assert_eq!(front.tap(x, y), press(Button::A));
+
+        front.screen = Screen::About(0);
+        let (top, _) = about_rows()[2];
+        let y = i32::try_from(top + 2).unwrap_or_default();
+        assert_eq!(front.tap(x, y), press(Button::A));
+        assert_eq!(front.screen, Screen::About(2));
+    }
+
+    #[test]
+    fn a_pointer_event_waits_for_the_next_frame() {
+        let mut front = Front::new(&Settings::default());
+        assert!(!front.events(&[Event::Pointer { x: 30, y: 60 }]));
+        assert_eq!(front.tapped, Some((30, 60)));
     }
 }

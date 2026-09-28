@@ -193,6 +193,16 @@ pub enum Event {
     /// A gamepad's button went down, by the backend's code for it, for
     /// choosing the gamepad's buttons.
     Pad(u32),
+    /// The screen was touched, or clicked with the mouse's main button, at
+    /// this point of the frame (pixels from its top left corner), for
+    /// screens that answer to pointing; never while the on-screen pad is
+    /// shown.
+    Pointer {
+        /// Pixels from the frame's left edge.
+        x: i32,
+        /// Pixels from the frame's top edge.
+        y: i32,
+    },
 }
 
 /// A failure of the platform backend.

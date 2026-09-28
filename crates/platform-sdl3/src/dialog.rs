@@ -71,6 +71,19 @@ pub fn preferences_dir(organization: &str, app: &str) -> Result<PathBuf, Platfor
     sdl3::filesystem::get_pref_path(organization, app).map_err(backend_error)
 }
 
+/// Reads the whole file at `path`, which may also be the `content://` URI
+/// Android's dialog gives for a document.
+///
+/// # Errors
+///
+/// Returns [`PlatformError`] when the file cannot be opened or read.
+pub fn read_file(path: &Path) -> Result<Vec<u8>, PlatformError> {
+    let mut stream = sdl3::iostream::IOStream::from_file(path, "rb").map_err(backend_error)?;
+    let mut bytes = Vec::new();
+    std::io::Read::read_to_end(&mut stream, &mut bytes).map_err(backend_error)?;
+    Ok(bytes)
+}
+
 /// Opens `url` in the user's web browser.
 ///
 /// # Errors
