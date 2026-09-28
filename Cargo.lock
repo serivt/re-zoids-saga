@@ -100,7 +100,7 @@ checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
 
 [[package]]
 name = "extraction"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "encoding_rs",
  "formats",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "extractor-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "extraction",
@@ -126,7 +126,7 @@ checksum = "3e0f1c7c3a72c66fd80abe965175f7523475c0489a87d3ff9d6e8c87d87a9d2d"
 
 [[package]]
 name = "formats"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "encoding_rs",
  "thiserror",
@@ -134,7 +134,7 @@ dependencies = [
 
 [[package]]
 name = "game-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "extraction",
  "formats",
@@ -146,28 +146,28 @@ dependencies = [
 
 [[package]]
 name = "game-fuzors"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "game-core",
 ]
 
 [[package]]
 name = "game-legacy"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "game-core",
 ]
 
 [[package]]
 name = "game-saga"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "game-core",
 ]
 
 [[package]]
 name = "gba-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "formats",
  "platform",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "launcher"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "extraction",
@@ -224,7 +224,7 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "localization"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "pkg-config"
@@ -234,14 +234,14 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "platform"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "platform-sdl3"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "platform",
  "sdl3",
