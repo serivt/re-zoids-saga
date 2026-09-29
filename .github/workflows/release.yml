@@ -1,6 +1,10 @@
-# Builds the packages players download, for macOS, Windows and Linux, with
-# the scripts in tools/package, each with a .sha256 file holding its SHA-256
-# checksum. Publishing a GitHub release (its tag, title, notes and prerelease
+# Builds the packages players download, for macOS, Windows, Linux and
+# Android, with the scripts in tools/package, each with a .sha256 file holding
+# its SHA-256 checksum. The Android app is signed with the keystore in the
+# ANDROID_KEYSTORE_BASE64 secret (ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
+# ANDROID_KEY_PASSWORD), which a release needs; without it a run by hand
+# builds it with the debug key. It is then started on an emulator, without a
+# ROM, to check that it shows the launcher. Publishing a GitHub release (its tag, title, notes and prerelease
 # mark written by hand) builds them from the release's tag and attaches them
 # to it; running the workflow by hand only keeps them as the run's artifacts.
 
@@ -99,15 +103,113 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  android:
+    name: Package (Android)
+    runs-on: ubuntu-24.04
+    env:
+      ABIS: arm64-v8a x86_64
+      NDK_VERSION: 27.3.13750724
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install the NDK and the Android targets
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install \
+            "ndk;$NDK_VERSION" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+          rustup target add aarch64-linux-android x86_64-linux-android
+          cargo install cargo-ndk --version 4.1.2 --locked
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: Android
+
+      - name: Keystore
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [[ -n "$KEYSTORE" ]]; then
+            base64 --decode <<< "$KEYSTORE" > "$RUNNER_TEMP/release.jks"
+            echo "ANDROID_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "BUILD=release" >> "$GITHUB_ENV"
+          elif [[ "$GITHUB_EVENT_NAME" == release ]]; then
+            echo "::error::a release needs the ANDROID_KEYSTORE_BASE64 secret"
+            exit 1
+          else
+            echo "BUILD=debug" >> "$GITHUB_ENV"
+          fi
+
+      - name: Package
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: tools/package/android.sh "$VERSION" "$BUILD"
+
+      - name: Checksum
+        working-directory: dist
+        run: |
+          for package in *.apk; do
+            sha256sum "$package" > "$package.sha256"
+            cat "$package.sha256"
+          done
+
+      - name: Let the emulator use KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Start it on an emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: tools/package/android-smoke.sh dist/re-zoids-saga-$VERSION-android.apk dist/smoke/android-smoke.png
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package-Android
+          path: |
+            dist/*.apk
+            dist/*.apk.sha256
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: android-smoke
+          path: dist/smoke/
+          if-no-files-found: ignore
+
   release:
     name: Release
     if: github.event_name == 'release'
-    needs: package
+    needs: [package, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
         with:
           path: dist
+          pattern: package-*
           merge-multiple: true
 
       - name: Attach to the release
