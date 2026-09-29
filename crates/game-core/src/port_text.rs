@@ -92,6 +92,10 @@ pub const LAUNCHER_DOWNLOADING: &str = "port/launcher/downloading";
 pub const LAUNCHER_DOWNLOAD_FAILED: &str = "port/launcher/download-failed";
 /// See [`LAUNCHER_FROM_FILE`].
 pub const LAUNCHER_TRANSLATION_HELP: &str = "port/launcher/translation-help";
+/// The options of the on-screen pad's size and opacity, on Android.
+pub const LAUNCHER_TOUCH_SIZE: &str = "port/launcher/touch-size";
+/// See [`LAUNCHER_TOUCH_SIZE`].
+pub const LAUNCHER_TOUCH_OPACITY: &str = "port/launcher/touch-opacity";
 /// The ROM is the known release.
 pub const LAUNCHER_ROM_VERIFIED: &str = "port/launcher/rom-verified";
 /// The ROM is the game's first release, which the port does not play.
@@ -240,6 +244,16 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
     launcher(LAUNCHER_ON, "on", "A setting that is on"),
     launcher(LAUNCHER_OFF, "off", "A setting that is off"),
     launcher(LAUNCHER_VOLUME, "Volume", "The line of the sound's volume"),
+    launcher(
+        LAUNCHER_TOUCH_SIZE,
+        "Pad size",
+        "The line of the on-screen pad's size, on Android",
+    ),
+    launcher(
+        LAUNCHER_TOUCH_OPACITY,
+        "Pad opacity",
+        "The line of the on-screen pad's opacity, on Android",
+    ),
     launcher_line(
         LAUNCHER_OPTIONS_HELP,
         "Left/Right: change   X: choose   Z: back",

@@ -1,7 +1,7 @@
 //! What the launcher remembers between runs: the ROM and the translation
-//! last played, the window, the sound and the keys and gamepad buttons
-//! chosen for the pad's buttons, one `key=value` line each, in the user's
-//! settings folder.
+//! last played, the window, the sound, the keys and gamepad buttons chosen
+//! for the pad's buttons and the on-screen pad's size and opacity, one
+//! `key=value` line each, in the user's settings folder.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -19,6 +19,8 @@ const SCALE_KEY: &str = "scale";
 const FULLSCREEN_KEY: &str = "fullscreen";
 const FILTER_KEY: &str = "filter";
 const VOLUME_KEY: &str = "volume";
+const TOUCH_SIZE_KEY: &str = "touch-size";
+const TOUCH_OPACITY_KEY: &str = "touch-opacity";
 const SHARP: &str = "sharp";
 const SMOOTH: &str = "smooth";
 /// The window's size in multiples of the screen, its default and the
@@ -28,6 +30,12 @@ pub const SCALES: std::ops::RangeInclusive<u32> = 1..=6;
 pub const DEFAULT_SCALE: u32 = 3;
 /// See [`SCALES`].
 pub const FULL_VOLUME: u8 = 100;
+/// The on-screen pad's size and opacity, in percent of their usual ones.
+pub const TOUCH_SIZES: std::ops::RangeInclusive<u8> = 60..=140;
+/// See [`TOUCH_SIZES`].
+pub const TOUCH_OPACITIES: std::ops::RangeInclusive<u8> = 20..=100;
+/// See [`TOUCH_SIZES`].
+pub const USUAL_TOUCH: u8 = 100;
 /// The settings folder's organization and program names, and the file in
 /// it.
 pub const ORGANIZATION: &str = "re-zoids-saga";
@@ -56,6 +64,10 @@ pub struct Settings {
     pub filter: Filter,
     /// The sound's volume, in percent.
     pub volume: u8,
+    /// The on-screen pad's size, in percent of its usual one.
+    pub touch_size: u8,
+    /// The on-screen pad's opacity, in percent of its usual one.
+    pub touch_opacity: u8,
 }
 
 impl Default for Settings {
@@ -69,6 +81,8 @@ impl Default for Settings {
             fullscreen: false,
             filter: Filter::Sharp,
             volume: FULL_VOLUME,
+            touch_size: USUAL_TOUCH,
+            touch_opacity: USUAL_TOUCH,
         }
     }
 }
@@ -116,6 +130,21 @@ impl Settings {
                         settings.volume = volume.min(FULL_VOLUME);
                     }
                 }
+                TOUCH_SIZE_KEY => {
+                    if let Some(size) = value.parse().ok().filter(|size| TOUCH_SIZES.contains(size))
+                    {
+                        settings.touch_size = size;
+                    }
+                }
+                TOUCH_OPACITY_KEY => {
+                    if let Some(opacity) = value
+                        .parse()
+                        .ok()
+                        .filter(|opacity| TOUCH_OPACITIES.contains(opacity))
+                    {
+                        settings.touch_opacity = opacity;
+                    }
+                }
                 _ => {}
             }
         }
@@ -146,6 +175,11 @@ impl Settings {
             self.scale,
             u8::from(self.fullscreen),
             self.volume
+        );
+        let _ = writeln!(
+            text,
+            "{TOUCH_SIZE_KEY}={}\n{TOUCH_OPACITY_KEY}={}",
+            self.touch_size, self.touch_opacity
         );
         for (button, key) in &self.keys {
             let _ = writeln!(text, "{BUTTON_PREFIX}{}={key}", button.name());
@@ -192,6 +226,8 @@ mod tests {
             fullscreen: true,
             filter: Filter::Smooth,
             volume: 70,
+            touch_size: 120,
+            touch_opacity: 40,
         };
         assert_eq!(Settings::parse(&settings.to_text()), settings);
         let read = Settings::parse("# notes\ntranslation=es.po\nrom=a=b.gba\nother=1\n");
@@ -200,7 +236,13 @@ mod tests {
         assert_eq!(Settings::parse(""), Settings::default());
         let keys = Settings::parse("key.b=Q\nkey.b=E\nkey.turbo=T\nkey.a=\n").keys;
         assert_eq!(keys, [(Button::B, "E".to_owned())]);
-        let odd = Settings::parse("scale=40\nvolume=250\nfilter=blurry\nfullscreen=yes\n");
+        let odd = Settings::parse(
+            "scale=40\nvolume=250\nfilter=blurry\nfullscreen=yes\ntouch-size=300\ntouch-opacity=5\n",
+        );
+        assert_eq!(
+            (odd.touch_size, odd.touch_opacity),
+            (USUAL_TOUCH, USUAL_TOUCH)
+        );
         assert_eq!(
             (odd.scale, odd.volume, odd.filter, odd.fullscreen),
             (DEFAULT_SCALE, FULL_VOLUME, Filter::Sharp, false)

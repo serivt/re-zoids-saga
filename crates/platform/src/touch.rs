@@ -12,6 +12,8 @@
 
 use crate::{Button, Input};
 
+/// How large the controls can be made, against their usual size.
+pub const SIZES: std::ops::RangeInclusive<f32> = 0.6..=1.4;
 /// The cross's size and the buttons' against the window's short side.
 const CROSS_RADIUS: f32 = 0.16;
 const BUTTON_RADIUS: f32 = 0.075;
@@ -97,15 +99,28 @@ impl TouchLayout {
     /// game screen of `frame` (width, height), keeping its proportions.
     #[must_use]
     pub fn new(window: (f32, f32), frame: (f32, f32)) -> Self {
+        Self::sized(window, frame, 1.0)
+    }
+
+    /// [`Self::new`] with the controls `size` times as large (and as far
+    /// from each other and the edges), from [`SIZES`]' least to its most.
+    #[must_use]
+    pub fn sized(window: (f32, f32), frame: (f32, f32), size: f32) -> Self {
         let (width, height) = window;
+        let size = size.clamp(*SIZES.start(), *SIZES.end());
         if width >= height {
-            Self::landscape(width, height, frame)
+            Self::landscape(width, height, frame, size)
         } else {
-            Self::portrait(width, height, frame)
+            Self::portrait(width, height, frame, size)
         }
     }
 
-    fn landscape(width: f32, height: f32, (frame_width, frame_height): (f32, f32)) -> Self {
+    fn landscape(
+        width: f32,
+        height: f32,
+        (frame_width, frame_height): (f32, f32),
+        size: f32,
+    ) -> Self {
         let scale = (height / frame_height).min(width / frame_width);
         let screen = Area {
             x: (width - frame_width * scale) / 2.0,
@@ -113,14 +128,20 @@ impl TouchLayout {
             width: frame_width * scale,
             height: frame_height * scale,
         };
-        let unit = height;
-        let side = screen.x.max(unit * (CROSS_RADIUS + 0.04));
-        let left = (side / 2.0).max(unit * (CROSS_RADIUS + 0.04));
+        let unit = height * size;
+        let margin = screen.x.max(unit * (CROSS_RADIUS + 0.04));
+        let left = (margin / 2.0).max(unit * (CROSS_RADIUS + 0.04));
         let right = width - left;
+        let buttons_y = height * 0.5 - unit * 0.04;
         let controls = vec![
             cross(left, height * 0.6, unit),
-            button(Button::A, right + unit * 0.065, height * 0.5, unit),
-            button(Button::B, right - unit * 0.075, height * 0.68, unit),
+            button(Button::A, right + unit * 0.065, buttons_y, unit),
+            button(
+                Button::B,
+                right - unit * 0.075,
+                buttons_y + unit * 0.18,
+                unit,
+            ),
             pill(Button::L, unit * 0.03, unit * 0.03, SHOULDER_SIZE, unit),
             pill(
                 Button::R,
@@ -135,7 +156,12 @@ impl TouchLayout {
         Self { screen, controls }
     }
 
-    fn portrait(width: f32, height: f32, (frame_width, frame_height): (f32, f32)) -> Self {
+    fn portrait(
+        width: f32,
+        height: f32,
+        (frame_width, frame_height): (f32, f32),
+        size: f32,
+    ) -> Self {
         let scale = width / frame_width;
         let screen = Area {
             x: 0.0,
@@ -143,13 +169,23 @@ impl TouchLayout {
             width,
             height: frame_height * scale,
         };
-        let unit = width;
+        let unit = width * size;
         let top = screen.height;
         let middle = top + (height - top) * 0.5;
         let controls = vec![
-            cross(width * 0.25, middle, unit),
-            button(Button::A, width * 0.84, middle - unit * 0.05, unit),
-            button(Button::B, width * 0.66, middle + unit * 0.07, unit),
+            cross(unit * (CROSS_RADIUS + 0.09), middle, unit),
+            button(
+                Button::A,
+                width - unit * (BUTTON_RADIUS + 0.085),
+                middle - unit * 0.05,
+                unit,
+            ),
+            button(
+                Button::B,
+                width - unit * (BUTTON_RADIUS + 0.265),
+                middle + unit * 0.07,
+                unit,
+            ),
             pill(
                 Button::L,
                 unit * 0.03,
@@ -164,8 +200,18 @@ impl TouchLayout {
                 SHOULDER_SIZE,
                 unit,
             ),
-            centered_pill(Button::Select, width * 0.4, height - unit * 0.08, unit),
-            centered_pill(Button::Start, width * 0.6, height - unit * 0.08, unit),
+            centered_pill(
+                Button::Select,
+                width * 0.5 - unit * 0.1,
+                height - unit * 0.08,
+                unit,
+            ),
+            centered_pill(
+                Button::Start,
+                width * 0.5 + unit * 0.1,
+                height - unit * 0.08,
+                unit,
+            ),
         ];
         Self { screen, controls }
     }
@@ -341,6 +387,30 @@ mod tests {
                 assert!(buttons.contains(&Control::Button(button)));
             }
             assert!(buttons.contains(&Control::Cross));
+        }
+    }
+
+    #[test]
+    fn every_size_fits_and_grows_the_controls() {
+        for window in [
+            (2400.0, 1080.0),
+            (1920.0, 1080.0),
+            (1080.0, 2400.0),
+            (800.0, 1280.0),
+        ] {
+            let mut last = 0.0;
+            for size in [0.6, 0.8, 1.0, 1.2, 1.4, 3.0] {
+                let layout = TouchLayout::sized(window, FRAME, size);
+                for placed in &layout.controls {
+                    assert!(
+                        inside(bounds(placed.shape), window),
+                        "{window:?} {size} {placed:?}"
+                    );
+                }
+                let (_, _, radius) = circle(&layout, Control::Cross);
+                assert!(radius >= last, "{window:?} {size}");
+                last = radius;
+            }
         }
     }
 

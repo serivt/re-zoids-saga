@@ -30,9 +30,10 @@ use game_core::port_text::{
     LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT,
     LAUNCHER_ROM, LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
     LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SHARP, LAUNCHER_SMOOTH,
-    LAUNCHER_SUBTITLE, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ,
-    LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_VERSION,
-    LAUNCHER_VOLUME, LAUNCHER_WINDOW, default_text,
+    LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_OPACITY, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION,
+    LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE,
+    LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WINDOW,
+    default_text,
 };
 use game_core::{TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -43,7 +44,7 @@ use platform_sdl3::{
 
 use crate::download::{Answer, Download, Language};
 use crate::quit::QuitPrompt;
-use crate::settings::{FULL_VOLUME, SCALES, Settings};
+use crate::settings::{FULL_VOLUME, SCALES, Settings, TOUCH_OPACITIES, TOUCH_SIZES};
 
 /// The project's name, never translated.
 pub const PROJECT_NAME: &str = "Re:Zoids Saga";
@@ -146,10 +147,13 @@ enum Setting {
     Fullscreen,
     Filter,
     Volume,
+    TouchSize,
+    TouchOpacity,
     Back,
 }
 
-const SETTINGS: [Setting; 7] = [
+/// The options on the desktop.
+const DESKTOP_SETTINGS: [Setting; 7] = [
     Setting::Keyboard,
     Setting::Gamepad,
     Setting::Window,
@@ -158,6 +162,27 @@ const SETTINGS: [Setting; 7] = [
     Setting::Volume,
     Setting::Back,
 ];
+
+/// The options on Android: the window always fills the screen and there
+/// is no keyboard; the on-screen pad has its size and opacity.
+const ANDROID_SETTINGS: [Setting; 6] = [
+    Setting::Gamepad,
+    Setting::Filter,
+    Setting::Volume,
+    Setting::TouchSize,
+    Setting::TouchOpacity,
+    Setting::Back,
+];
+
+/// The options this platform shows.
+const SETTINGS: &[Setting] = if cfg!(target_os = "android") {
+    &ANDROID_SETTINGS
+} else {
+    &DESKTOP_SETTINGS
+};
+
+/// How much a step of the pad's size or opacity changes it, in percent.
+const TOUCH_STEP: u8 = 10;
 
 /// What a binding screen binds the buttons to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -262,6 +287,8 @@ pub struct Front {
     fullscreen: bool,
     filter: Filter,
     volume: u8,
+    touch_size: u8,
+    touch_opacity: u8,
     gamepads: Vec<String>,
     /// Whether a binding screen caught its key or gamepad button this
     /// frame, which the frame's buttons then leave alone.
@@ -322,6 +349,8 @@ impl Front {
             fullscreen: settings.fullscreen,
             filter: settings.filter,
             volume: settings.volume,
+            touch_size: settings.touch_size,
+            touch_opacity: settings.touch_opacity,
             gamepads: Vec::new(),
             caught: false,
             quitting: None,
@@ -361,6 +390,8 @@ impl Front {
             fullscreen: self.fullscreen,
             filter: self.filter,
             volume: self.volume,
+            touch_size: self.touch_size,
+            touch_opacity: self.touch_opacity,
         }
     }
 
@@ -547,8 +578,9 @@ impl Front {
 
     /// A touch or a click at (`x`, `y`) of the frame: the line under it
     /// becomes the selected one and is chosen, as X does; on the window's
-    /// size and the volume, the left half of the screen lowers them and the
-    /// right half raises them. Returns the buttons it stands for.
+    /// size, the volume and the pad's size and opacity, the left half of the
+    /// screen lowers them and the right half raises them. Returns the
+    /// buttons it stands for.
     fn tap(&mut self, x: i32, y: i32) -> Input {
         let (Ok(x), Ok(y)) = (usize::try_from(x), usize::try_from(y)) else {
             return Input::default();
@@ -573,10 +605,18 @@ impl Front {
                 };
                 self.screen = Screen::Options(line);
                 match SETTINGS[line] {
-                    Setting::Window | Setting::Volume if x < SCREEN_MIDDLE => {
+                    Setting::Window
+                    | Setting::Volume
+                    | Setting::TouchSize
+                    | Setting::TouchOpacity
+                        if x < SCREEN_MIDDLE =>
+                    {
                         Input::default().with(Button::Left)
                     }
-                    Setting::Window | Setting::Volume => Input::default().with(Button::Right),
+                    Setting::Window
+                    | Setting::Volume
+                    | Setting::TouchSize
+                    | Setting::TouchOpacity => Input::default().with(Button::Right),
                     _ => chosen,
                 }
             }
@@ -756,10 +796,16 @@ impl Front {
             line = (line + 1).min(SETTINGS.len() - 1);
         }
         self.screen = Screen::Options(line);
+        self.change(SETTINGS[line], pressed);
+    }
+
+    /// What `pressed` does on the option `setting`: left and right change
+    /// its value, X opens it or switches it.
+    fn change(&mut self, setting: Setting, pressed: Input) {
         let less = pressed.is_held(Button::Left);
         let more = pressed.is_held(Button::Right);
         let chosen = pressed.is_held(Button::A);
-        match SETTINGS[line] {
+        match setting {
             Setting::Keyboard if chosen => self.screen = Device::Keyboard.bindings(),
             Setting::Gamepad if chosen => self.screen = Device::Gamepad.bindings(),
             Setting::Window if less && self.scale > *SCALES.start() => self.scale -= 1,
@@ -774,6 +820,12 @@ impl Front {
             Setting::Volume if less => self.volume = self.volume.saturating_sub(VOLUME_STEP),
             Setting::Volume if more => {
                 self.volume = self.volume.saturating_add(VOLUME_STEP).min(FULL_VOLUME);
+            }
+            Setting::TouchSize if less || more => {
+                self.touch_size = stepped(self.touch_size, more, &TOUCH_SIZES);
+            }
+            Setting::TouchOpacity if less || more => {
+                self.touch_opacity = stepped(self.touch_opacity, more, &TOUCH_OPACITIES);
             }
             Setting::Back if chosen => self.screen = Screen::Main,
             _ => {}
@@ -1133,6 +1185,8 @@ impl Front {
             }
             Setting::Filter => (self.filter_name(), TEXT),
             Setting::Volume => (format!("{}%", self.volume), TEXT),
+            Setting::TouchSize => (format!("{}%", self.touch_size), TEXT),
+            Setting::TouchOpacity => (format!("{}%", self.touch_opacity), TEXT),
             Setting::Back => return None,
         };
         Some(value)
@@ -1336,6 +1390,8 @@ impl Setting {
             Self::Fullscreen => LAUNCHER_FULLSCREEN,
             Self::Filter => LAUNCHER_FILTER,
             Self::Volume => LAUNCHER_VOLUME,
+            Self::TouchSize => LAUNCHER_TOUCH_SIZE,
+            Self::TouchOpacity => LAUNCHER_TOUCH_OPACITY,
             Self::Back => LAUNCHER_BACK,
         }
     }
@@ -1561,6 +1617,7 @@ pub fn apply(display: &mut Sdl3Display, settings: &Settings) -> Result<()> {
     display.set_pad_buttons(&settings.pad_buttons);
     let fullscreen = settings.fullscreen || ALWAYS_FULLSCREEN;
     display.set_video(settings.scale, fullscreen, settings.filter)?;
+    display.set_touch_style(settings.touch_size, settings.touch_opacity);
     Ok(())
 }
 
@@ -1572,13 +1629,25 @@ fn display_changed(before: &Settings, after: &Settings) -> bool {
         before.scale,
         before.fullscreen,
         before.filter,
+        (before.touch_size, before.touch_opacity),
     ) != (
         &after.keys,
         &after.pad_buttons,
         after.scale,
         after.fullscreen,
         after.filter,
+        (after.touch_size, after.touch_opacity),
     )
+}
+
+/// `value` a step up (`more`) or down, kept within `range`.
+fn stepped(value: u8, more: bool, range: &std::ops::RangeInclusive<u8>) -> u8 {
+    let next = if more {
+        value.saturating_add(TOUCH_STEP)
+    } else {
+        value.saturating_sub(TOUCH_STEP)
+    };
+    next.clamp(*range.start(), *range.end())
 }
 
 /// Shows the screen until the player starts the game, with what they
@@ -1961,6 +2030,35 @@ mod tests {
         front.screen = Screen::Translations(0);
         front.draw(&mut frame);
         assert_eq!(frame.pixel(0, 0), Some(BACKDROP_TOP));
+    }
+
+    #[test]
+    fn the_pad_s_size_and_opacity_step_within_their_ranges() {
+        let mut front = Front::new(&Settings::default());
+        front.change(Setting::TouchSize, press(Button::Right));
+        assert_eq!(front.settings().touch_size, 110);
+        for _ in 0..10 {
+            front.change(Setting::TouchSize, press(Button::Right));
+        }
+        assert_eq!(front.touch_size, *TOUCH_SIZES.end());
+        for _ in 0..20 {
+            front.change(Setting::TouchOpacity, press(Button::Left));
+        }
+        assert_eq!(front.touch_opacity, *TOUCH_OPACITIES.start());
+        assert_eq!(
+            front
+                .setting_value(Setting::TouchOpacity)
+                .map(|(value, _)| value),
+            Some("20%".to_owned())
+        );
+        assert!(!ANDROID_SETTINGS.contains(&Setting::Keyboard));
+        assert!(!ANDROID_SETTINGS.contains(&Setting::Window));
+        assert!(
+            DESKTOP_SETTINGS
+                .iter()
+                .all(|setting| !matches!(setting, Setting::TouchSize | Setting::TouchOpacity))
+        );
+        assert_eq!(ANDROID_SETTINGS.last(), Some(&Setting::Back));
     }
 
     #[test]

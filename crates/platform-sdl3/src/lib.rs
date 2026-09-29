@@ -16,7 +16,7 @@ use sdl3::event::Event as SdlEvent;
 use sdl3::keyboard::{Keycode, Scancode};
 use sdl3::mouse::MouseButton;
 use sdl3::pixels::PixelFormat;
-use sdl3::render::{BlendMode, ScaleMode, TextureCreator, WindowCanvas};
+use sdl3::render::{BlendMode, FRect, ScaleMode, TextureCreator, WindowCanvas};
 use sdl3::surface::Surface;
 use sdl3::sys::render::{
     SDL_LOGICAL_PRESENTATION_DISABLED, SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
@@ -62,6 +62,8 @@ pub struct Sdl3Display {
     keys: Vec<(Scancode, Button)>,
     pads: Option<pad::Pads>,
     touch: Option<touch::TouchPad>,
+    /// The on-screen pad's size and opacity, against their usual ones.
+    touch_style: (f32, f32),
     filter: Filter,
     canvas: WindowCanvas,
     texture_creator: TextureCreator<WindowContext>,
@@ -110,6 +112,7 @@ impl Sdl3Display {
             keys: DEFAULT_KEYS.to_vec(),
             pads,
             touch: None,
+            touch_style: (1.0, 1.0),
             filter: Filter::Sharp,
             canvas,
             texture_creator,
@@ -217,12 +220,22 @@ impl Sdl3Display {
         self.canvas.set_draw_color(sdl3::pixels::Color::BLACK);
         self.canvas.clear();
         let held = self.input();
+        let output = self.canvas.output_size().map_err(backend_error)?;
+        let pad_hidden = self.has_gamepad();
+        let frame_size = (self.frame_width, self.frame_height);
+        let filter = self.filter;
         if let Some(touch) = self.touch.as_mut() {
-            touch.fit(self.canvas.output_size().map_err(backend_error)?);
-            self.canvas
-                .copy(&texture, None, touch.screen())
-                .map_err(backend_error)?;
-            touch.draw(&mut self.canvas, held).map_err(backend_error)?;
+            if pad_hidden {
+                self.canvas
+                    .copy(&texture, None, fitted(output, frame_size, filter))
+                    .map_err(backend_error)?;
+            } else {
+                touch.fit(output);
+                self.canvas
+                    .copy(&texture, None, touch.screen())
+                    .map_err(backend_error)?;
+                touch.draw(&mut self.canvas, held).map_err(backend_error)?;
+            }
         } else {
             self.canvas
                 .copy(&texture, None, None)
@@ -290,6 +303,7 @@ impl Display for Sdl3Display {
         let touch = self
             .touch
             .as_ref()
+            .filter(|_| !self.has_gamepad())
             .map(touch::TouchPad::input)
             .unwrap_or_default();
         self.keys
@@ -428,7 +442,11 @@ impl Sdl3Display {
     ///
     /// Returns [`PlatformError`] when the renderer cannot change.
     pub fn set_touch_pad(&mut self, on: bool) -> Result<(), PlatformError> {
-        self.touch = on.then(|| touch::TouchPad::new((self.frame_width, self.frame_height)));
+        self.touch = on.then(|| {
+            let mut pad = touch::TouchPad::new((self.frame_width, self.frame_height));
+            pad.set_style(self.touch_style.0, self.touch_style.1);
+            pad
+        });
         self.canvas.set_blend_mode(if on {
             BlendMode::Blend
         } else {
@@ -441,6 +459,23 @@ impl Sdl3Display {
     #[must_use]
     pub fn has_touch_pad(&self) -> bool {
         self.touch.is_some()
+    }
+
+    /// Makes the on-screen pad's controls `size` percent of their usual
+    /// size (from 60 to 140) and `opacity` percent as opaque as usual.
+    pub fn set_touch_style(&mut self, size: u8, opacity: u8) {
+        self.touch_style = (f32::from(size) / 100.0, f32::from(opacity) / 100.0);
+        if let Some(touch) = self.touch.as_mut() {
+            touch.set_style(self.touch_style.0, self.touch_style.1);
+        }
+    }
+
+    /// Whether a gamepad is connected, which hides the on-screen pad and
+    /// leaves the whole window to the frame.
+    fn has_gamepad(&self) -> bool {
+        self.pads
+            .as_ref()
+            .is_some_and(|pads| !pads.names().is_empty())
     }
 
     /// Lets SDL scale the frame to the window, unless the on-screen pad
@@ -512,6 +547,35 @@ fn function_key(keycode: Keycode) -> Option<u8> {
     u8::try_from(index + 1).ok()
 }
 
+/// Where a frame of `frame` pixels goes in an output of `output` pixels:
+/// centered, as large as it fits, in whole multiples with the sharp filter.
+fn fitted(output: (u32, u32), frame: (usize, usize), filter: Filter) -> FRect {
+    let (width, height) = (f32_of(output.0), f32_of(output.1));
+    let (frame_width, frame_height) = (f32_of_usize(frame.0), f32_of_usize(frame.1));
+    let scale = (width / frame_width).min(height / frame_height);
+    let scale = match filter {
+        Filter::Sharp if scale >= 1.0 => scale.floor(),
+        _ => scale,
+    };
+    let (shown_width, shown_height) = (frame_width * scale, frame_height * scale);
+    FRect::new(
+        (width - shown_width) / 2.0,
+        (height - shown_height) / 2.0,
+        shown_width,
+        shown_height,
+    )
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn f32_of(value: u32) -> f32 {
+    value as f32
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn f32_of_usize(value: usize) -> f32 {
+    value as f32
+}
+
 /// A position in the frame, in whole pixels (a pointer outside it gives a
 /// negative or too large one).
 #[allow(clippy::cast_possible_truncation)]
@@ -527,5 +591,21 @@ fn backend_error(message: impl std::fmt::Display) -> PlatformError {
     PlatformError::Backend {
         backend: BACKEND,
         message: message.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_fitted_frame_is_centered_and_sharp_in_whole_multiples() {
+        let sharp = fitted((2400, 1080), (240, 160), Filter::Sharp);
+        assert_eq!((sharp.w, sharp.h), (1440.0, 960.0));
+        assert_eq!((sharp.x, sharp.y), (480.0, 60.0));
+        let smooth = fitted((2400, 1080), (240, 160), Filter::Smooth);
+        assert_eq!((smooth.w, smooth.h), (1620.0, 1080.0));
+        let small = fitted((200, 100), (240, 160), Filter::Sharp);
+        assert!(small.w <= 200.0 && small.h <= 100.0);
     }
 }

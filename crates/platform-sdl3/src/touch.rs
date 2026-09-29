@@ -48,6 +48,10 @@ pub(crate) struct TouchPad {
     layout: TouchLayout,
     window: (u32, u32),
     frame: (f32, f32),
+    /// The controls' size against their usual one, and their opacity from
+    /// 0 to 1 of their usual one.
+    size: f32,
+    opacity: f32,
 }
 
 impl TouchPad {
@@ -62,15 +66,25 @@ impl TouchPad {
             layout: TouchLayout::new(frame, frame),
             window: (0, 0),
             frame,
+            size: 1.0,
+            opacity: 1.0,
         }
+    }
+
+    /// Makes the controls `size` times their usual size and `opacity`
+    /// (0 to 1) as opaque as usual.
+    pub(crate) fn set_style(&mut self, size: f32, opacity: f32) {
+        self.size = size;
+        self.opacity = opacity.clamp(0.0, 1.0);
+        self.window = (0, 0);
     }
 
     /// Lays the controls out again when the window is now `window` pixels.
     pub(crate) fn fit(&mut self, window: (u32, u32)) {
         if window != self.window {
             self.window = window;
-            self.layout =
-                TouchLayout::new((to_f32_u32(window.0), to_f32_u32(window.1)), self.frame);
+            let window = (to_f32_u32(window.0), to_f32_u32(window.1));
+            self.layout = TouchLayout::sized(window, self.frame, self.size);
         }
     }
 
@@ -128,33 +142,56 @@ impl TouchPad {
 
     /// Draws the controls, those `held` brighter.
     pub(crate) fn draw(&self, canvas: &mut WindowCanvas, held: Input) -> Result<(), sdl3::Error> {
+        let palette = Palette::new(self.opacity);
         for placed in &self.layout.controls {
             match (placed.control, placed.shape) {
                 (Control::Cross, Shape::Circle { x, y, radius }) => {
-                    draw_cross(canvas, (x, y), radius, held)?;
+                    draw_cross(canvas, (x, y), radius, held, &palette)?;
                 }
                 (Control::Button(button), Shape::Circle { x, y, radius }) => {
-                    let color = if held.is_held(button) { HELD } else { IDLE };
+                    let color = palette.of(held.is_held(button));
                     disc(canvas, (x, y), radius, color)?;
-                    letters(canvas, label(button), (x, y), radius * 2.0 * LETTER_HEIGHT)?;
+                    let height = radius * 2.0 * LETTER_HEIGHT;
+                    letters(canvas, label(button), (x, y), height, palette.mark)?;
                 }
                 (Control::Button(button), Shape::Pill(area)) => {
-                    let color = if held.is_held(button) { HELD } else { IDLE };
+                    let color = palette.of(held.is_held(button));
                     let radius = area.height / 2.0;
                     let middle = (area.x + area.width / 2.0, area.y + radius);
                     let ends = (area.x + radius, area.x + area.width - radius);
                     fan(canvas, middle, &stadium(ends, middle.1, radius), color)?;
-                    letters(
-                        canvas,
-                        label(button),
-                        middle,
-                        area.height * LETTER_HEIGHT * 1.4,
-                    )?;
+                    let height = area.height * LETTER_HEIGHT * 1.4;
+                    letters(canvas, label(button), middle, height, palette.mark)?;
                 }
                 (Control::Cross, Shape::Pill(_)) => {}
             }
         }
         Ok(())
+    }
+}
+
+/// The colors of the controls at an opacity.
+struct Palette {
+    idle: FColor,
+    held: FColor,
+    mark: FColor,
+}
+
+impl Palette {
+    fn new(opacity: f32) -> Self {
+        let faded = |color: FColor| FColor {
+            a: color.a * opacity,
+            ..color
+        };
+        Self {
+            idle: faded(IDLE),
+            held: faded(HELD),
+            mark: faded(MARK),
+        }
+    }
+
+    fn of(&self, held: bool) -> FColor {
+        if held { self.held } else { self.idle }
     }
 }
 
@@ -165,8 +202,9 @@ fn draw_cross(
     (x, y): (f32, f32),
     radius: f32,
     held: Input,
+    palette: &Palette,
 ) -> Result<(), sdl3::Error> {
-    disc(canvas, (x, y), radius, IDLE)?;
+    disc(canvas, (x, y), radius, palette.idle)?;
     let length = radius * ARM_LENGTH;
     let thickness = radius * ARM_THICKNESS;
     let half = thickness / 2.0;
@@ -191,10 +229,10 @@ fn draw_cross(
     fill(
         canvas,
         FRect::new(x - half, y - half, thickness, thickness),
-        IDLE,
+        palette.idle,
     )?;
     for (button, arm) in arms {
-        fill(canvas, arm, if held.is_held(button) { HELD } else { IDLE })?;
+        fill(canvas, arm, palette.of(held.is_held(button)))?;
     }
     Ok(())
 }
@@ -260,12 +298,13 @@ fn fan(
     canvas.render_geometry(&vertices, None, indices.as_slice())
 }
 
-/// `text` centered on `middle`, `height` pixels tall.
+/// `text` centered on `middle`, `height` pixels tall, in `color`.
 fn letters(
     canvas: &mut WindowCanvas,
     text: &str,
     middle: (f32, f32),
     height: f32,
+    color: FColor,
 ) -> Result<(), sdl3::Error> {
     let cell = height / to_f32(GLYPH_ROWS);
     let widths: Vec<usize> = text.chars().map(|ch| glyph(ch)[0].len()).collect();
@@ -289,7 +328,7 @@ fn letters(
         }
         x += to_f32(rows[0].len() + 1) * cell;
     }
-    canvas.set_draw_color(MARK);
+    canvas.set_draw_color(color);
     canvas.fill_rects(&cells)
 }
 
