@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, channel};
 
 use platform::PlatformError;
-use sdl3::dialog::{DialogCallback, DialogError, DialogFileFilter, show_open_file_dialog};
+use sdl3::dialog::{
+    DialogCallback, DialogError, DialogFileFilter, show_open_file_dialog, show_save_file_dialog,
+};
 
 use crate::{Sdl3Display, backend_error};
 
@@ -59,6 +61,34 @@ impl Sdl3Display {
         .map_err(backend_error)?;
         Ok(FileChoice { answer })
     }
+
+    /// Opens the system's dialog to choose where to write a file, offering
+    /// `filters` as [`Self::choose_file`] does and proposing `location` (a
+    /// folder, or a file's name) when given.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PlatformError`] when the dialog cannot be opened.
+    pub fn choose_file_to_write(
+        &self,
+        filters: &[(&str, &str)],
+        location: Option<&Path>,
+    ) -> Result<FileChoice, PlatformError> {
+        let (sender, answer) = channel();
+        let filters: Vec<DialogFileFilter<'_>> = filters
+            .iter()
+            .map(|&(name, pattern)| DialogFileFilter { name, pattern })
+            .collect();
+        let callback: DialogCallback = Box::new(
+            move |result: Result<Vec<PathBuf>, DialogError>, _: Option<DialogFileFilter<'_>>| {
+                let chosen = result.ok().and_then(|files| files.into_iter().next());
+                let _ = sender.send(chosen);
+            },
+        );
+        show_save_file_dialog(&filters, location, Some(self.canvas.window()), callback)
+            .map_err(backend_error)?;
+        Ok(FileChoice { answer })
+    }
 }
 
 /// The folder where the program named `app` keeps the user's settings,
@@ -82,6 +112,18 @@ pub fn read_file(path: &Path) -> Result<Vec<u8>, PlatformError> {
     let mut bytes = Vec::new();
     std::io::Read::read_to_end(&mut stream, &mut bytes).map_err(backend_error)?;
     Ok(bytes)
+}
+
+/// Writes `bytes` as the whole file at `path`, which may also be the
+/// `content://` URI Android's dialog gives for a document.
+///
+/// # Errors
+///
+/// Returns [`PlatformError`] when the file cannot be opened or written.
+pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), PlatformError> {
+    let mut stream = sdl3::iostream::IOStream::from_file(path, "wb").map_err(backend_error)?;
+    std::io::Write::write_all(&mut stream, bytes).map_err(backend_error)?;
+    std::io::Write::flush(&mut stream).map_err(backend_error)
 }
 
 /// Opens `url` in the user's web browser.

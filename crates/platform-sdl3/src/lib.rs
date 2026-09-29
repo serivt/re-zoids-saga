@@ -6,7 +6,7 @@ mod pad;
 mod storage;
 mod touch;
 
-pub use dialog::{FileChoice, open_url, preferences_dir, read_file};
+pub use dialog::{FileChoice, open_url, preferences_dir, read_file, write_file};
 pub use pad::{default_pad_buttons, pad_button_label, pad_button_name};
 pub use storage::{FileStorage, slot_path};
 

@@ -6,6 +6,7 @@
 mod download;
 mod front;
 mod quit;
+mod saves;
 mod settings;
 
 use std::ffi::OsString;
@@ -32,7 +33,6 @@ const PLAYER_START: (usize, usize) = extraction::saga::PLAYER_START;
 const FRAME_DURATION: std::time::Duration = std::time::Duration::from_micros(16_743);
 const AUDIO_QUEUE_FRAMES: usize = 6;
 const RENDER_FRAME_LIMIT: usize = 600;
-const SAVE_EXTENSION: &str = "sav";
 /// The most save slots the list shows without scrolling.
 const MAX_SLOTS: usize = 9;
 
@@ -122,7 +122,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
     let save_path = options
         .save_path
         .clone()
-        .unwrap_or_else(|| rom_path.with_extension(SAVE_EXTENSION));
+        .unwrap_or_else(|| rom_path.with_extension(saves::SAVE_EXTENSION));
     let slots: Vec<Box<dyn platform::SaveStorage>> = (0..options.slots)
         .map(|slot| {
             let path = slot_path(&save_path, slot);

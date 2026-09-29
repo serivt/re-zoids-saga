@@ -96,6 +96,36 @@ pub const LAUNCHER_TRANSLATION_HELP: &str = "port/launcher/translation-help";
 pub const LAUNCHER_TOUCH_SIZE: &str = "port/launcher/touch-size";
 /// See [`LAUNCHER_TOUCH_SIZE`].
 pub const LAUNCHER_TOUCH_OPACITY: &str = "port/launcher/touch-opacity";
+/// The saves' screens, on Android: the options' line and heading, a
+/// slot's line (`{slot}` its number) and what it holds, a slot's two
+/// actions, and the statuses.
+pub const LAUNCHER_SAVES: &str = "port/launcher/saves";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_SLOT: &str = "port/launcher/slot";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_SLOT_SAVED: &str = "port/launcher/slot-saved";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_SLOT_EMPTY: &str = "port/launcher/slot-empty";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_EXPORT: &str = "port/launcher/export";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_IMPORT: &str = "port/launcher/import";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_SAVES_HELP: &str = "port/launcher/saves-help";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_EXPORT_HELP: &str = "port/launcher/export-help";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_IMPORT_HELP: &str = "port/launcher/import-help";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_EXPORTED: &str = "port/launcher/exported";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_IMPORTED: &str = "port/launcher/imported";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_NOT_A_SAVE: &str = "port/launcher/not-a-save";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_COPY_FAILED: &str = "port/launcher/copy-failed";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_ROM_FIRST: &str = "port/launcher/rom-first";
 /// The ROM is the known release.
 pub const LAUNCHER_ROM_VERIFIED: &str = "port/launcher/rom-verified";
 /// The ROM is the game's first release, which the port does not play.
@@ -390,7 +420,69 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
     launcher_line(
         LAUNCHER_TRANSLATION_HELP,
         "X: choose   Z: back",
-        "The translation screen's help",
+        "The help of the translation's and the saves' screens",
+    ),
+    launcher(
+        LAUNCHER_SAVES,
+        "Saves",
+        "The options' line of the saves, on Android, and its screen's heading",
+    ),
+    launcher(
+        LAUNCHER_SLOT,
+        "Slot {slot}",
+        "A save slot's line; {slot} is its number",
+    ),
+    launcher(
+        LAUNCHER_SLOT_SAVED,
+        "saved",
+        "Beside a slot that holds a save",
+    ),
+    launcher(
+        LAUNCHER_SLOT_EMPTY,
+        "empty",
+        "Beside a slot that holds none",
+    ),
+    launcher(
+        LAUNCHER_EXPORT,
+        "Export...",
+        "Writes a copy of the slot's save where the player chooses",
+    ),
+    launcher(
+        LAUNCHER_IMPORT,
+        "Import...",
+        "Replaces the slot's save with a file the player chooses",
+    ),
+    launcher_line(
+        LAUNCHER_SAVES_HELP,
+        "Copy saves to or from an emulator.",
+        "Help for the saves' screen",
+    ),
+    launcher_line(
+        LAUNCHER_EXPORT_HELP,
+        "Writes a copy of this save.",
+        "Help for Export",
+    ),
+    launcher_line(
+        LAUNCHER_IMPORT_HELP,
+        "Replaces this save (kept as .bak).",
+        "Help for Import",
+    ),
+    launcher_line(LAUNCHER_EXPORTED, "The save was exported.", "Export worked"),
+    launcher_line(LAUNCHER_IMPORTED, "The save was imported.", "Import worked"),
+    launcher_line(
+        LAUNCHER_NOT_A_SAVE,
+        "That file is not a Zoids Saga save.",
+        "The file chosen to import is not a save of the game",
+    ),
+    launcher_line(
+        LAUNCHER_COPY_FAILED,
+        "The save could not be copied.",
+        "Export or import failed",
+    ),
+    launcher_line(
+        LAUNCHER_ROM_FIRST,
+        "Choose your ROM first.",
+        "The saves live beside the ROM, which is not chosen yet",
     ),
     launcher_line(
         LAUNCHER_ROM_VERIFIED,
