@@ -61,8 +61,10 @@ pad and the saves' export and import in place of the window's and the keyboard's
 | SELECT | Backspace | Back |
 | L, R | A, S | Shoulders |
 
+In a build with the `debug-mode` feature (`cargo run -p launcher --features debug-mode`),
 F10 turns a debugging mode on and off: the roaming enemies are intangible, so the player
 walks through them without battles, and the protagonist's attacks beat whatever they hit.
+Other builds, the packages players download among them, ignore F10.
 
 ## Command line
 

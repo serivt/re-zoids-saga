@@ -287,7 +287,8 @@ START opens the menu described in [menu.md](menu.md); the field waits underneath
 
 ## Debugging aid
 
-F10 in the launcher turns a debugging mode on and off (`Game::toggle_debug_mode`). While
+F10 in a launcher built with the `debug-mode` feature turns a debugging mode on and off
+(`Game::toggle_debug_mode`; see [launcher.md](launcher.md)). While
 it is on, on every map, the roaming enemies are intangible: the player walks through them
 and none meets it in battle. In battle the protagonist's attacks always land and beat
 what they hit (see [combat.md](combat.md)). It is not the original's: only the port has

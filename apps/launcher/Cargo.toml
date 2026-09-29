@@ -23,6 +23,9 @@ serde = { version = "1.0.229", features = ["derive"] }
 
 [features]
 packaged = ["platform-sdl3/static-sdl"]
+# F10 turns the game's debugging mode on and off; never in the packages
+# players download.
+debug-mode = []
 
 [lints]
 workspace = true

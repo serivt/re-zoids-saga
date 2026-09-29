@@ -1105,7 +1105,7 @@ few frames apart from the original's and the rolls mix in the frame counter.
 
 ## Debugging aid
 
-In the port's debugging mode (F10 in the launcher, see [field.md](field.md)) the
+In the port's debugging mode (F10 in a launcher built with the `debug-mode` feature, see [field.md](field.md)) the
 protagonist's attacks always land and deal at least the hit points each target has
 left, so a battle ends in a blow or two (`Combat::set_overpowered`). The original has
 no such thing.

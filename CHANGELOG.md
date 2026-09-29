@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The demo ends at the start of chapter 7.
+- F10's debugging aid only works in a build with the `debug-mode` feature
+  (`cargo run -p launcher --features debug-mode`); the packages ignore F10.
 
 ### Fixed
 
