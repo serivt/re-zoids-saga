@@ -21,15 +21,15 @@ TOOLCHAIN="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake"
 rm -rf "$JNI_LIBS"
 for ABI in $ABIS; do
     case "$ABI" in
-        arm64-v8a) TRIPLE=aarch64_linux_android ;;
-        x86_64) TRIPLE=x86_64_linux_android ;;
+        arm64-v8a) TRIPLE=aarch64-linux-android ;;
+        x86_64) TRIPLE=x86_64-linux-android ;;
         *) echo "unsupported ABI $ABI" >&2; exit 1 ;;
     esac
-    export "CMAKE_TOOLCHAIN_FILE_$TRIPLE=$TOOLCHAIN"
+    export "CMAKE_TOOLCHAIN_FILE_${TRIPLE//-/_}=$TOOLCHAIN"
     cargo ndk -t "$ABI" -P 21 -o "$JNI_LIBS" build --release --locked -p re-zoids-saga-android
     # SDL's own build leaves libSDL3.so in its build script's folder: the
     # newest one for this target is the one just linked against.
-    TARGET_DIR="target/${TRIPLE//_/-}/release/build"
+    TARGET_DIR="target/$TRIPLE/release/build"
     SDL_LIB=$(ls -t "$TARGET_DIR"/sdl3-sys-*/out/lib/libSDL3.so | head -1)
     cp "$SDL_LIB" "$JNI_LIBS/$ABI/"
 done
