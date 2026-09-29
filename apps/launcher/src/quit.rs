@@ -1,7 +1,8 @@
 //! The question asked before closing on Escape, from the launcher's screen
 //! or the game, so that a key pressed by mistake closes nothing: No is
 //! chosen at first, left and right switch the answer, X or Return answers,
-//! Z or Escape again keeps playing.
+//! Z or Escape again keeps playing; a touch or a click on an answer gives
+//! it.
 //!
 //! Source of knowledge: this project's own design; the original has no
 //! way to close.
@@ -21,6 +22,8 @@ const WARNING_Y: usize = QUESTION_Y + 12;
 const ANSWERS_Y: usize = BOX.1 + BOX.3 - 17;
 /// Pixels between the two answers' centers.
 const ANSWERS_APART: usize = 72;
+/// How far above and below an answer's text a tap still gives it.
+const ANSWER_REACH: usize = 6;
 /// How much of its light the screen keeps behind the box, in eighths.
 const SHADE_EIGHTHS: u16 = 3;
 
@@ -61,6 +64,25 @@ impl QuitPrompt {
             return Some(false);
         }
         chosen.then_some(self.yes)
+    }
+
+    /// The answer under a touch or a click at (`x`, `y`) of the frame,
+    /// `true` to close, or `None` away from both.
+    #[must_use]
+    pub fn answer_at(x: i32, y: i32) -> Option<bool> {
+        let (x, y) = (usize::try_from(x).ok()?, usize::try_from(y).ok()?);
+        let middle = BOX.0 + BOX.2 / 2;
+        let rows = ANSWERS_Y.saturating_sub(ANSWER_REACH)..ANSWERS_Y + 8 + ANSWER_REACH;
+        if !rows.contains(&y) {
+            return None;
+        }
+        if (middle - ANSWERS_APART..middle).contains(&x) {
+            Some(true)
+        } else if (middle..middle + ANSWERS_APART).contains(&x) {
+            Some(false)
+        } else {
+            None
+        }
     }
 
     /// Draws the question over `frame`, which it darkens, with the texts
@@ -142,5 +164,16 @@ mod tests {
         let mut prompt = QuitPrompt::new(Input::default(), true);
         assert_eq!(prompt.update(press(Button::Left)), None);
         assert_eq!(prompt.update(press(Button::B)), Some(false));
+    }
+
+    #[test]
+    fn a_tap_on_an_answer_gives_it() {
+        let pixel = |value: usize| i32::try_from(value).unwrap_or_default();
+        let (y, middle) = (pixel(ANSWERS_Y + 4), pixel(BOX.0 + BOX.2 / 2));
+        assert_eq!(QuitPrompt::answer_at(middle - 36, y), Some(true));
+        assert_eq!(QuitPrompt::answer_at(middle + 36, y), Some(false));
+        assert_eq!(QuitPrompt::answer_at(middle - 36, pixel(QUESTION_Y)), None);
+        assert_eq!(QuitPrompt::answer_at(2, y), None);
+        assert_eq!(QuitPrompt::answer_at(-1, -1), None);
     }
 }

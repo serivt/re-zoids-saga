@@ -183,7 +183,8 @@ impl Input {
 pub enum Event {
     /// The window was closed.
     Quit,
-    /// The key that goes back or leaves (Escape) went down.
+    /// The key that goes back or leaves went down: Escape, or Android's
+    /// back button.
     Back,
     /// Function key F`n` (1–12) went down: the launcher's debugging keys.
     FunctionKey(u8),

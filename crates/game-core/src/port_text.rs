@@ -96,6 +96,19 @@ pub const LAUNCHER_TRANSLATION_HELP: &str = "port/launcher/translation-help";
 pub const LAUNCHER_TOUCH_SIZE: &str = "port/launcher/touch-size";
 /// See [`LAUNCHER_TOUCH_SIZE`].
 pub const LAUNCHER_TOUCH_OPACITY: &str = "port/launcher/touch-opacity";
+/// The launcher's help lines and its options line's help on a touch
+/// screen, where rows are tapped and the pad's A and B choose and go back:
+/// those of the main screen, the options, the lists (translations and
+/// saves) and the about screen.
+pub const LAUNCHER_TOUCH_HELP: &str = "port/launcher/touch-help";
+/// See [`LAUNCHER_TOUCH_HELP`].
+pub const LAUNCHER_TOUCH_OPTIONS_HELP: &str = "port/launcher/touch-options-help";
+/// See [`LAUNCHER_TOUCH_HELP`].
+pub const LAUNCHER_TOUCH_LIST_HELP: &str = "port/launcher/touch-list-help";
+/// See [`LAUNCHER_TOUCH_HELP`].
+pub const LAUNCHER_TOUCH_ABOUT_HELP: &str = "port/launcher/touch-about-help";
+/// See [`LAUNCHER_TOUCH_HELP`].
+pub const LAUNCHER_PICK_TOUCH_OPTIONS: &str = "port/launcher/pick-touch-options";
 /// The saves' screens, on Android: the options' line and heading, a
 /// slot's line (`{slot}` its number) and what it holds, a slot's two
 /// actions, and the statuses.
@@ -283,6 +296,31 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         LAUNCHER_TOUCH_OPACITY,
         "Pad opacity",
         "The line of the on-screen pad's opacity, on Android",
+    ),
+    launcher_line(
+        LAUNCHER_TOUCH_HELP,
+        "Tap or A: choose   B: clear",
+        "The controls, at the bottom, on Android",
+    ),
+    launcher_line(
+        LAUNCHER_TOUCH_OPTIONS_HELP,
+        "Left/Right: change   A: choose   B: back",
+        "The options screen's help, on Android",
+    ),
+    launcher_line(
+        LAUNCHER_TOUCH_LIST_HELP,
+        "Tap or A: choose   B: back",
+        "The help of the translation's and the saves' screens, on Android",
+    ),
+    launcher_line(
+        LAUNCHER_TOUCH_ABOUT_HELP,
+        "Tap or A: open   B: back",
+        "The about screen's help, on Android",
+    ),
+    launcher_line(
+        LAUNCHER_PICK_TOUCH_OPTIONS,
+        "Sound, the pad and saves.",
+        "Help for the options line, on Android",
     ),
     launcher_line(
         LAUNCHER_OPTIONS_HELP,

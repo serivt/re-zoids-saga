@@ -27,15 +27,17 @@ use game_core::port_text::{
     LAUNCHER_LEFT, LAUNCHER_LICENSE, LAUNCHER_LOOKING_UP, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM,
     LAUNCHER_NO_TRANSLATION, LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON,
     LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED,
-    LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM, LAUNCHER_PICK_TRANSLATION,
-    LAUNCHER_PLAY, LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT,
-    LAUNCHER_READY, LAUNCHER_RIGHT, LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE,
-    LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED,
-    LAUNCHER_SAVES, LAUNCHER_SAVES_HELP, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY,
-    LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_OPACITY,
-    LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP,
-    LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE,
-    LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WINDOW, default_text,
+    LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM, LAUNCHER_PICK_TOUCH_OPTIONS,
+    LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY, LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD,
+    LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT, LAUNCHER_ROM,
+    LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
+    LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SAVES, LAUNCHER_SAVES_HELP,
+    LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY, LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH,
+    LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP, LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP,
+    LAUNCHER_TOUCH_OPACITY, LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION,
+    LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE,
+    LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WINDOW,
+    default_text,
 };
 use game_core::{TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -48,6 +50,23 @@ use crate::download::{Answer, Download, Language};
 use crate::quit::QuitPrompt;
 use crate::saves;
 use crate::settings::{FULL_VOLUME, SCALES, Settings, TOUCH_OPACITIES, TOUCH_SIZES};
+
+/// `desktop`, a text that names keys, or on Android `touch`, the one that
+/// names taps and the on-screen pad's buttons.
+const fn on_touch(desktop: &'static str, touch: &'static str) -> &'static str {
+    if cfg!(target_os = "android") {
+        touch
+    } else {
+        desktop
+    }
+}
+
+/// The help lines and the options line's help, on this system.
+const MAIN_HELP: &str = on_touch(LAUNCHER_HELP, LAUNCHER_TOUCH_HELP);
+const OPTIONS_HELP: &str = on_touch(LAUNCHER_OPTIONS_HELP, LAUNCHER_TOUCH_OPTIONS_HELP);
+const LIST_HELP: &str = on_touch(LAUNCHER_TRANSLATION_HELP, LAUNCHER_TOUCH_LIST_HELP);
+const ABOUT_HELP: &str = on_touch(LAUNCHER_ABOUT_HELP, LAUNCHER_TOUCH_ABOUT_HELP);
+const PICK_OPTIONS: &str = on_touch(LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_TOUCH_OPTIONS);
 
 /// The project's name, never translated.
 pub const PROJECT_NAME: &str = "Re:Zoids Saga";
@@ -558,7 +577,8 @@ impl Front {
             return Ok(Step::Stay);
         }
         if let Some(prompt) = &mut self.quitting {
-            match prompt.update(input) {
+            let tapped_answer = tapped.and_then(|(x, y)| QuitPrompt::answer_at(x, y));
+            match tapped_answer.or_else(|| prompt.update(input)) {
                 Some(true) => return Ok(Step::Quit),
                 Some(false) => self.quitting = None,
                 None => {}
@@ -1104,26 +1124,26 @@ impl Front {
                 self.draw_main(frame);
                 let (status, status_color) = self.status();
                 self.centered(frame, STATUS_Y, &status, status_color);
-                self.centered(frame, HELP_Y, &self.text(LAUNCHER_HELP), DIM);
+                self.centered(frame, HELP_Y, &self.text(MAIN_HELP), DIM);
             }
             Screen::Options(line) => {
                 self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_OPTIONS), DIM);
                 self.draw_options(frame, line);
-                self.centered(frame, HELP_Y, &self.text(LAUNCHER_OPTIONS_HELP), DIM);
+                self.centered(frame, HELP_Y, &self.text(OPTIONS_HELP), DIM);
             }
             Screen::Translations(line) => {
                 self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_TRANSLATION), DIM);
                 self.draw_translations(frame, line);
                 let (status, color) = self.translation_status(line);
                 self.centered(frame, STATUS_Y, &status, color);
-                self.centered(frame, HELP_Y, &self.text(LAUNCHER_TRANSLATION_HELP), DIM);
+                self.centered(frame, HELP_Y, &self.text(LIST_HELP), DIM);
             }
             Screen::Saves(line) => {
                 self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_SAVES), DIM);
                 self.draw_saves(frame, line);
                 let (status, color) = self.save_message(LAUNCHER_SAVES_HELP);
                 self.centered(frame, STATUS_Y, &status, color);
-                self.centered(frame, HELP_Y, &self.text(LAUNCHER_TRANSLATION_HELP), DIM);
+                self.centered(frame, HELP_Y, &self.text(LIST_HELP), DIM);
             }
             Screen::Slot { slot, line } => {
                 let heading = self
@@ -1138,7 +1158,7 @@ impl Front {
                 };
                 let (status, color) = self.save_message(help);
                 self.centered(frame, STATUS_Y, &status, color);
-                self.centered(frame, HELP_Y, &self.text(LAUNCHER_TRANSLATION_HELP), DIM);
+                self.centered(frame, HELP_Y, &self.text(LIST_HELP), DIM);
             }
             Screen::About(line) => {
                 self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_ABOUT), DIM);
@@ -1149,7 +1169,7 @@ impl Front {
                     _ => (self.text(LAUNCHER_OPENS_PAGE), DIM),
                 };
                 self.centered(frame, STATUS_Y, &status, color);
-                self.centered(frame, HELP_Y, &self.text(LAUNCHER_ABOUT_HELP), DIM);
+                self.centered(frame, HELP_Y, &self.text(ABOUT_HELP), DIM);
             }
             Screen::Bindings {
                 device,
@@ -1531,12 +1551,16 @@ impl Front {
                 None => (self.text(LAUNCHER_NO_ROM), DIM),
             },
             Line::Options => {
+                let summary = format!("{}, {}%", self.filter_name(), self.volume);
+                if cfg!(target_os = "android") {
+                    return (summary, DIM);
+                }
                 let window = if self.fullscreen {
                     self.text(LAUNCHER_FULLSCREEN)
                 } else {
                     format!("x{}", self.scale)
                 };
-                let summary = format!("{window}, {}, {}%", self.filter_name(), self.volume);
+                let summary = format!("{window}, {summary}");
                 (summary, DIM)
             }
             _ => match &self.translation {
@@ -1550,7 +1574,7 @@ impl Front {
     /// The line under the panel: about the line under the cursor.
     fn status(&self) -> (String, Rgb) {
         match LINES[self.line] {
-            Line::Options => (self.text(LAUNCHER_PICK_OPTIONS), DIM),
+            Line::Options => (self.text(PICK_OPTIONS), DIM),
             Line::About => (self.text(LAUNCHER_PICK_ABOUT), DIM),
             Line::Rom | Line::Play | Line::Quit => match &self.rom {
                 None => (self.text(LAUNCHER_PICK_ROM), WARNING),

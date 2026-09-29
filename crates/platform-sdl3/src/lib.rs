@@ -371,7 +371,8 @@ impl Display for Sdl3Display {
                 }
                 SdlEvent::Quit { .. } => Some(Event::Quit),
                 SdlEvent::KeyDown {
-                    keycode: Some(Keycode::Escape),
+                    keycode: Some(Keycode::Escape | Keycode::AcBack),
+                    repeat: false,
                     ..
                 } => Some(Event::Back),
                 SdlEvent::KeyDown {
