@@ -4,7 +4,7 @@ A FOSS native runtime for preserving *Zoids Saga* (Game Boy Advance, Japan), wri
 Rust.
 
 The game is *re*implemented, hence the *Re:* in its name, as a native, cross-platform
-application (Windows, macOS, Linux and eventually Android) with a modern localization
+application (Windows, macOS, Linux and Android) with a modern localization
 layer (Japanese, English, Spanish), while preserving the original gameplay behavior.
 
 This is **not** an emulator and **not** a ROM hack. The original ROM is never modified
@@ -22,8 +22,8 @@ start of chapter 7, where the game thanks the player and offers to save.
 
 1. Download the package for your system from the
    [Releases](https://github.com/serivt/re-zoids-saga/releases) page: a disk image for
-   macOS, a zip for Windows, an archive for Linux (x86-64, glibc 2.34 or later). Nothing
-   else needs installing. Each package has a `.sha256` file beside it with its SHA-256
+   macOS, a zip for Windows, an archive for Linux (x86-64, glibc 2.34 or later), an APK
+   for Android (5.0 or later). Nothing else needs installing. Each package has a `.sha256` file beside it with its SHA-256
    checksum, to check the download (`shasum -a 256 -c <file>.sha256`, or
    `Get-FileHash <file>` in PowerShell).
 2. Start it:
@@ -40,13 +40,15 @@ start of chapter 7, where the game thanks the player and offers to save.
      can also build the program yourself from the source, see
      [Build and run](#build-and-run).
    - **Linux:** unpack the folder anywhere and run `./re-zoids-saga`.
+   - **Android:** open the `.apk` on the phone and allow installing it (it is not in any
+     store); an on-screen pad surrounds the game. See [docs/android.md](docs/android.md).
 3. Choose your Zoids Saga ROM (Japan, Rev 1) and, optionally, a translation: the
    Translation line downloads a language from
    [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations) or
    opens a `.po` file you already have. Then Play. Saves are kept next to the ROM, in the original's `.sav` format.
 
 Default keys: arrows move, X = A, Z = B, Return = START, Backspace = SELECT, A = L,
-S = R, Esc asks whether to quit. Gamepads work too; keys and buttons can be changed in
+S = R, Esc (or Android's back button) asks whether to quit. Gamepads work too; keys and buttons can be changed in
 Options.
 
 ## Build and run

@@ -46,6 +46,10 @@ folder where SDL keeps a program's preferences (Application Support on macOS,
 Esc on the launcher's screen, or while the game plays, asks before closing (No is chosen
 at first; Esc again stays), and the game waits while it asks.
 
+On Android the launcher is the same, answering taps, with the options of the on-screen
+pad and the saves' export and import in place of the window's and the keyboard's; see
+[android.md](android.md).
+
 ## Controls
 
 | Pad | Keyboard | Gamepad |
@@ -76,6 +80,7 @@ A ROM on the command line skips the launcher's screen and plays from the publish
 | `--translation <file.po>` | Shows a translation (see [translation.md](translation.md)) |
 | `--export-template <file.pot>` | Writes the template translators start from |
 | `--room` | Skips straight to the first room |
+| `--touch` | Shows the on-screen pad for touch screens, as Android always does (with `SDL_MOUSE_TOUCH_EVENTS=1` the mouse plays a finger) |
 | `<table>_<index>` | Shows that script in its box instead, e.g. `dialogue_00043` |
 | `--dump <frame.ppm>` | Writes a frame instead of opening a window (without a ROM, the launcher's screen) |
 

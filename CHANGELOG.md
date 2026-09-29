@@ -23,7 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and game on SDL3 for Android, with an on-screen pad around the game's screen in either
   orientation, taps on the launcher's lines, the whole screen, and the ROM and the
   translation copied from Android's file dialog into the app. Built with
-  `tools/package/android.sh`.
+  `tools/package/android.sh`, and by the release workflow, which starts it on an
+  emulator first; see `docs/android.md`.
+- **The on-screen pad's size and opacity** in Android's options; the pad hides while a
+  gamepad is connected.
+- **Saves to export and import** on Android: Options › Saves copies a slot's `.sav` to
+  a place chosen in the system's dialog, for an emulator or a backup, or puts one
+  there in a slot, checking first that it is a save of the game and keeping the one it
+  replaces as `.bak`.
+- **Android's back button** goes back on the launcher's screens and asks before closing,
+  as Esc does; taps answer the question to quit, and the launcher's help names taps and
+  the pad's buttons.
 - **Taps and clicks on the launcher.** A touch or a click chooses the line under it; the
   desktop can show the on-screen pad with `--touch`.
 

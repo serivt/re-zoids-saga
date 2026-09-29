@@ -4,7 +4,7 @@ Guidance for AI agents and human contributors working on this repository.
 
 ## Project Overview
 
-**re-zoids-saga** is a FOSS native runtime for preserving the Zoids saga of Game Boy Advance games. The goal is to reimplement the games as native, cross-platform applications (Windows, macOS, Linux, and eventually Android) with a modern localization layer (Japanese, English, Spanish), while preserving the original gameplay behavior.
+**re-zoids-saga** is a FOSS native runtime for preserving the Zoids saga of Game Boy Advance games. The goal is to reimplement the games as native, cross-platform applications (Windows, macOS, Linux, and Android) with a modern localization layer (Japanese, English, Spanish), while preserving the original gameplay behavior.
 
 This is **not** an emulator and **not** a ROM hack. The original ROM is never modified or redistributed: it is used exclusively as a **data source**. Users must provide their own legally obtained game files.
 
@@ -130,9 +130,12 @@ re-zoids-saga/
 │       └── fuzors/              # Zoids Saga III / Fuzors-specific logic and data bindings
 │
 ├── apps/
-│   ├── launcher/                # main binary: ROM picker, title detection, transparent
-│   │                            # extraction with progress UI, then wires the matching
-│   │                            # game crate + platform-sdl3; settings, language selection
+│   ├── launcher/                # main binary (and library): ROM picker, title detection,
+│   │                            # transparent extraction with progress UI, then wires the
+│   │                            # matching game crate + platform-sdl3; settings, language
+│   │                            # selection
+│   ├── android/                 # the Android app: libmain.so runs the launcher, and its
+│   │                            # Gradle project (docs/android.md)
 │   └── extractor-cli/           # thin CLI over crates/extraction for development and
 │                                # debugging (inspect/dump extracted data)
 │

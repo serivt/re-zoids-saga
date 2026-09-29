@@ -32,6 +32,7 @@ whichever the player's desktop has.
 | macOS 11+ | `tools/package/macos.sh [version]` | `re-zoids-saga-<version>-macos.dmg`: `Re Zoids Saga.app` (universal: Apple Silicon and Intel, ad-hoc signed), `README.txt`, `LICENSE.txt` and a link to Applications |
 | Windows | `tools/package/windows.ps1 [version]` | `re-zoids-saga-<version>-windows-x86_64.zip`: `re-zoids-saga.exe`, `README.txt`, `LICENSE.txt` |
 | Linux (glibc 2.34+) | `tools/package/linux.sh [version]` | `re-zoids-saga-<version>-linux-x86_64.tar.gz`: `re-zoids-saga`, `README.txt`, `LICENSE.txt` |
+| Android 5.0+ | `tools/package/android.sh [version] [debug\|release]` | `re-zoids-saga-<version>-android.apk`, for `arm64-v8a` and `x86_64` (see [android.md](android.md)) |
 
 Each script runs from the repository's root, builds with `--locked`, and writes to
 `dist/` (gitignored). The version defaults to `git describe`. `README.txt` is
@@ -60,8 +61,11 @@ targets; the macOS app carries the `.icns` in its bundle.
 
 ## Releases
 
-[.github/workflows/release.yml](../.github/workflows/release.yml) runs the three
-scripts on GitHub's runners (macOS 14, Windows, Ubuntu 22.04). Publishing a
+[.github/workflows/release.yml](../.github/workflows/release.yml) runs the four
+scripts on GitHub's runners (macOS 14, Windows, Ubuntu 22.04, and Ubuntu 24.04 for
+Android). The Android job signs the app with the keystore in the repository's secrets
+(a release fails without it; a run by hand then uses the debug key) and starts it on an
+emulator with `tools/package/android-smoke.sh`, without a ROM, before keeping it. Publishing a
 GitHub release, with its tag (`v0.1.0`), title, notes and prerelease mark written
 by hand, builds the packages from the release's tag and attaches them to it; the
 workflow runs as it is at that tag's commit. Running the workflow by hand only
