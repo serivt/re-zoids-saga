@@ -691,6 +691,19 @@ bit 1 (`2`) its side's.
   belong to story battles' enemies. A record naming a way past 16 would send the
   original to an empty entry of the table; the port takes the first way.
 
+  Checked against the original for ways 0 to 5, 12 and 13, the ways of story battles
+  30, 34 and 36 to 40: each battle replayed from the original's game state and
+  random state at its call, with the frame counter of each actor's rolls and each
+  enemy's choice set to the original's (the frames differ, below), gave the same
+  random state, weapon and group at all 85 choices of the enemies.
+
+  The original's frames differ where CPU time runs out. The round's first actor starts
+  its turn (`0x0802AF70`: the rolls, then its statistics again) late in the frame,
+  after the round's setup; when the rolls begin past about line 85 the statistics
+  (some 190,000 cycles) spill into the next frame, and the menu or choice comes a
+  frame later than the port's. The line depends on the round's setup, so the port
+  does not model it; the random values drawn after it then differ.
+
 The port's units, their statistics, the order and the three attacks of the traced
 battle matched the original's RAM: 20 hit points on a Command Wolf, 23 and 24 on the
 Gator and the Iguan, then 19 on the Iguan.
@@ -1157,8 +1170,9 @@ no such thing.
   the enemy's.
 - The item list's pages and their arrows (`0x080339F8`), which six battle items never
   need.
-- The enemies' ways of choosing other than the first were read from the code alone:
-  no enemy of the traced areas uses them.
+- The frame a round's first actor loses to CPU time (see Turns and the enemies'
+  choices), and the attack scenes' lengths, which differ by a frame or two; either
+  changes the random values drawn afterwards.
 - In the attack scenes: the behaviors that no weapon's animation uses (5, 6, 7, 11,
   26, 28, 30; 3 and 4 are the aim's cursors) play as 2.
 - In the aim: the front weapon's hiding while the Zoid fades (the mount's `+0x4A`),
