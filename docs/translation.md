@@ -128,7 +128,12 @@ spacing, capitals 8 pixels tall, with accented letters built from the plain ones
 (acute, grave, circumflex, diaeresis, tilde, cedilla) and `¿` `¡` as `?` `!` turned
 around. Characters neither font has draw as the fallback glyph. In the name entry's
 grid and name field every character is centered in an 8-pixel cell so it lines up
-with the cursor and the slot marks.
+with the cursor and the slot marks. With a translation the game's numbers, which it
+prints with full-width digits (money, levels, hit points, the figures of the menus
+and the battle messages, and the port's own values), draw with the Latin font's
+digits, each centered in the 8-pixel cell the ROM's digit takes, so they match the
+translated text and every column of figures stays where the original has it
+(`TextPainter::set_latin_digits`); without one they keep the ROM's.
 
 Text wraps by pixels at the window's inner width; a menu window keeps two cells free
 on each side for the cursor (see [formats/window.md](formats/window.md)). What fits

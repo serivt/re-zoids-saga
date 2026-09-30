@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Damage numbers:** each unit a blow lands on shows the damage it took as a number
     under it for a moment, besides the message, in the game's own orange digits.
 
+### Changed
+
+- With a translation, the game's numbers (money, levels, hit points, the menus' figures
+  and the battle messages) show in the translation's Latin digits instead of the
+  Japanese font's, each in the place the original gives it.
+
 ## [0.2.0] - 2026-09-28
 
 ### Added

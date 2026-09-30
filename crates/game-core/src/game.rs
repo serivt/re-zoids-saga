@@ -722,6 +722,7 @@ impl<'rom> Game<'rom> {
         mut translation: Translation,
     ) -> Result<Vec<String>, GameError> {
         let problems = translation.fit(&self.data, self.painter.metrics())?;
+        self.painter.set_latin_digits(true);
         self.extensions
             .borrow_mut()
             .insert(Box::new(TranslationExtension::new(translation)));

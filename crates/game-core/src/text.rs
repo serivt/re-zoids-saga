@@ -259,6 +259,8 @@ pub struct TextPainter<'rom> {
     index: GlyphIndex,
     fallback: Option<Glyph>,
     metrics: TextMetrics,
+    /// Whether the game's full-width digits draw with the Latin font.
+    latin_digits: bool,
 }
 
 impl<'rom> TextPainter<'rom> {
@@ -271,7 +273,25 @@ impl<'rom> TextPainter<'rom> {
             index,
             fallback,
             metrics: TextMetrics::standard(),
+            latin_digits: false,
         }
+    }
+
+    /// Draws the game's full-width digits with the Latin font's, each
+    /// centered in the cell the ROM's takes, so that the numbers match a
+    /// translation's text and every column stays where it was; or with the
+    /// ROM's, as the original.
+    pub fn set_latin_digits(&mut self, latin: bool) {
+        self.latin_digits = latin;
+    }
+
+    /// The Latin glyph a full-width digit draws with, when they do.
+    fn latin_digit(&self, ch: char) -> Option<PixelGlyph> {
+        if !self.latin_digits || !('０'..='９').contains(&ch) {
+            return None;
+        }
+        let digit = char::from_u32(u32::from(ch) - u32::from('０') + u32::from('0'))?;
+        self.metrics.latin_glyph(digit)
     }
 
     /// The painter's character widths.
@@ -380,6 +400,18 @@ impl<'rom> TextPainter<'rom> {
                     };
                     continue;
                 }
+                if let Some(glyph) = self.latin_digit(ch) {
+                    let inset = (CELL_WIDTH - usize::from(glyph.width).min(CELL_WIDTH)) / 2;
+                    draw_latin(
+                        frame,
+                        x + cell_offset(pen + inset, 1),
+                        line_y,
+                        &glyph,
+                        palette,
+                    );
+                    pen += CELL_WIDTH;
+                    continue;
+                }
                 if let Some(glyph) = self.glyph(ch) {
                     let image = IndexedImage {
                         width: GLYPH_WIDTH,
@@ -464,4 +496,43 @@ fn cedilla(base: PixelGlyph) -> PixelGlyph {
 
 fn cell_offset(cells: usize, cell_size: usize) -> i32 {
     i32::try_from(cells * cell_size).unwrap_or(i32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The columns `text` puts ink in, drawn by a painter without ROM
+    /// glyphs.
+    fn inked_columns(text: &str, latin_digits: bool) -> Vec<usize> {
+        let Ok(index) = GlyphIndex::parse(&[]) else {
+            panic!("an empty range table parses");
+        };
+        let mut painter = TextPainter::new(&[], index, None);
+        painter.set_latin_digits(latin_digits);
+        let mut frame = Frame::new(64, 32, platform::Rgb::default());
+        let palette = Palette::new(
+            [platform::Rgb {
+                r: 255,
+                g: 255,
+                b: 255,
+            }; 16],
+        );
+        painter.draw(&mut frame, 0, 0, text, &palette);
+        (0..64)
+            .filter(|&x| (0..32).any(|y| frame.pixel(x, y) != Some(platform::Rgb::default())))
+            .collect()
+    }
+
+    #[test]
+    fn full_width_digits_draw_latin_in_their_cells_only_when_asked() {
+        assert!(inked_columns("３", false).is_empty());
+        let columns = inked_columns("　３", true);
+        assert!(!columns.is_empty());
+        assert!(
+            columns
+                .iter()
+                .all(|x| (CELL_WIDTH..2 * CELL_WIDTH).contains(x))
+        );
+    }
 }
