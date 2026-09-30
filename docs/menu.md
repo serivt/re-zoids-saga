@@ -542,7 +542,9 @@ the original's. In the classic mode コンフィグ is the original's (above). I
 mode (see [launcher.md](launcher.md)) it lists every setting the game lets the player
 change while it plays: window 4, a light menu like the save slots', takes the columns
 from the main list's right edge to the screen's, 8 rows high to cover the status panel,
-a line per setting with its value from cell 13: the message speed (１ to ５, the original's, stored in the party as its list does), the
+a line per setting with its value from cell 13 (further left when a translation's list
+starts further right and the widest value would not fit before the cursor's right mark):
+the message speed (１ to ５, the original's, stored in the party as its list does), the
 battle animations (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Without the attack scenes)
 and the damage numbers (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Damage numbers). The
 help line says what

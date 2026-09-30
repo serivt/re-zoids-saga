@@ -20,6 +20,7 @@ use crate::port_text::{
     OPTIONS_SPEED_HELP, full_width, port_text,
 };
 use crate::script::{MOVED_DOWN, MOVED_LEFT, MOVED_RIGHT, MOVED_UP, ScriptRunner};
+use crate::text::CELL_WIDTH;
 use crate::windows::ScriptWindows;
 
 /// The list's window, where the original's message speed shows.
@@ -37,6 +38,9 @@ const FRAME_ROWS: u8 = 2;
 const PANEL_ROWS: u8 = 8;
 /// The cell where the values start.
 const VALUE_CELL: usize = 13;
+/// The cells of a line's window that hold no text: the frame and the
+/// cursor's mark on each side.
+const MARGIN_CELLS: usize = 4;
 /// A menu that reports every key the list takes: the cursor's moves, left
 /// and right.
 const REPORTS_SIDES: u8 = 6;
@@ -197,6 +201,7 @@ impl PauseMenu {
     /// the current line, and the help line.
     fn draw_options(&self, windows: &mut ScriptWindows<'_>) {
         let extensions = windows.extensions().clone();
+        let value_cell = value_cell(windows);
         windows.clear_window(LIST_WINDOW);
         for (index, setting) in SETTINGS.iter().enumerate() {
             if index > 0 {
@@ -215,7 +220,7 @@ impl PauseMenu {
                 }
             };
             put_text(windows, &port_text(&extensions, label));
-            windows.pad_to(LIST_WINDOW, VALUE_CELL);
+            windows.pad_to(LIST_WINDOW, value_cell);
             put_text(windows, &value);
         }
         windows.set_cursor(LIST_WINDOW, Some(self.options.line));
@@ -238,6 +243,31 @@ impl PauseMenu {
         }
         windows.present(Some(HELP_WINDOW));
     }
+}
+
+/// The cell where the values start: [`VALUE_CELL`], or further left when
+/// the widest value, on or off or a speed, would not fit before the
+/// cursor's right mark (a translation's list starts further right).
+fn value_cell(windows: &ScriptWindows<'_>) -> usize {
+    let extensions = windows.extensions().clone();
+    let metrics = windows.metrics();
+    let widest = [
+        port_text(&extensions, OPTIONS_ON),
+        port_text(&extensions, OPTIONS_OFF),
+        full_width(u32::from(*SPEEDS.end())),
+    ]
+    .iter()
+    .map(|value| metrics.width(value).div_ceil(CELL_WIDTH))
+    .max()
+    .unwrap_or(0);
+    let cells = windows
+        .windows()
+        .get(usize::from(LIST_WINDOW))
+        .and_then(Option::as_ref)
+        .map_or(VALUE_CELL + widest, |list| {
+            list.width.saturating_sub(MARGIN_CELLS)
+        });
+    VALUE_CELL.min(cells.saturating_sub(widest))
 }
 
 /// Prints `text` on the list's current line.
