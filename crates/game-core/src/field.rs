@@ -22,7 +22,10 @@
 //! the player's steps last one walking cycle). Actors are drawn nearer over
 //! farther, in the order the game's own sort leaves them, and the screen
 //! shows the positions of the frame before with the current pictures.
-//! Completing a step onto an exit reports it; pressing A while standing and
+//! Completing a step of the player's onto an exit reports it, whether the
+//! buttons or an event's walk moved it, but for a walk through (the stepping
+//! command `0x0800B764` reads the footing as a step ends); pressing A while
+//! standing and
 //! facing an actor turns it toward the player (characters only) and reports
 //! what it runs.
 
@@ -1118,6 +1121,12 @@ impl Field {
             if finished && index == 0 && actor.command == Command::Player {
                 let (column, row) = actor.footing();
                 return self.scene.exit(column, row).map(FieldEvent::Exit);
+            }
+            if let (true, 0, Command::WalkTo(Walk { through: false, .. })) =
+                (finished, index, actor.command)
+                && let Some(exit) = self.scene.exit(actor.footing().0, actor.footing().1)
+            {
+                return Some(FieldEvent::Exit(exit));
             }
             if let (true, 0, Command::WalkTo(walk)) = (finished, index, actor.command) {
                 return self.walk_door(walk);
@@ -2717,6 +2726,25 @@ mod tests {
         assert_eq!(exits, [FieldEvent::Exit(1)]);
         assert_eq!(field.player().footing(), (1, 2));
         assert_eq!(field.update(Input::default()), None);
+    }
+
+    #[test]
+    fn an_event_walk_takes_the_exit_it_ends_a_step_on_unless_it_walks_through() {
+        for (through, expected) in [(false, vec![FieldEvent::Exit(1)]), (true, vec![])] {
+            let mut field = field(6, 5);
+            field.player_mut().command = Command::WalkTo(Walk {
+                column: 1,
+                row: 1,
+                speed: PIXEL,
+                animation_shift: 1,
+                through,
+            });
+            let events: Vec<_> = (0..32)
+                .filter_map(|_| field.update(Input::default()))
+                .collect();
+            assert_eq!(events, expected);
+            assert_eq!(field.player().footing(), (1, 2));
+        }
     }
 
     #[test]

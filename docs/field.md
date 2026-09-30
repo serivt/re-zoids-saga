@@ -243,8 +243,12 @@ attribute `0xA000`, which also blocks walking).
 
 ## Exits
 
-When a step completes onto a footing whose attribute is `0x4000 | n`, the engine reports
-exit `n`; the caller looks the warp up in the current map's table (see
+When a step of the player's completes onto a footing whose attribute is `0x4000 | n`,
+the engine reports exit `n`: the stepping command (`0x0800B764`) reads the player's
+footing as each step ends, whether the buttons or an event's walk (command 10) moved it,
+but not for a walk through (command 11) or with bit 2 of the field's state halfword
+(`0x02000008`) set, which no event traced so far sets. Chapter 9's briefing room is left
+so: the event walks the prince onto the exit and ends; the caller looks the warp up in the current map's table (see
 [formats/map.md](formats/map.md)), loads the destination scene and stands the player on
 the arrival metatile, turning it when the warp says so. The screen fades out with the
 door sound before the load and back in after it, at the timings in
