@@ -5,6 +5,22 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Game mode.** The launcher's new Game mode line chooses between Classic, which plays
+  exactly as the original, and Enhanced, which adds conveniences the original never
+  had, each turned on or off on the game mode's screen:
+  - **Settings in the pause menu:** the pause menu's Config option opens a list of the
+    settings the game can change while it plays, the battle message speed and the
+    enhanced mode's conveniences, each described on the help line and changed with
+    left and right. The launcher remembers the changes; the classic mode keeps the
+    original's Config screen.
+  - **Battle animations off:** skips the battles' attack scenes. An enemy's attack goes
+    straight to its outcome, and the party still aims its attacks but fires without
+    the scene, so battles take about half as long.
+
 ## [0.2.0] - 2026-09-28
 
 ### Added
