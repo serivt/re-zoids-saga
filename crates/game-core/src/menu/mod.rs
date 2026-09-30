@@ -32,6 +32,7 @@ use crate::{ScriptHost, TextPainter, WindowPainter, draw_sprite};
 mod equipment;
 pub(crate) mod formation;
 mod items;
+mod options;
 mod parts;
 mod save_slots;
 mod shop;
@@ -358,6 +359,8 @@ enum MenuState {
     Saving,
     /// The port's list of save slots before the question.
     SaveSlot,
+    /// The port's list of settings, コンフィグ in the enhanced mode.
+    Options,
     Unit,
     Character,
     Zoid,
@@ -429,6 +432,8 @@ pub struct PauseMenu {
     item_menu: items::ItemMenu,
     /// The port's save slots.
     save: save_slots::SaveSlots,
+    /// コンフィグ's settings in the enhanced mode.
+    options: options::Options,
     equipment: equipment::Equipment,
     equip_image: Option<(u16, BattleImage)>,
     weapon_sprites: Vec<((u16, usize), Option<EffectSprite>)>,
@@ -522,6 +527,7 @@ impl PauseMenu {
             zi_kind: zi_data::ZiList::default(),
             item_menu: items::ItemMenu::default(),
             save: save_slots::SaveSlots::default(),
+            options: options::Options::default(),
             equipment: equipment::Equipment::default(),
             equip_image: None,
             weapon_sprites: Vec::new(),
@@ -722,6 +728,7 @@ impl PauseMenu {
             MenuState::Closed => return Ok(MenuStep::Closed),
             MenuState::Saving => return Ok(MenuStep::Save),
             MenuState::SaveSlot => return self.save_slot_frame(rom, input, windows),
+            MenuState::Options => return self.options_frame(rom, input, windows),
             _ => {}
         }
         if !self.runner.update(rom, input, windows)? {
@@ -785,8 +792,11 @@ impl PauseMenu {
             MenuState::ItemTarget => self.target_choice(rom, code, choice, windows)?,
             MenuState::Notice(back) => self.return_to(rom, back, windows)?,
             MenuState::Shop(step) => self.shop_choice(rom, step, code, choice, windows)?,
-            MenuState::Saving | MenuState::SaveSlot | MenuState::Closing(_) | MenuState::Closed => {
-            }
+            MenuState::Saving
+            | MenuState::SaveSlot
+            | MenuState::Options
+            | MenuState::Closing(_)
+            | MenuState::Closed => {}
         }
         self.load_equip_image(rom);
         Ok(if self.state == MenuState::Closed {
@@ -1300,6 +1310,11 @@ impl PauseMenu {
                 let formation = formation::Formation::new(&GameData::new(rom), &self.game_state);
                 self.formation = Some(Box::new(formation));
                 self.scroll += 1;
+                Ok(())
+            }
+            ITEM_CONFIG if self.offers_options() => {
+                windows.clear_window(HELP_WINDOW);
+                self.open_options(windows);
                 Ok(())
             }
             ITEM_CONFIG => {

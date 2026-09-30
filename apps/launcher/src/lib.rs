@@ -53,6 +53,30 @@ impl Extension for StorageReport {
     }
 }
 
+/// Remembers the enhanced mode's settings the player changes in the pause
+/// menu, so the launcher shows them and the next game plays with them.
+struct ModeKeeper;
+
+impl Extension for ModeKeeper {
+    fn name(&self) -> &'static str {
+        "launcher-mode-keeper"
+    }
+
+    fn on_event(&mut self, event: &GameEvent) {
+        let GameEvent::EnhancementsChanged(enhancements) = event else {
+            return;
+        };
+        let Some(path) = settings_path() else {
+            return;
+        };
+        let mut settings = settings::Settings::load(&path);
+        settings.mode.enhancements = *enhancements;
+        if let Err(error) = settings.store(&path) {
+            eprintln!("Settings:   {error}");
+        }
+    }
+}
+
 /// Runs the launcher with `args`, the command line without the program's
 /// name: without a ROM it shows its own screen, with one it plays it or
 /// does what the options ask.
@@ -136,6 +160,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
     game.extensions()
         .borrow_mut()
         .insert(Box::new(StorageReport));
+    game.extensions().borrow_mut().insert(Box::new(ModeKeeper));
     if let Some(path) = &options.translation {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read translation {}", path.display()))?;

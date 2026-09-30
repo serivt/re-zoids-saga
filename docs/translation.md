@@ -102,6 +102,12 @@ translated message wider than its note allows.
 | `port/save-slots/load-help` | どのデータからつづけますか？ | The help line while continuing, 224 pixels |
 | `port/save-slots/question` | スロット{slot}にセーブしますか？ | The question for an empty slot, 224 pixels |
 | `port/save-slots/overwrite` | スロット{slot}に上書きしますか？ | The question over a slot's game, 224 pixels |
+| `port/options/speed` | メッセージ速度 | The enhanced mode's コンフィグ: the message speed's line, 96 pixels |
+| `port/options/speed-help` | 戦闘メッセージの速さ　１が速い | Its help line, 224 pixels |
+| `port/options/battle-animations` | 戦闘アニメ | The battle animations' line, 96 pixels |
+| `port/options/battle-animations-help` | ＯＦＦで攻撃シーンを省略 | Its help line, 224 pixels |
+| `port/options/on`, `port/options/off` | ＯＮ, ＯＦＦ | A setting's value, 48 pixels |
+| `port/options/keys` | 左右：変更　Ｂ：もどる | The help's second line, 224 pixels |
 | `port/demo/thanks` | あそんでくれて　ありがとう！ and two more lines | The thanks at the end of the demo, 3 lines of 224 pixels |
 | `port/demo/question` | ここまでの記録を　セーブしますか？ | The question after them, over the original's はい/いいえ |
 | `port/demo/saved` | セーブしました。 | The notice once saved |

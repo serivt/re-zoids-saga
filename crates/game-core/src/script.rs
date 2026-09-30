@@ -55,8 +55,10 @@ pub const MOVED_UP: u16 = 0x20;
 pub const MOVED_DOWN: u16 = 0x40;
 const PAGE_LEFT: u16 = 2;
 const PAGE_RIGHT: u16 = 4;
-const MOVED_LEFT: u16 = 8;
-const MOVED_RIGHT: u16 = 0x10;
+/// What a menu of mode 5 or 6 leaves in var0 for left.
+pub const MOVED_LEFT: u16 = 8;
+/// What a menu of mode 6 leaves in var0 for right.
+pub const MOVED_RIGHT: u16 = 0x10;
 const STARTED: u16 = 0x80;
 const SELECTED: u16 = 0;
 

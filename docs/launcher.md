@@ -37,7 +37,9 @@ Game mode chooses how the game plays, on a screen of its own:
 
 The mode is set before the game starts (`Game::set_play_mode`, see
 `crates/game-core/src/play_mode.rs`) and does not change while it plays; saves are the
-original's in either mode.
+original's in either mode. In the enhanced mode the pause menu's コンフィグ lists the
+enhancements too, beside the original's message speed (see [menu.md](menu.md)); what the
+player changes there holds at once and the launcher remembers it.
 
 Options holds:
 

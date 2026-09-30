@@ -46,6 +46,21 @@ pub const SLOT_QUESTION: &str = "port/save-slots/question";
 /// The question before saving over a slot's game.
 pub const SLOT_OVERWRITE: &str = "port/save-slots/overwrite";
 
+/// The pause menu's settings in the enhanced mode: the message speed's
+/// line and help.
+pub const OPTIONS_SPEED: &str = "port/options/speed";
+/// See [`OPTIONS_SPEED`].
+pub const OPTIONS_SPEED_HELP: &str = "port/options/speed-help";
+/// The battle animations' line and help.
+pub const OPTIONS_ANIMATIONS: &str = "port/options/battle-animations";
+/// See [`OPTIONS_ANIMATIONS`].
+pub const OPTIONS_ANIMATIONS_HELP: &str = "port/options/battle-animations-help";
+/// A setting that is on, and off.
+pub const OPTIONS_ON: &str = "port/options/on";
+/// See [`OPTIONS_ON`].
+pub const OPTIONS_OFF: &str = "port/options/off";
+/// The keys, on the help line's second line.
+pub const OPTIONS_KEYS: &str = "port/options/keys";
 
 /// The thanks at the end of the demo, in the story box.
 pub const DEMO_THANKS: &str = "port/demo/thanks";
@@ -732,6 +747,48 @@ pub const PORT_TEXTS: &[PortText] = &[
         key: SLOT_OVERWRITE,
         text: "スロット{slot}に上書きしますか？",
         note: "The question before saving over a slot's game, {slot} its number; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: OPTIONS_SPEED,
+        text: "メッセージ速度",
+        note: "The pause menu's settings, enhanced mode: the battle message speed's line, before its value at cell 13 (96 pixels)",
+        pixels: 96,
+    },
+    PortText {
+        key: OPTIONS_SPEED_HELP,
+        text: "戦闘メッセージの速さ　１が速い",
+        note: "The help line for the message speed, 1 fastest and 5 slowest; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: OPTIONS_ANIMATIONS,
+        text: "戦闘アニメ",
+        note: "The pause menu's settings, enhanced mode: the battle animations' line, before its value at cell 13 (96 pixels)",
+        pixels: 96,
+    },
+    PortText {
+        key: OPTIONS_ANIMATIONS_HELP,
+        text: "ＯＦＦで攻撃シーンを省略",
+        note: "The help line for the battle animations: off skips the attack scenes; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: OPTIONS_ON,
+        text: "ＯＮ",
+        note: "A setting that is on, in the pause menu's settings; 48 pixels",
+        pixels: 48,
+    },
+    PortText {
+        key: OPTIONS_OFF,
+        text: "ＯＦＦ",
+        note: "A setting that is off, in the pause menu's settings; 48 pixels",
+        pixels: 48,
+    },
+    PortText {
+        key: OPTIONS_KEYS,
+        text: "左右：変更　Ｂ：もどる",
+        note: "The second help line of the pause menu's settings: left/right change, B goes back; 224 pixels",
         pixels: 224,
     },
     PortText {

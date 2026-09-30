@@ -110,6 +110,9 @@ pub enum Event {
     MenuOpened,
     /// The pause menu closed.
     MenuClosed,
+    /// The player changed the enhanced mode's settings in the pause menu,
+    /// a port feature; they hold from now on.
+    EnhancementsChanged(crate::play_mode::Enhancements),
     /// A keeper opened a shop.
     ShopOpened(Shop),
     /// The shop closed and the field is back.

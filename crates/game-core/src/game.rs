@@ -45,7 +45,7 @@ use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
 use crate::guide::{Cover, Guide, GuideError, GuideKind};
 use crate::menu::{MenuStep, Party, PauseMenu, Shop};
 use crate::objects::AreaObjects;
-use crate::play_mode::PlayMode;
+use crate::play_mode::{Enhancements, PlayMode};
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptContext, ScriptError, ScriptRunner};
 use crate::slots::{self, Pick, Purpose, Slot, SlotPicker};
@@ -401,6 +401,18 @@ impl<'rom> Game<'rom> {
         self.play_mode
     }
 
+    /// Keeps the enhancements the pause menu hands back, in the enhanced
+    /// mode, and tells the extensions when they changed.
+    fn take_enhancements(&mut self, chosen: Option<Enhancements>) {
+        let (PlayMode::Enhanced(current), Some(chosen)) = (self.play_mode, chosen) else {
+            return;
+        };
+        if chosen != current {
+            self.play_mode = PlayMode::Enhanced(chosen);
+            Self::emit(&self.extensions, &Event::EnhancementsChanged(chosen));
+        }
+    }
+
     /// The extensions the game raises events to and asks questions of.
     #[must_use]
     pub fn extensions(&self) -> &SharedExtensions {
@@ -642,6 +654,10 @@ impl<'rom> Game<'rom> {
                     let mut menu =
                         PauseMenu::new(&self.data, self.party.clone(), self.state.clone())?;
                     self.offer_save_slots(&mut menu);
+                    menu.set_enhancements(match self.play_mode {
+                        PlayMode::Classic => None,
+                        PlayMode::Enhanced(enhancements) => Some(enhancements),
+                    });
                     menu.open(rom, &mut self.windows)?;
                     self.screen = Screen::Menu(Box::new(menu));
                     Self::emit(&self.extensions, &Event::MenuOpened);
@@ -664,7 +680,9 @@ impl<'rom> Game<'rom> {
                 MenuStep::Closed => {
                     self.party = menu.party();
                     self.state.clone_from_slice(menu.state());
+                    let enhancements = menu.enhancements();
                     self.screen = Screen::Field;
+                    self.take_enhancements(enhancements);
                     self.events.set_brightness(BLACK);
                     self.events.fade_in_after(MENU_RETURN_BLACK_FRAMES, 0);
                     if let Some(field) = &mut self.field {

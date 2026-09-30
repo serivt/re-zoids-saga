@@ -535,6 +535,23 @@ with the cursor on コンフィグ, as the original does. セーブ asks; はい
 and answers セーブしました, or セーブを中止しました when it could not be written, and
 いいえ or B answer セーブを中止しました.
 
+### Settings in the enhanced mode (a port feature)
+
+Source of knowledge: this project's own design; the windows, the menu and its sounds are
+the original's. In the classic mode コンフィグ is the original's (above). In the enhanced
+mode (see [launcher.md](launcher.md)) it lists every setting the game lets the player
+change while it plays: window 4, a light menu like the save slots', takes the columns
+from the main list's right edge to the screen's, 8 rows high to cover the status panel,
+a line per setting with its value from cell 13: the message speed (１ to ５, the
+original's, stored in the party as its list does) and the battle animations (ＯＮ or
+ＯＦＦ, see [combat.md](combat.md), Without the attack scenes). The help line says what
+the setting under the cursor does, and below it the keys. Up and down move (`0x40`);
+left and right, or A, change the value (`0x40`), the speed stopping at its ends and the
+animations switching; B plays `0x3F` and goes back to the main list with the cursor on
+コンフィグ. The settings hold from then on; the launcher remembers the enhancements for
+the next game. The port's messages are keyed `port/options/...` (see
+[translation.md](translation.md)). Implemented in `crates/game-core/src/menu/options.rs`.
+
 ### Save slots (a port feature)
 
 Source of knowledge: this project's own design; the original has one save. With more than
