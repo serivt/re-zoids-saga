@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Battle animations off:** skips the battles' attack scenes. An enemy's attack goes
     straight to its outcome, and the party still aims its attacks but fires without
     the scene, so battles take about half as long.
+  - **Damage numbers:** each unit a blow lands on shows the damage it took as a number
+    under it for a moment, besides the message, in the game's own orange digits.
 
 ## [0.2.0] - 2026-09-28
 
