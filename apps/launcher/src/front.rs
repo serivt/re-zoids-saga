@@ -2,6 +2,8 @@
 //! line: the project's name and version, the ROM and the translation to
 //! play with (the ROM chosen in the system's file dialog; the translation
 //! downloaded from the translations' repository or opened likewise), the
+//! game mode (classic, as the original, or enhanced, with the port's
+//! conveniences the player turns on, see `game_core::play_mode`), the
 //! options (the
 //! keyboard's keys, the gamepad's buttons, the window, the filter and the
 //! volume), the screen about the port (its version, license and the
@@ -18,26 +20,28 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use extraction::{Identification, IdentifyError, Title};
 use game_core::port_text::{
-    LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_BACK, LAUNCHER_CHOOSE_TRANSLATION,
-    LAUNCHER_CONTROLS_HELP, LAUNCHER_COPY_FAILED, LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN,
-    LAUNCHER_DOWNLOAD_FAILED, LAUNCHER_DOWNLOADED, LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS,
-    LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED, LAUNCHER_FILTER, LAUNCHER_FROM_FILE,
-    LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD, LAUNCHER_HELP, LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP,
-    LAUNCHER_IMPORTED, LAUNCHER_KEYBOARD, LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT,
-    LAUNCHER_LEFT, LAUNCHER_LICENSE, LAUNCHER_LOOKING_UP, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM,
+    LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_BACK, LAUNCHER_BATTLE_ANIMATIONS,
+    LAUNCHER_CHOOSE_TRANSLATION, LAUNCHER_CLASSIC, LAUNCHER_CLASSIC_NOTE, LAUNCHER_CONTROLS_HELP,
+    LAUNCHER_COPY_FAILED, LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED,
+    LAUNCHER_DOWNLOADED, LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS, LAUNCHER_ENHANCED,
+    LAUNCHER_ENHANCED_NOTE, LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED,
+    LAUNCHER_FILTER, LAUNCHER_FROM_FILE, LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD, LAUNCHER_HELP,
+    LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP, LAUNCHER_IMPORTED, LAUNCHER_KEYBOARD,
+    LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LEFT, LAUNCHER_LICENSE,
+    LAUNCHER_LOOKING_UP, LAUNCHER_MODE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM,
     LAUNCHER_NO_TRANSLATION, LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON,
     LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED,
-    LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM, LAUNCHER_PICK_TOUCH_OPTIONS,
-    LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY, LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD,
-    LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT, LAUNCHER_ROM,
-    LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
-    LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SAVES, LAUNCHER_SAVES_HELP,
-    LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY, LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH,
-    LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP, LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP,
-    LAUNCHER_TOUCH_OPACITY, LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION,
-    LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE,
-    LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WINDOW,
-    default_text,
+    LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_MODE, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM,
+    LAUNCHER_PICK_TOUCH_OPTIONS, LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY, LAUNCHER_PRESS_KEY,
+    LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT,
+    LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER,
+    LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SAVES,
+    LAUNCHER_SAVES_HELP, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY, LAUNCHER_SLOT_SAVED,
+    LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP, LAUNCHER_TOUCH_HELP,
+    LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY, LAUNCHER_TOUCH_OPTIONS_HELP,
+    LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP,
+    LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE,
+    LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WINDOW, default_text,
 };
 use game_core::{TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -49,7 +53,7 @@ use platform_sdl3::{
 use crate::download::{Answer, Download, Language};
 use crate::quit::QuitPrompt;
 use crate::saves;
-use crate::settings::{FULL_VOLUME, SCALES, Settings, TOUCH_OPACITIES, TOUCH_SIZES};
+use crate::settings::{FULL_VOLUME, GameMode, SCALES, Settings, TOUCH_OPACITIES, TOUCH_SIZES};
 
 /// `desktop`, a text that names keys, or on Android `touch`, the one that
 /// names taps and the on-screen pad's buttons.
@@ -87,8 +91,8 @@ const TITLE_SCALE: usize = 2;
 const TITLE_Y: usize = 10;
 const SUBTITLE_Y: usize = 32;
 const PANEL: (usize, usize, usize, usize) = (MARGIN, 46, 240 - 2 * MARGIN, 82);
-const FIRST_LINE_Y: usize = 53;
-const LINE_HEIGHT: usize = 12;
+const FIRST_LINE_Y: usize = 52;
+const LINE_HEIGHT: usize = 10;
 const OPTIONS_FIRST_LINE_Y: usize = 51;
 const OPTION_LINE_HEIGHT: usize = 10;
 /// Rows the about screen's page lines skip, their address below them.
@@ -135,15 +139,17 @@ pub struct Choice {
 enum Line {
     Rom,
     Translation,
+    Mode,
     Options,
     About,
     Play,
     Quit,
 }
 
-const LINES: [Line; 6] = [
+const LINES: [Line; 7] = [
     Line::Rom,
     Line::Translation,
+    Line::Mode,
     Line::Options,
     Line::About,
     Line::Play,
@@ -205,6 +211,17 @@ const SETTINGS: &[Setting] = if cfg!(target_os = "android") {
 } else {
     &DESKTOP_SETTINGS
 };
+
+/// The lines of the game mode's screen, top to bottom: the mode, the
+/// enhancements it turns on, and the way back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModeLine {
+    Mode,
+    BattleAnimations,
+    Back,
+}
+
+const MODE_LINES: [ModeLine; 3] = [ModeLine::Mode, ModeLine::BattleAnimations, ModeLine::Back];
 
 /// How much a step of the pad's size or opacity changes it, in percent.
 const TOUCH_STEP: u8 = 10;
@@ -281,6 +298,8 @@ enum Screen {
     Main,
     /// The options, with the line under the cursor.
     Options(usize),
+    /// The game mode and its enhancements, with the line under the cursor.
+    Mode(usize),
     /// The screen about the port, with the line under the cursor.
     About(usize),
     /// Where the translation comes from: a file, or a language to
@@ -322,6 +341,7 @@ pub struct Front {
     volume: u8,
     touch_size: u8,
     touch_opacity: u8,
+    mode: GameMode,
     gamepads: Vec<String>,
     /// Whether a binding screen caught its key or gamepad button this
     /// frame, which the frame's buttons then leave alone.
@@ -389,6 +409,7 @@ impl Front {
             volume: settings.volume,
             touch_size: settings.touch_size,
             touch_opacity: settings.touch_opacity,
+            mode: settings.mode,
             gamepads: Vec::new(),
             caught: false,
             quitting: None,
@@ -432,6 +453,7 @@ impl Front {
             volume: self.volume,
             touch_size: self.touch_size,
             touch_opacity: self.touch_opacity,
+            mode: self.mode,
         }
     }
 
@@ -518,7 +540,13 @@ impl Front {
                         device.options()
                     };
                 }
-                (Event::Back, Screen::Options(_) | Screen::About(_) | Screen::Translations(_)) => {
+                (
+                    Event::Back,
+                    Screen::Options(_)
+                    | Screen::Mode(_)
+                    | Screen::About(_)
+                    | Screen::Translations(_),
+                ) => {
                     self.screen = Screen::Main;
                 }
                 (Event::Back, Screen::Saves(_)) => self.screen = saves_option(),
@@ -620,6 +648,7 @@ impl Front {
             Screen::Saves(line) => self.update_saves(line, pressed),
             Screen::Slot { slot, line } => self.update_slot(display, slot, line, pressed)?,
             Screen::Options(line) => self.update_options(line, pressed),
+            Screen::Mode(line) => self.update_mode(line, pressed),
             Screen::About(line) => self.update_about(line, pressed),
             Screen::Bindings {
                 device,
@@ -674,6 +703,18 @@ impl Front {
                     | Setting::TouchOpacity => Input::default().with(Button::Right),
                     _ => chosen,
                 }
+            }
+            Screen::Mode(_) => {
+                let Some(line) = row_at(
+                    y,
+                    OPTIONS_FIRST_LINE_Y,
+                    OPTION_LINE_HEIGHT,
+                    MODE_LINES.len(),
+                ) else {
+                    return Input::default();
+                };
+                self.screen = Screen::Mode(line);
+                chosen
             }
             Screen::About(_) => {
                 let Some(line) = about_rows().iter().position(|&(top, rows)| {
@@ -944,6 +985,7 @@ impl Front {
                 self.download_failure = None;
                 self.look_up();
             }
+            Line::Mode => self.screen = Screen::Mode(0),
             Line::Options => self.screen = Screen::Options(0),
             Line::About => {
                 self.unopened = false;
@@ -1008,6 +1050,36 @@ impl Front {
                 self.screen = Screen::Saves(0);
             }
             Setting::Back if chosen => self.screen = Screen::Main,
+            _ => {}
+        }
+    }
+
+    /// The game mode's screen: up and down move, left, right and X switch
+    /// the mode or, in the enhanced mode, an enhancement, or go back, and
+    /// so does Z.
+    fn update_mode(&mut self, line: usize, pressed: Input) {
+        if pressed.is_held(Button::B) {
+            self.screen = Screen::Main;
+            return;
+        }
+        let mut line = line;
+        if pressed.is_held(Button::Up) {
+            line = line.saturating_sub(1);
+        }
+        if pressed.is_held(Button::Down) {
+            line = (line + 1).min(MODE_LINES.len() - 1);
+        }
+        self.screen = Screen::Mode(line);
+        let switched = [Button::Left, Button::Right, Button::A]
+            .into_iter()
+            .any(|button| pressed.is_held(button));
+        match MODE_LINES[line] {
+            ModeLine::Mode if switched => self.mode.enhanced = !self.mode.enhanced,
+            ModeLine::BattleAnimations if switched && self.mode.enhanced => {
+                let enhancements = &mut self.mode.enhancements;
+                enhancements.battle_animations = !enhancements.battle_animations;
+            }
+            ModeLine::Back if pressed.is_held(Button::A) => self.screen = Screen::Main,
             _ => {}
         }
     }
@@ -1131,6 +1203,7 @@ impl Front {
                 self.draw_options(frame, line);
                 self.centered(frame, HELP_Y, &self.text(OPTIONS_HELP), DIM);
             }
+            Screen::Mode(line) => self.draw_mode(frame, line),
             Screen::Translations(line) => {
                 self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_TRANSLATION), DIM);
                 self.draw_translations(frame, line);
@@ -1232,6 +1305,7 @@ impl Front {
         let labels = [
             self.text(LAUNCHER_ROM),
             self.text(LAUNCHER_TRANSLATION),
+            self.text(LAUNCHER_MODE),
             self.text(LAUNCHER_OPTIONS),
         ];
         let value_x = self.value_column(&labels);
@@ -1246,7 +1320,7 @@ impl Front {
                 DIM
             };
             let (label, value) = match line {
-                Line::Rom | Line::Translation | Line::Options => {
+                Line::Rom | Line::Translation | Line::Mode | Line::Options => {
                     let (value, value_color) = self.value(*line);
                     (labels[index].clone(), Some((value_x, value, value_color)))
                 }
@@ -1273,6 +1347,66 @@ impl Front {
                 .map(|(value, value_color)| (value_x, value, value_color));
             self.draw_line(frame, (y, is_selected, color), &labels[index], value);
         }
+    }
+
+    /// The game mode's screen: the mode, the enhancements (unavailable in
+    /// the classic mode), the way back and what the mode means.
+    fn draw_mode(&self, frame: &mut Frame, selected: usize) {
+        self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_MODE), DIM);
+        let note = if self.mode.enhanced {
+            LAUNCHER_ENHANCED_NOTE
+        } else {
+            LAUNCHER_CLASSIC_NOTE
+        };
+        self.centered(frame, STATUS_Y, &self.text(note), DIM);
+        self.centered(frame, HELP_Y, &self.text(OPTIONS_HELP), DIM);
+        let labels: Vec<String> = MODE_LINES
+            .iter()
+            .map(|line| self.text(line.label()))
+            .collect();
+        let value_x = self.value_column(&labels);
+        for (index, line) in MODE_LINES.iter().enumerate() {
+            let y = OPTIONS_FIRST_LINE_Y + index * OPTION_LINE_HEIGHT;
+            let is_selected = index == selected;
+            let color = match line {
+                ModeLine::BattleAnimations if !self.mode.enhanced => UNAVAILABLE,
+                _ if is_selected => TEXT,
+                _ => DIM,
+            };
+            let value = match line {
+                ModeLine::Mode => Some((self.mode_name(), self.mode_color())),
+                ModeLine::BattleAnimations => {
+                    let key = if self.mode.enhancements.battle_animations {
+                        LAUNCHER_ON
+                    } else {
+                        LAUNCHER_OFF
+                    };
+                    let value_color = if self.mode.enhanced {
+                        TEXT
+                    } else {
+                        UNAVAILABLE
+                    };
+                    Some((self.text(key), value_color))
+                }
+                ModeLine::Back => None,
+            }
+            .map(|(value, value_color)| (value_x, value, value_color));
+            self.draw_line(frame, (y, is_selected, color), &labels[index], value);
+        }
+    }
+
+    /// The game mode's name.
+    fn mode_name(&self) -> String {
+        self.text(if self.mode.enhanced {
+            LAUNCHER_ENHANCED
+        } else {
+            LAUNCHER_CLASSIC
+        })
+    }
+
+    /// The color the game mode's name shows in.
+    fn mode_color(&self) -> Rgb {
+        if self.mode.enhanced { GOOD } else { TEXT }
     }
 
     /// The translation's screen: the line that opens a file, a line per
@@ -1550,6 +1684,7 @@ impl Front {
                 Some((path, kind)) => (name(path), kind_color(*kind)),
                 None => (self.text(LAUNCHER_NO_ROM), DIM),
             },
+            Line::Mode => (self.mode_name(), self.mode_color()),
             Line::Options => {
                 let summary = format!("{}, {}%", self.filter_name(), self.volume);
                 if cfg!(target_os = "android") {
@@ -1574,6 +1709,7 @@ impl Front {
     /// The line under the panel: about the line under the cursor.
     fn status(&self) -> (String, Rgb) {
         match LINES[self.line] {
+            Line::Mode => (self.text(LAUNCHER_PICK_MODE), DIM),
             Line::Options => (self.text(PICK_OPTIONS), DIM),
             Line::About => (self.text(LAUNCHER_PICK_ABOUT), DIM),
             Line::Rom | Line::Play | Line::Quit => match &self.rom {
@@ -1649,6 +1785,16 @@ impl Setting {
             Self::TouchSize => LAUNCHER_TOUCH_SIZE,
             Self::TouchOpacity => LAUNCHER_TOUCH_OPACITY,
             Self::Saves => LAUNCHER_SAVES,
+            Self::Back => LAUNCHER_BACK,
+        }
+    }
+}
+
+impl ModeLine {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Mode => LAUNCHER_MODE,
+            Self::BattleAnimations => LAUNCHER_BATTLE_ANIMATIONS,
             Self::Back => LAUNCHER_BACK,
         }
     }
@@ -2208,6 +2354,29 @@ mod tests {
             (Filter::Smooth, true, 80)
         );
         front.update_options(volume, press(Button::B));
+        assert_eq!(front.screen, Screen::Main);
+    }
+
+    #[test]
+    fn the_enhancements_change_only_in_the_enhanced_mode() {
+        let mut front = Front::new(&Settings::default());
+        let mode = MODE_LINES.iter().position(|line| *line == ModeLine::Mode);
+        let animations = MODE_LINES
+            .iter()
+            .position(|line| *line == ModeLine::BattleAnimations);
+        let (Some(mode), Some(animations)) = (mode, animations) else {
+            panic!("the game mode's screen lacks a line");
+        };
+        front.update_mode(animations, press(Button::A));
+        assert!(front.settings().mode.enhancements.battle_animations);
+        front.update_mode(mode, press(Button::Right));
+        front.update_mode(animations, press(Button::A));
+        let chosen = front.settings().mode;
+        assert!(chosen.enhanced && !chosen.enhancements.battle_animations);
+        front.update_mode(mode, press(Button::Left));
+        let kept = front.settings().mode;
+        assert!(!kept.enhanced && !kept.enhancements.battle_animations);
+        front.update_mode(mode, press(Button::B));
         assert_eq!(front.screen, Screen::Main);
     }
 

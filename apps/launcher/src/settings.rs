@@ -1,11 +1,13 @@
 //! What the launcher remembers between runs: the ROM and the translation
 //! last played, the window, the sound, the keys and gamepad buttons chosen
-//! for the pad's buttons and the on-screen pad's size and opacity, one
-//! `key=value` line each, in the user's settings folder.
+//! for the pad's buttons, the on-screen pad's size and opacity, and the
+//! game mode with its enhancements, one `key=value` line each, in the
+//! user's settings folder.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use game_core::{Enhancements, PlayMode};
 use platform::Button;
 use platform_sdl3::Filter;
 
@@ -21,6 +23,12 @@ const FILTER_KEY: &str = "filter";
 const VOLUME_KEY: &str = "volume";
 const TOUCH_SIZE_KEY: &str = "touch-size";
 const TOUCH_OPACITY_KEY: &str = "touch-opacity";
+/// The game mode: `classic` or `enhanced`.
+const MODE_KEY: &str = "mode";
+const CLASSIC: &str = "classic";
+const ENHANCED: &str = "enhanced";
+/// The enhanced mode's battle animations, `1` shown or `0` skipped.
+const BATTLE_ANIMATIONS_KEY: &str = "battle-animations";
 const SHARP: &str = "sharp";
 const SMOOTH: &str = "smooth";
 /// The window's size in multiples of the screen, its default and the
@@ -68,6 +76,30 @@ pub struct Settings {
     pub touch_size: u8,
     /// The on-screen pad's opacity, in percent of its usual one.
     pub touch_opacity: u8,
+    /// The game mode and its enhancements.
+    pub mode: GameMode,
+}
+
+/// The game mode the player chose, and the enhancements chosen for the
+/// enhanced mode, kept in the classic mode too for when it comes back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GameMode {
+    /// Whether the game plays in the enhanced mode.
+    pub enhanced: bool,
+    /// The enhancements the enhanced mode turns on.
+    pub enhancements: Enhancements,
+}
+
+impl GameMode {
+    /// How the game plays with this choice.
+    #[must_use]
+    pub fn play_mode(self) -> PlayMode {
+        if self.enhanced {
+            PlayMode::Enhanced(self.enhancements)
+        } else {
+            PlayMode::Classic
+        }
+    }
 }
 
 impl Default for Settings {
@@ -83,6 +115,7 @@ impl Default for Settings {
             volume: FULL_VOLUME,
             touch_size: USUAL_TOUCH,
             touch_opacity: USUAL_TOUCH,
+            mode: GameMode::default(),
         }
     }
 }
@@ -145,6 +178,10 @@ impl Settings {
                         settings.touch_opacity = opacity;
                     }
                 }
+                MODE_KEY => settings.mode.enhanced = value == ENHANCED,
+                BATTLE_ANIMATIONS_KEY => {
+                    settings.mode.enhancements.battle_animations = value != "0";
+                }
                 _ => {}
             }
         }
@@ -180,6 +217,16 @@ impl Settings {
             text,
             "{TOUCH_SIZE_KEY}={}\n{TOUCH_OPACITY_KEY}={}",
             self.touch_size, self.touch_opacity
+        );
+        let mode = if self.mode.enhanced {
+            ENHANCED
+        } else {
+            CLASSIC
+        };
+        let _ = writeln!(
+            text,
+            "{MODE_KEY}={mode}\n{BATTLE_ANIMATIONS_KEY}={}",
+            u8::from(self.mode.enhancements.battle_animations)
         );
         for (button, key) in &self.keys {
             let _ = writeln!(text, "{BUTTON_PREFIX}{}={key}", button.name());
@@ -228,6 +275,12 @@ mod tests {
             volume: 70,
             touch_size: 120,
             touch_opacity: 40,
+            mode: GameMode {
+                enhanced: true,
+                enhancements: Enhancements {
+                    battle_animations: false,
+                },
+            },
         };
         assert_eq!(Settings::parse(&settings.to_text()), settings);
         let read = Settings::parse("# notes\ntranslation=es.po\nrom=a=b.gba\nother=1\n");
@@ -246,6 +299,21 @@ mod tests {
         assert_eq!(
             (odd.scale, odd.volume, odd.filter, odd.fullscreen),
             (DEFAULT_SCALE, FULL_VOLUME, Filter::Sharp, false)
+        );
+    }
+
+    #[test]
+    fn the_game_mode_is_classic_until_the_enhanced_one_is_chosen() {
+        assert_eq!(Settings::default().mode.play_mode(), PlayMode::Classic);
+        let odd = Settings::parse("mode=turbo\nbattle-animations=0\n");
+        assert_eq!(odd.mode.play_mode(), PlayMode::Classic);
+        assert!(!odd.mode.enhancements.battle_animations);
+        let enhanced = Settings::parse("mode=enhanced\nbattle-animations=0\n");
+        assert_eq!(
+            enhanced.mode.play_mode(),
+            PlayMode::Enhanced(Enhancements {
+                battle_animations: false
+            })
         );
     }
 }

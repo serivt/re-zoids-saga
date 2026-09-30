@@ -148,18 +148,16 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
             eprintln!("Translation: {problem}");
         }
     }
+    let settings = settings.unwrap_or_else(saved_settings);
+    game.set_play_mode(settings.mode.play_mode());
+    println!("Mode:       {:?}", settings.mode.play_mode());
     match &options.dump_path {
         Some(path) => {
             let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
             game.draw(&mut frame);
             write_ppm(path, &frame)
         }
-        None => play(
-            display,
-            &mut game,
-            &settings.unwrap_or_else(saved_settings),
-            options.touch,
-        ),
+        None => play(display, &mut game, &settings, options.touch),
     }
 }
 

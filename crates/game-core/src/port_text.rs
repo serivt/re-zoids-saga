@@ -46,6 +46,7 @@ pub const SLOT_QUESTION: &str = "port/save-slots/question";
 /// The question before saving over a slot's game.
 pub const SLOT_OVERWRITE: &str = "port/save-slots/overwrite";
 
+
 /// The thanks at the end of the demo, in the story box.
 pub const DEMO_THANKS: &str = "port/demo/thanks";
 /// The question after the thanks.
@@ -205,6 +206,21 @@ pub const LAUNCHER_ON: &str = "port/launcher/on";
 pub const LAUNCHER_OFF: &str = "port/launcher/off";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_VOLUME: &str = "port/launcher/volume";
+/// The main screen's line of the game mode, its values, and the game
+/// mode's screen: its enhancements and what each mode means.
+pub const LAUNCHER_MODE: &str = "port/launcher/mode";
+/// See [`LAUNCHER_MODE`].
+pub const LAUNCHER_CLASSIC: &str = "port/launcher/classic";
+/// See [`LAUNCHER_MODE`].
+pub const LAUNCHER_ENHANCED: &str = "port/launcher/enhanced";
+/// See [`LAUNCHER_MODE`].
+pub const LAUNCHER_BATTLE_ANIMATIONS: &str = "port/launcher/battle-animations";
+/// See [`LAUNCHER_MODE`].
+pub const LAUNCHER_PICK_MODE: &str = "port/launcher/pick-mode";
+/// See [`LAUNCHER_MODE`].
+pub const LAUNCHER_CLASSIC_NOTE: &str = "port/launcher/classic-note";
+/// See [`LAUNCHER_MODE`].
+pub const LAUNCHER_ENHANCED_NOTE: &str = "port/launcher/enhanced-note";
 /// The options screen's help.
 pub const LAUNCHER_OPTIONS_HELP: &str = "port/launcher/options-help";
 /// The gamepad screen while it waits for the button of `{button}`.
@@ -287,6 +303,41 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
     launcher(LAUNCHER_ON, "on", "A setting that is on"),
     launcher(LAUNCHER_OFF, "off", "A setting that is off"),
     launcher(LAUNCHER_VOLUME, "Volume", "The line of the sound's volume"),
+    launcher(
+        LAUNCHER_MODE,
+        "Game mode",
+        "The line of the game mode: as the original, or with the port's conveniences",
+    ),
+    launcher(
+        LAUNCHER_CLASSIC,
+        "Classic",
+        "The game mode that plays exactly as the original",
+    ),
+    launcher(
+        LAUNCHER_ENHANCED,
+        "Enhanced",
+        "The game mode with the port's conveniences",
+    ),
+    launcher(
+        LAUNCHER_BATTLE_ANIMATIONS,
+        "Battle animations",
+        "The enhanced mode's line that shows or skips the battles' attack scenes",
+    ),
+    launcher_line(
+        LAUNCHER_PICK_MODE,
+        "As the original, or with conveniences.",
+        "Help for the game mode's line",
+    ),
+    launcher_line(
+        LAUNCHER_CLASSIC_NOTE,
+        "Plays exactly as the original.",
+        "What the classic mode means, on the game mode's screen",
+    ),
+    launcher_line(
+        LAUNCHER_ENHANCED_NOTE,
+        "Adds the conveniences turned on here.",
+        "What the enhanced mode means, on the game mode's screen",
+    ),
     launcher(
         LAUNCHER_TOUCH_SIZE,
         "Pad size",

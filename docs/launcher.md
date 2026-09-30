@@ -24,6 +24,21 @@ game or another game it says so and Play stays off, and the command line refuses
 the same way. It speaks the chosen translation's language (English without one). The
 port's version shows in the top right corner.
 
+Game mode chooses how the game plays, on a screen of its own:
+
+- **Classic** (the default) plays exactly as the original;
+- **Enhanced** adds conveniences the original never had, each turned on or off on the
+  same screen (they show unavailable in the classic mode, which keeps the choices for
+  when the enhanced mode comes back):
+  - *Battle animations* off skips the battles' attack scenes: an enemy's attack goes
+    from the fade out straight to its outcome on the battle's screen, and the party's
+    scene stops once the player has aimed (see [combat.md](combat.md), Without the
+    attack scenes).
+
+The mode is set before the game starts (`Game::set_play_mode`, see
+`crates/game-core/src/play_mode.rs`) and does not change while it plays; saves are the
+original's in either mode.
+
 Options holds:
 
 - the window's size (×1 to ×6) and fullscreen;
@@ -38,8 +53,8 @@ About shows the version and the license, and the project's pages: the port's rep
 and the translations' ([re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations)),
 which X opens in the web browser.
 
-The game plays with these options from then on, also when given a ROM on the command
-line. The choices are remembered in `launcher.cfg` under `re-zoids-saga/launcher` in the
+The game plays with these options and this mode from then on, also when given a ROM on
+the command line. The choices are remembered in `launcher.cfg` under `re-zoids-saga/launcher` in the
 folder where SDL keeps a program's preferences (Application Support on macOS,
 `~/.local/share` on Linux, AppData on Windows).
 
