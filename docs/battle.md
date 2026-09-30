@@ -105,7 +105,9 @@ The drawer (`0x08000560`) builds the OAM entries from these pieces:
   `−x − width` (less another width for a double-size box).
 - **Plain pieces:** flipped once more when the piece asks for it.
 - **Affine pieces:** the drawer sets `ObjAffineSet` with the reciprocal of each scale
-  and the piece's rotation, then negates the first entry for the mirroring.
+  and the piece's rotation, then negates the first entry for the mirroring. The
+  entries are cut toward zero: rounding them strays a pixel here and there on the
+  rotated pieces of the staff roll's Liger (see `docs/events.md`).
 - **Culling:** it hides an anchor more than 264 pixels right or 160 below.
 
 The OAM copy, like the scroll, shows on the next frame. The scenes' effects are all

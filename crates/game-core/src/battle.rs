@@ -632,12 +632,13 @@ pub(crate) fn piece_matrix(piece: &EffectPiece, mirrored: bool) -> (i32, i32, i3
     (pa, pb, pc, pd)
 }
 
-/// Rounds a matrix entry, bounded by the reciprocal of the smallest scale,
-/// to an integer.
+/// Cuts a matrix entry, bounded by the reciprocal of the smallest scale,
+/// to an integer toward zero: rounding instead strays a pixel here and
+/// there on the rotated pieces of the staff roll's Liger.
 #[allow(clippy::cast_possible_truncation)]
 fn to_fixed(value: f64) -> i32 {
     value
-        .round()
+        .trunc()
         .clamp(-f64::from(0x1_0000), f64::from(0x1_0000)) as i32
 }
 
