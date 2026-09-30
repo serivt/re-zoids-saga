@@ -9,6 +9,8 @@ use platform::{Frame, Rgb};
 
 /// The project's Latin font, an original asset.
 pub const LATIN_FONT_SOURCE: &str = include_str!("../../../assets/fonts/latin/re-zoids-latin.txt");
+/// The project's small capitals, for the port's small notices.
+pub const SMALL_FONT_SOURCE: &str = include_str!("../../../assets/fonts/latin/re-zoids-tiny.txt");
 const BACKGROUND_INDEX: u8 = 1;
 const INK_INDEX: u8 = 15;
 const LATIN_TOP: usize = 4;
@@ -149,6 +151,7 @@ fn plain_latin(ch: char) -> char {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TextMetrics {
     latin: PixelFont,
+    small: PixelFont,
 }
 
 impl TextMetrics {
@@ -157,6 +160,7 @@ impl TextMetrics {
     pub fn standard() -> Self {
         Self {
             latin: PixelFont::parse(LATIN_FONT_SOURCE).unwrap_or_default(),
+            small: PixelFont::parse(SMALL_FONT_SOURCE).unwrap_or_default(),
         }
     }
 
@@ -178,6 +182,49 @@ impl TextMetrics {
                     matches!(plain_latin(other), 'i' | 'j'),
                 ))
             }
+        }
+    }
+
+    /// The small capital of `ch`: lower case draws with the capitals, and
+    /// the marks, accents and cedilla are built as the Latin font's are.
+    fn small_glyph(&self, ch: char) -> Option<PixelGlyph> {
+        let capital = |ch: char| ch.to_uppercase().next().unwrap_or(ch);
+        if let Some(glyph) = self.small.glyph(capital(ch)) {
+            return Some(*glyph);
+        }
+        let plain = |ch: char| self.small.glyph(capital(plain_latin(ch))).copied();
+        match ch {
+            '¿' => self.small.glyph('?').map(PixelGlyph::turned),
+            '¡' => self.small.glyph('!').map(PixelGlyph::turned),
+            'ç' | 'Ç' => plain(ch).map(cedilla),
+            other => Some(latin_accented(plain(other)?, accent(other)?, false)),
+        }
+    }
+
+    /// Pixels `text` takes in the small capitals.
+    #[must_use]
+    pub fn small_width(&self, text: &str) -> usize {
+        let width: usize = text
+            .chars()
+            .filter_map(|ch| self.small_glyph(ch))
+            .map(|glyph| usize::from(glyph.width) + LATIN_SPACING)
+            .sum();
+        width.saturating_sub(LATIN_SPACING)
+    }
+
+    /// Draws `text` on one line in the small capitals, its glyphs' top-left
+    /// corner at `(x, y)`, in `color`; characters they lack are skipped.
+    pub fn draw_small(&self, frame: &mut Frame, (x, y): (usize, usize), text: &str, color: Rgb) {
+        let mut pen = x;
+        for glyph in text.chars().filter_map(|ch| self.small_glyph(ch)) {
+            for row in 0..PIXEL_FONT_ROWS {
+                for column in 0..usize::from(glyph.width) {
+                    if glyph.pixel(column, row) {
+                        frame.set_pixel(pen + column, y + row, color);
+                    }
+                }
+            }
+            pen += usize::from(glyph.width) + LATIN_SPACING;
         }
     }
 
@@ -534,5 +581,21 @@ mod tests {
                 .iter()
                 .all(|x| (CELL_WIDTH..2 * CELL_WIDTH).contains(x))
         );
+    }
+
+    #[test]
+    fn the_small_capitals_draw_lower_case_as_capitals_and_build_the_accents() {
+        let metrics = TextMetrics::standard();
+        assert_eq!(metrics.small_glyph('a'), metrics.small_glyph('A'));
+        assert_eq!(metrics.small_width("AB"), 7);
+        assert_eq!(metrics.small_width("ab"), 7);
+        let (Some(plain), Some(acute)) = (metrics.small_glyph('o'), metrics.small_glyph('ó'))
+        else {
+            panic!("the small capitals lack O");
+        };
+        assert_eq!(plain.rows[4..], acute.rows[4..]);
+        assert_ne!(plain.rows[..4], acute.rows[..4]);
+        assert!(metrics.small_glyph('¿').is_some() && metrics.small_glyph('ñ').is_some());
+        assert!(metrics.small_glyph('ア').is_none());
     }
 }

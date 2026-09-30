@@ -5,6 +5,19 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Autosave.** The enhanced mode saves the game each time the player arrives on a new
+  map and walks freely there, into a save of its own beside the slots (`game.auto.sav`,
+  in the original's format like them). Continuing lists it first, marked apart from the
+  numbered slots; saving never offers it. The saves queue up and are written in order in
+  the background, so quick changes of map are all kept and the game never waits for them;
+  a tiny, faint "Autosaving..." shows at the top left, in the translation's words, until
+  they are written. It is on by default and turned off on the game mode's screen or in the
+  pause menu's Config; the classic mode never autosaves.
+
 ## [0.3.0] - 2026-09-30
 
 ### Added

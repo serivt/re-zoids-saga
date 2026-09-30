@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 
 use extraction::saga::Portrait;
-use platform::Frame;
+use platform::{Frame, Rgb};
 
 use crate::data::GameData;
 use crate::extension::{Event, SharedExtensions};
@@ -52,6 +52,19 @@ const AUTO_MARK_FROM_RIGHT: usize = 12;
 const MARK_PADDING: (usize, usize) = (2, 1);
 const MARK_CAPITALS: usize = 8;
 const MARK_CAPITALS_TOP: usize = 2;
+/// A notice's look: the rows its letters may take, how far its shadow
+/// falls, the colors of its letters, of their shadow and of the scratch
+/// they are drawn on first, their opacity at its fullest (of 256), and the
+/// levels it fades through.
+const NOTICE_ROWS: usize = formats::pixel_font::PIXEL_FONT_ROWS;
+const NOTICE_SHADOW: usize = 1;
+const NOTICE_INK: Rgb = Rgb::new(248, 248, 248);
+const NOTICE_SHADE: Rgb = Rgb::new(0, 0, 0);
+const NOTICE_CLEAR: Rgb = Rgb::new(1, 2, 3);
+const NOTICE_INK_ALPHA: u16 = 176;
+const NOTICE_SHADE_ALPHA: u16 = 128;
+/// See [`NOTICE_ROWS`].
+pub const NOTICE_LEVELS: u8 = 16;
 /// The skin's colors the mark takes: the windows' background and ink.
 const BACKGROUND_COLOR: u8 = 1;
 const INK_COLOR: u8 = 15;
@@ -911,6 +924,59 @@ fn draw_auto_mark(frame: &mut Frame, window: &Window, skin: &WindowPainter, pain
     metrics.draw_plain(frame, text, AUTO_MARK, ink, 1);
 }
 
+/// A notice of the port's over the screen, such as the autosave's: `text`
+/// in the small capitals with their glyphs' top-left corner at `(x, y)`,
+/// no plate, light and see-through with a faint shadow under it, `level` 0
+/// (unseen) to 16 (its fullest) so it can fade in and out; characters the
+/// font lacks are skipped.
+pub fn draw_notice(
+    frame: &mut Frame,
+    (x, y): (usize, usize),
+    text: &str,
+    painter: &TextPainter,
+    level: u8,
+) {
+    let metrics = painter.metrics();
+    let width = metrics.small_width(text) + NOTICE_SHADOW;
+    let mut ink = Frame::new(width, NOTICE_ROWS, NOTICE_CLEAR);
+    metrics.draw_small(&mut ink, (0, 0), text, NOTICE_INK);
+    let level = u16::from(level.min(NOTICE_LEVELS));
+    let inked = |column: usize, row: usize| ink.pixel(column, row) == Some(NOTICE_INK);
+    let rows = NOTICE_ROWS + NOTICE_SHADOW;
+    for row in 0..rows {
+        for column in 0..width {
+            let (color, alpha) = if inked(column, row) {
+                (NOTICE_INK, NOTICE_INK_ALPHA)
+            } else if column >= NOTICE_SHADOW
+                && row >= NOTICE_SHADOW
+                && inked(column - NOTICE_SHADOW, row - NOTICE_SHADOW)
+            {
+                (NOTICE_SHADE, NOTICE_SHADE_ALPHA)
+            } else {
+                continue;
+            };
+            let Some(base) = frame.pixel(x + column, y + row) else {
+                continue;
+            };
+            let alpha = alpha * level / u16::from(NOTICE_LEVELS);
+            frame.set_pixel(x + column, y + row, blend(base, color, alpha));
+        }
+    }
+}
+
+/// `over` laid on `base` at `alpha` of 256.
+fn blend(base: Rgb, over: Rgb, alpha: u16) -> Rgb {
+    let mix = |under: u8, top: u8| {
+        let value = (u16::from(under) * (256 - alpha) + u16::from(top) * alpha) / 256;
+        u8::try_from(value).unwrap_or(u8::MAX)
+    };
+    Rgb::new(
+        mix(base.r, over.r),
+        mix(base.g, over.g),
+        mix(base.b, over.b),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -1144,6 +1210,32 @@ mod tests {
             host.windows()[1].as_ref().unwrap().frame_style(),
             FrameStyle::None
         );
+    }
+
+    #[test]
+    fn a_notice_shades_its_letters_over_the_screen_and_fades_with_its_level() {
+        let index = formats::font::GlyphIndex::parse(&[]).unwrap();
+        let painter = TextPainter::new(&[], index, None);
+        let gray = Rgb::new(100, 100, 100);
+        let draw = |level| {
+            let mut frame = Frame::new(40, 16, gray);
+            draw_notice(&mut frame, (2, 2), "Ab", &painter, level);
+            frame
+        };
+        let colors = |frame: &Frame| {
+            (0..16)
+                .flat_map(|y| (0..40).map(move |x| (x, y)))
+                .filter_map(|(x, y)| frame.pixel(x, y))
+                .filter(|color| *color != gray)
+                .collect::<Vec<_>>()
+        };
+        assert!(colors(&draw(0)).is_empty());
+        let full = colors(&draw(NOTICE_LEVELS));
+        assert!(full.contains(&blend(gray, NOTICE_INK, NOTICE_INK_ALPHA)));
+        assert!(full.contains(&blend(gray, NOTICE_SHADE, NOTICE_SHADE_ALPHA)));
+        assert!(full.iter().all(|color| *color != NOTICE_INK));
+        let half = colors(&draw(NOTICE_LEVELS / 2));
+        assert!(half.contains(&blend(gray, NOTICE_INK, NOTICE_INK_ALPHA / 2)));
     }
 
     #[test]

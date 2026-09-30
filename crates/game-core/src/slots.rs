@@ -1,7 +1,9 @@
 //! Save slots, which the original lacks: the port keeps several saves,
 //! each a whole save memory of the original's format (see
 //! `docs/formats/save.md`), and lets the player choose one when saving
-//! and continuing.
+//! and continuing. With the enhanced mode's autosave, continuing also
+//! lists the game saved on the last change of map, first and marked
+//! apart from the numbered slots; saving never offers it.
 //!
 //! Source of knowledge: this project's own design, drawn with the game's
 //! windows: a light menu lists the slots (number, name and level, or
@@ -16,8 +18,8 @@ use platform::Input;
 
 use crate::extension::Rect;
 use crate::port_text::{
-    SLOT_BROKEN, SLOT_DETAILS, SLOT_EMPTY, SLOT_LEVEL, SLOT_LOAD_HELP, SLOT_SAVE_HELP, fill,
-    full_width, port_text,
+    SLOT_AUTOSAVE, SLOT_AUTOSAVE_HELP, SLOT_BROKEN, SLOT_DETAILS, SLOT_EMPTY, SLOT_LEVEL,
+    SLOT_LOAD_HELP, SLOT_SAVE_HELP, fill, full_width, port_text,
 };
 use crate::save::Found;
 use crate::script::{MOVED_DOWN, MOVED_UP, ScriptError, ScriptHost, ScriptRunner};
@@ -156,7 +158,7 @@ pub const TITLE_LAYOUT: SlotLayout = SlotLayout {
 /// What the player did with the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pick {
-    /// Chose slot `n`, from 0.
+    /// Chose the list's line `n`, from 0.
     Slot(usize),
     /// Left it with B.
     Canceled,
@@ -168,6 +170,8 @@ pub struct SlotPicker {
     purpose: Purpose,
     layout: SlotLayout,
     line: usize,
+    /// Whether the first line is the autosave.
+    autosave: bool,
     runner: ScriptRunner,
 }
 
@@ -181,8 +185,18 @@ impl SlotPicker {
             purpose,
             layout,
             line,
+            autosave: false,
             runner: ScriptRunner::new(Vec::new()),
         }
+    }
+
+    /// Takes the first slot listed for the autosave: it is marked instead
+    /// of numbered, the numbers start again from 1 on the next line, and
+    /// the help line names it.
+    #[must_use]
+    pub fn with_autosave(mut self) -> Self {
+        self.autosave = !self.slots.is_empty();
+        self
     }
 
     /// The slot under the cursor.
@@ -205,15 +219,20 @@ impl SlotPicker {
             windows.open_window(help, HELP_KIND, rect, STYLE);
         }
         let (list, rect) = self.layout.list;
-        windows.open_window(list, LIST_KIND, rect, STYLE);
+        windows.open_window(list, LIST_KIND, fit(rect, self.slots.len()), STYLE);
         for (index, slot) in self.slots.iter().enumerate() {
             if index > 0 {
                 windows.line_break(list);
             }
-            let number = u32::try_from(index + 1).unwrap_or(u32::MAX);
-            put_text(windows, list, &full_width(number));
-            windows.put_char(list, FULL_WIDTH_SPACE);
             let extensions = windows.extensions().clone();
+            match index.checked_sub(usize::from(self.autosave)) {
+                Some(numbered) => {
+                    let number = u32::try_from(numbered + 1).unwrap_or(u32::MAX);
+                    put_text(windows, list, &full_width(number));
+                }
+                None => put_text(windows, list, &port_text(&extensions, SLOT_AUTOSAVE)),
+            }
+            windows.put_char(list, FULL_WIDTH_SPACE);
             match slot {
                 Slot::Empty => put_text(windows, list, &port_text(&extensions, SLOT_EMPTY)),
                 Slot::Broken => put_text(windows, list, &port_text(&extensions, SLOT_BROKEN)),
@@ -301,6 +320,7 @@ impl SlotPicker {
         let (help, _) = self.layout.help;
         let extensions = windows.extensions().clone();
         let key = match self.purpose {
+            _ if self.autosave && self.line == 0 => SLOT_AUTOSAVE_HELP,
             Purpose::Save => SLOT_SAVE_HELP,
             Purpose::Load => SLOT_LOAD_HELP,
         };
@@ -316,6 +336,16 @@ impl SlotPicker {
             put_text(windows, help, &details);
         }
     }
+}
+
+/// `rect` grown to hold `lines` text lines, two rows each within its
+/// border, moving up as far as the screen lets it: the title's list is
+/// sized for the four slots and takes a fifth line for the autosave.
+fn fit(rect: Rect, lines: usize) -> Rect {
+    let (x, y, width, height) = rect;
+    let needed = u8::try_from(lines * 2 + 2).unwrap_or(u8::MAX);
+    let extra = needed.saturating_sub(height);
+    (x, y.saturating_sub(extra), width, height.max(needed))
 }
 
 /// Prints `text` into window `id`, a new line at each line break.
@@ -438,6 +468,44 @@ mod tests {
         );
         picker.close(&mut windows);
         assert!(!windows.any_open());
+    }
+
+    #[test]
+    fn the_autosave_comes_first_marked_and_the_list_grows_to_hold_it() {
+        let mut windows = ScriptWindows::new(&[], "");
+        let slots = vec![
+            game("アトレー", 7),
+            game("アトレー", 5),
+            Slot::Empty,
+            Slot::Empty,
+            Slot::Empty,
+        ];
+        let mut picker = SlotPicker::new(slots, Purpose::Load, TITLE_LAYOUT, 0).with_autosave();
+        picker.open(Input::default(), &mut windows);
+        let list = windows.windows()[1].as_ref().expect("open");
+        assert_eq!((list.y, list.height), (1, 12));
+        assert_eq!(
+            list.lines[0],
+            "Ａ\u{3000}アトレー\u{3000}\u{3000}\u{3000}\u{3000}\u{3000}Ｌｖ７"
+        );
+        assert!(list.lines[1].starts_with("１\u{3000}アトレー"));
+        assert_eq!(list.lines[4], "４\u{3000}データなし");
+        assert_eq!(
+            lines(&windows, 2),
+            [
+                "マップ移動時のオートセーブです",
+                "エリア１\u{3000}所持金３０５Ｇ"
+            ]
+        );
+        assert_eq!(
+            step(&mut picker, &mut windows, press(platform::Button::Down)),
+            None
+        );
+        assert_eq!(lines(&windows, 2)[0], "どのデータからつづけますか？");
+        assert_eq!(
+            step(&mut picker, &mut windows, press(platform::Button::A)),
+            Some(Pick::Slot(1))
+        );
     }
 
     #[test]

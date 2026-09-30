@@ -102,6 +102,8 @@ translated message wider than its note allows.
 | `port/save-slots/load-help` | どのデータからつづけますか？ | The help line while continuing, 224 pixels |
 | `port/save-slots/question` | スロット{slot}にセーブしますか？ | The question for an empty slot, 224 pixels |
 | `port/save-slots/overwrite` | スロット{slot}に上書きしますか？ | The question over a slot's game, 224 pixels |
+| `port/save-slots/autosave` | Ａ | The autosave's mark in place of a slot's number when continuing, 16 pixels |
+| `port/save-slots/autosave-help` | マップ移動時のオートセーブです | The help line with the autosave under the cursor, 224 pixels |
 | `port/options/speed` | メッセージ速度 | The enhanced mode's コンフィグ: the message speed's line, 96 pixels |
 | `port/options/speed-help` | 戦闘メッセージの速さ　１が速い | Its help line, 224 pixels |
 | `port/options/battle-animations` | 戦闘アニメ | The battle animations' line, 96 pixels |
@@ -110,8 +112,11 @@ translated message wider than its note allows.
 | `port/options/damage-numbers-help` | 受けたダメージを数字で表示 | Its help line, 224 pixels |
 | `port/options/auto-text` | オート送り | The auto text's line, 96 pixels |
 | `port/options/auto-text-help` | ＯＮで会話が自動で進む　ＳＥＬＥＣＴでも切替 | Its help line, 224 pixels |
+| `port/options/autosave` | オートセーブ | The autosave's line, 96 pixels |
+| `port/options/autosave-help` | マップ移動時に専用のスロットへ記録 | Its help line, 224 pixels |
 | `port/options/on`, `port/options/off` | ＯＮ, ＯＦＦ | A setting's value, 48 pixels |
 | `port/options/keys` | 左右：変更　Ｂ：もどる | The help's second line, 224 pixels |
+| `port/autosave/notice` | Autosaving | The small notice while the autosave is written, in the small capitals alone (lower case shows as capitals, characters they lack are skipped), the port adding one to three dots; 120 pixels |
 | `port/demo/thanks` | あそんでくれて　ありがとう！ and two more lines | The thanks at the end of the demo, 3 lines of 224 pixels |
 | `port/demo/question` | ここまでの記録を　セーブしますか？ | The question after them, over the original's はい/いいえ |
 | `port/demo/saved` | セーブしました。 | The notice once saved |
@@ -128,7 +133,10 @@ draws with this project's own pixel font (`assets/fonts/latin/re-zoids-latin.txt
 an original asset in the repository): proportional, 3–5 pixels wide plus a pixel of
 spacing, capitals 8 pixels tall, with accented letters built from the plain ones
 (acute, grave, circumflex, diaeresis, tilde, cedilla) and `¿` `¡` as `?` `!` turned
-around. Characters neither font has draw as the fallback glyph. In the name entry's
+around. The autosave's notice uses the project's small capitals
+(`assets/fonts/latin/re-zoids-tiny.txt`, also original): five pixels tall, lower case
+drawn as capitals, with the same accents, cedilla and turned marks. Characters neither
+font has draw as the fallback glyph. In the name entry's
 grid and name field every character is centered in an 8-pixel cell so it lines up
 with the cursor and the slot marks. With a translation the game's numbers, which it
 prints with full-width digits (money, levels, hit points, the figures of the menus

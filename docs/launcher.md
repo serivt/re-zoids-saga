@@ -40,10 +40,13 @@ Game mode chooses how the game plays, on a screen of its own:
   - *Auto text* on lets the text boxes go on by themselves once their text has been on
     screen long enough to read, with an AUTO mark on them; SELECT turns it on or off
     while a text box shows (see [formats/script-text.md](formats/script-text.md)).
+  - *Autosave* (on by default) saves the game on each change of map into a place of its
+    own, `game.auto.sav`, which つづきから lists first and セーブ never offers (see
+    [formats/save.md](formats/save.md), The autosave).
 
 The mode is set before the game starts (`Game::set_play_mode`, see
 `crates/game-core/src/play_mode.rs`) and does not change while it plays; saves are the
-original's in either mode. In the enhanced mode the pause menu's コンフィグ lists the
+original's in either mode, the autosave's too. In the enhanced mode the pause menu's コンフィグ lists the
 enhancements too, beside the original's message speed (see [menu.md](menu.md)); what the
 player changes there holds at once and the launcher remembers it.
 
@@ -123,7 +126,8 @@ A ROM on the command line skips the launcher's screen and plays from the publish
 
 Saves use the original's format, so they move between this port, emulators and the
 cartridge; slot 1 is the `.sav` and slot n the same name with `.n` before the extension
-(`game.2.sav`).
+(`game.2.sav`). The enhanced mode's autosave is the same name with `.auto`
+(`game.auto.sav`).
 
 ## The extractor
 

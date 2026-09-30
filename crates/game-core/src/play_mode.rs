@@ -16,8 +16,11 @@ pub enum PlayMode {
 }
 
 /// The conveniences the enhanced mode can turn on or off, each as the
-/// original plays by default.
+/// original plays by default but the autosave, which is on: it keeps its
+/// game apart from the slots and changes nothing of the play. Each is a
+/// switch of its own, on or off whatever the others are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Enhancements {
     /// Whether the battles show their attack scenes: without them an
     /// enemy's attack goes straight to its outcome and the party's scene
@@ -30,6 +33,10 @@ pub struct Enhancements {
     /// been on screen long enough to read, as a key would; SELECT turns it
     /// on or off while a text box shows.
     pub auto_text: bool,
+    /// Whether the game is saved on each change of map, once the player
+    /// walks freely on the new one, into a slot of its own that
+    /// continuing lists first and saving never offers.
+    pub autosave: bool,
 }
 
 impl Default for Enhancements {
@@ -38,6 +45,7 @@ impl Default for Enhancements {
             battle_animations: true,
             damage_numbers: false,
             auto_text: false,
+            autosave: true,
         }
     }
 }
@@ -51,11 +59,18 @@ pub enum Enhancement {
     DamageNumbers,
     /// See [`Enhancements::auto_text`].
     AutoText,
+    /// See [`Enhancements::autosave`].
+    Autosave,
 }
 
 impl Enhancement {
     /// Every enhancement, in the order the lists show them.
-    pub const ALL: [Self; 3] = [Self::BattleAnimations, Self::DamageNumbers, Self::AutoText];
+    pub const ALL: [Self; 4] = [
+        Self::BattleAnimations,
+        Self::DamageNumbers,
+        Self::AutoText,
+        Self::Autosave,
+    ];
 }
 
 impl Enhancements {
@@ -66,6 +81,7 @@ impl Enhancements {
             Enhancement::BattleAnimations => self.battle_animations,
             Enhancement::DamageNumbers => self.damage_numbers,
             Enhancement::AutoText => self.auto_text,
+            Enhancement::Autosave => self.autosave,
         }
     }
 
@@ -75,6 +91,7 @@ impl Enhancements {
             Enhancement::BattleAnimations => &mut self.battle_animations,
             Enhancement::DamageNumbers => &mut self.damage_numbers,
             Enhancement::AutoText => &mut self.auto_text,
+            Enhancement::Autosave => &mut self.autosave,
         };
         *flag = !*flag;
     }
@@ -82,11 +99,14 @@ impl Enhancements {
 
 impl PlayMode {
     /// The enhancements that apply: the original's behavior in the classic
-    /// mode.
+    /// mode, which does not autosave either.
     #[must_use]
     pub fn enhancements(self) -> Enhancements {
         match self {
-            Self::Classic => Enhancements::default(),
+            Self::Classic => Enhancements {
+                autosave: false,
+                ..Enhancements::default()
+            },
             Self::Enhanced(enhancements) => enhancements,
         }
     }
@@ -102,9 +122,11 @@ mod tests {
             battle_animations: false,
             damage_numbers: true,
             auto_text: true,
+            autosave: true,
         };
         assert!(PlayMode::Classic.enhancements().battle_animations);
         assert!(!PlayMode::Classic.enhancements().damage_numbers);
+        assert!(!PlayMode::Classic.enhancements().autosave);
         assert_eq!(PlayMode::Enhanced(chosen).enhancements(), chosen);
     }
 
@@ -119,10 +141,11 @@ mod tests {
     }
 
     #[test]
-    fn the_enhancements_start_as_the_original_plays() {
+    fn the_enhancements_start_as_the_original_plays_but_the_autosave() {
         assert_eq!(PlayMode::default(), PlayMode::Classic);
         assert!(Enhancements::default().battle_animations);
         assert!(!Enhancements::default().damage_numbers);
         assert!(!Enhancements::default().auto_text);
+        assert!(Enhancements::default().autosave);
     }
 }

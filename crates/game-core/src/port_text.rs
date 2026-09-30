@@ -5,7 +5,8 @@
 //! under `port/`, which a translation's PO file uses as it uses the name
 //! entry's reserved keys, and a text shown when no extension answers:
 //! Japanese for what the game shows, English for the launcher's screen,
-//! which comes before any ROM is read. A `{name}` marker in a message stands for a value the port
+//! which comes before any ROM is read, and for the autosave's notice, which
+//! draws with the port's small capitals alone. A `{name}` marker in a message stands for a value the port
 //! fills in; numbers are printed with full-width digits, as the game's own
 //! values are.
 
@@ -45,6 +46,10 @@ pub const SLOT_LOAD_HELP: &str = "port/save-slots/load-help";
 pub const SLOT_QUESTION: &str = "port/save-slots/question";
 /// The question before saving over a slot's game.
 pub const SLOT_OVERWRITE: &str = "port/save-slots/overwrite";
+/// The autosave's mark in place of a slot's number, when continuing.
+pub const SLOT_AUTOSAVE: &str = "port/save-slots/autosave";
+/// The help line while the autosave is under the cursor.
+pub const SLOT_AUTOSAVE_HELP: &str = "port/save-slots/autosave-help";
 
 /// The pause menu's settings in the enhanced mode: the message speed's
 /// line and help.
@@ -63,12 +68,19 @@ pub const OPTIONS_DAMAGE_NUMBERS_HELP: &str = "port/options/damage-numbers-help"
 pub const OPTIONS_AUTO_TEXT: &str = "port/options/auto-text";
 /// See [`OPTIONS_AUTO_TEXT`].
 pub const OPTIONS_AUTO_TEXT_HELP: &str = "port/options/auto-text-help";
+/// The autosave's line and help.
+pub const OPTIONS_AUTOSAVE: &str = "port/options/autosave";
+/// See [`OPTIONS_AUTOSAVE`].
+pub const OPTIONS_AUTOSAVE_HELP: &str = "port/options/autosave-help";
 /// A setting that is on, and off.
 pub const OPTIONS_ON: &str = "port/options/on";
 /// See [`OPTIONS_ON`].
 pub const OPTIONS_OFF: &str = "port/options/off";
 /// The keys, on the help line's second line.
 pub const OPTIONS_KEYS: &str = "port/options/keys";
+
+/// The notice over the field while the autosave is written.
+pub const AUTOSAVE_NOTICE: &str = "port/autosave/notice";
 
 /// The thanks at the end of the demo, in the story box.
 pub const DEMO_THANKS: &str = "port/demo/thanks";
@@ -243,6 +255,8 @@ pub const LAUNCHER_DAMAGE_NUMBERS: &str = "port/launcher/damage-numbers";
 /// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_AUTO_TEXT: &str = "port/launcher/auto-text";
 /// See [`LAUNCHER_MODE`].
+pub const LAUNCHER_AUTOSAVE: &str = "port/launcher/autosave";
+/// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_PICK_MODE: &str = "port/launcher/pick-mode";
 /// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_CLASSIC_NOTE: &str = "port/launcher/classic-note";
@@ -359,6 +373,11 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         LAUNCHER_AUTO_TEXT,
         "Auto text",
         "The enhanced mode's line that lets the text boxes go on by themselves, turned on or off with SELECT while one shows",
+    ),
+    launcher(
+        LAUNCHER_AUTOSAVE,
+        "Autosave",
+        "The enhanced mode's line that saves the game on each change of map, into a slot of its own listed first when continuing",
     ),
     launcher_line(
         LAUNCHER_PICK_MODE,
@@ -772,6 +791,18 @@ pub const PORT_TEXTS: &[PortText] = &[
         pixels: 224,
     },
     PortText {
+        key: SLOT_AUTOSAVE,
+        text: "Ａ",
+        note: "The autosave's mark in the list of games to continue, where the other slots show their number: up to 2 cells (16 pixels)",
+        pixels: 16,
+    },
+    PortText {
+        key: SLOT_AUTOSAVE_HELP,
+        text: "マップ移動時のオートセーブです",
+        note: "The help line while the autosave, the game saved on each change of map, is under the cursor; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
         key: OPTIONS_SPEED,
         text: "メッセージ速度",
         note: "The pause menu's settings, enhanced mode: the battle message speed's line, before its value at cell 13 (96 pixels)",
@@ -820,6 +851,18 @@ pub const PORT_TEXTS: &[PortText] = &[
         pixels: 224,
     },
     PortText {
+        key: OPTIONS_AUTOSAVE,
+        text: "オートセーブ",
+        note: "The pause menu's settings, enhanced mode: the autosave's line, before its value at cell 13 (96 pixels)",
+        pixels: 96,
+    },
+    PortText {
+        key: OPTIONS_AUTOSAVE_HELP,
+        text: "マップ移動時に専用のスロットへ記録",
+        note: "The help line for the autosave: on, the game is saved into a slot of its own on each change of map, listed first when continuing; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
         key: OPTIONS_ON,
         text: "ＯＮ",
         note: "A setting that is on, in the pause menu's settings; 48 pixels",
@@ -836,6 +879,12 @@ pub const PORT_TEXTS: &[PortText] = &[
         text: "左右：変更　Ｂ：もどる",
         note: "The second help line of the pause menu's settings: left/right change, B goes back; 224 pixels",
         pixels: 224,
+    },
+    PortText {
+        key: AUTOSAVE_NOTICE,
+        text: "Autosaving",
+        note: "The small notice at the field's top left while the enhanced mode's autosave is written, in the port's small capitals (lower case shows as capitals; characters they lack are skipped), followed by one to three dots the port adds; one line of 120 pixels",
+        pixels: 120,
     },
     PortText {
         key: DEMO_THANKS,

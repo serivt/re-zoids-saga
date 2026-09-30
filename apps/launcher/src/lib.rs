@@ -22,7 +22,7 @@ use game_core::{
 use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{AudioOut, Display, Event, Frame, Input, Rgb};
-use platform_sdl3::{FileStorage, Sdl3Display, preferences_dir, slot_path};
+use platform_sdl3::{FileStorage, Sdl3Display, autosave_path, preferences_dir, slot_path};
 
 /// The function key that turns the debugging mode on or off, only in a
 /// build with the `debug-mode` feature.
@@ -150,14 +150,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
         .save_path
         .clone()
         .unwrap_or_else(|| rom_path.with_extension(saves::SAVE_EXTENSION));
-    let slots: Vec<Box<dyn platform::SaveStorage>> = (0..options.slots)
-        .map(|slot| {
-            let path = slot_path(&save_path, slot);
-            println!("Save:       slot {} in {}", slot + 1, path.display());
-            Box::new(FileStorage::new(path)) as Box<dyn platform::SaveStorage>
-        })
-        .collect();
-    game.set_save_slots(slots);
+    keep_saves(&mut game, &save_path, options.slots);
     game.extensions()
         .borrow_mut()
         .insert(Box::new(StorageReport));
@@ -193,6 +186,22 @@ const ICON_SIDE: u32 = 128;
 
 /// Opens the window, with the project's icon; a missing icon is only
 /// reported.
+/// Keeps the game's `slots` save slots and its autosave beside the save
+/// at `save_path` (see `docs/formats/save.md`).
+fn keep_saves(game: &mut Game<'_>, save_path: &Path, slots: usize) {
+    let slots: Vec<Box<dyn platform::SaveStorage>> = (0..slots)
+        .map(|slot| {
+            let path = slot_path(save_path, slot);
+            println!("Save:       slot {} in {}", slot + 1, path.display());
+            Box::new(FileStorage::new(path)) as Box<dyn platform::SaveStorage>
+        })
+        .collect();
+    game.set_save_slots(slots);
+    let autosave = autosave_path(save_path);
+    println!("Save:       autosave in {}", autosave.display());
+    game.set_autosave_storage(Box::new(FileStorage::new(autosave)));
+}
+
 fn open_window(title: &str, width: usize, height: usize, scale: u32) -> Result<Sdl3Display> {
     let mut display = Sdl3Display::open(title, width, height, scale)?;
     if let Err(error) = display.set_icon(ICON, ICON_SIDE) {

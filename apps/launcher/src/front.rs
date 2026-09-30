@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use extraction::{Identification, IdentifyError, Title};
 use game_core::port_text::{
-    LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_AUTO_TEXT, LAUNCHER_BACK,
+    LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_AUTO_TEXT, LAUNCHER_AUTOSAVE, LAUNCHER_BACK,
     LAUNCHER_BATTLE_ANIMATIONS, LAUNCHER_CHOOSE_TRANSLATION, LAUNCHER_CLASSIC,
     LAUNCHER_CLASSIC_NOTE, LAUNCHER_CONTROLS_HELP, LAUNCHER_COPY_FAILED, LAUNCHER_DAMAGE_NUMBERS,
     LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED, LAUNCHER_DOWNLOADED,
@@ -222,11 +222,12 @@ enum ModeLine {
     Back,
 }
 
-const MODE_LINES: [ModeLine; 5] = [
+const MODE_LINES: [ModeLine; 6] = [
     ModeLine::Mode,
     ModeLine::Enhancement(Enhancement::BattleAnimations),
     ModeLine::Enhancement(Enhancement::DamageNumbers),
     ModeLine::Enhancement(Enhancement::AutoText),
+    ModeLine::Enhancement(Enhancement::Autosave),
     ModeLine::Back,
 ];
 
@@ -1803,6 +1804,7 @@ impl ModeLine {
             Self::Enhancement(Enhancement::BattleAnimations) => LAUNCHER_BATTLE_ANIMATIONS,
             Self::Enhancement(Enhancement::DamageNumbers) => LAUNCHER_DAMAGE_NUMBERS,
             Self::Enhancement(Enhancement::AutoText) => LAUNCHER_AUTO_TEXT,
+            Self::Enhancement(Enhancement::Autosave) => LAUNCHER_AUTOSAVE,
             Self::Back => LAUNCHER_BACK,
         }
     }

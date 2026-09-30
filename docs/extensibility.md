@@ -78,6 +78,7 @@ Events (notifications; every extension sees them, in order):
 | `FlagChanged` | flag, value | script host |
 | `MenuOpened`, `MenuChoice`, `MenuClosed` | table, string index, line | pause menu, title, name entry |
 | `SaveRequested`, `LoadRequested` | — | pause menu, title |
+| `Autosaved` | map number | field, once the enhanced mode's autosave is written |
 | `StorageFailed` | why | saving and continuing, when the save cannot be read or written |
 
 Hooks (queries; the first extension that answers decides, the engine's default is
@@ -149,7 +150,7 @@ first.
   `ExitTaken`, `Talk`, `ScriptStarted`, `ScriptEnded`, `MessageShown`,
   `WindowOpened`, `WindowClosed`, `SoundRequested`, `FlagChanged`, `MenuOpened`,
   `MenuClosed`, `ShopOpened`, `ShopClosed`, `CombatStarted`, `CombatEnded`,
-  `SaveRequested`, `LoadRequested`,
+  `SaveRequested`, `LoadRequested`, `Autosaved`,
   `StorageFailed`. Not yet raised: `MenuChoice`.
 - Hooks asked today: `translate_message`, `fit_window`, `music_for_map`,
   `alphabet_pages`, `name_entry_help`, `port_text`, `sound_for`. `resource` waits for mod packs.

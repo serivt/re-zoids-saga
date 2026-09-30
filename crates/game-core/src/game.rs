@@ -29,9 +29,10 @@ use formats::m4a::M4aError;
 use formats::progress::{FLAG_WORDS, encode_name};
 use gba_runtime::apu::SoundEngine;
 use gba_runtime::ppu::{FADE_STEPS, SCREEN_HEIGHT, SCREEN_WIDTH, darken};
-use platform::{Button, Frame, Input, Rgb, SaveStorage};
+use platform::{Button, Frame, Input, Rgb, SaveStorage, StorageError};
 use thiserror::Error;
 
+use crate::autosave::{Autosaver, Notice};
 use crate::battle::Staged;
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::combat::{Combat, Outcome};
@@ -48,6 +49,7 @@ use crate::guide::{Cover, Guide, GuideError, GuideKind};
 use crate::menu::{MenuStep, Party, PauseMenu, Shop};
 use crate::objects::AreaObjects;
 use crate::play_mode::{Enhancement, Enhancements, PlayMode};
+use crate::port_text::{AUTOSAVE_NOTICE, port_text};
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptContext, ScriptError, ScriptRunner};
 use crate::slots::{self, Pick, Purpose, Slot, SlotPicker};
@@ -57,7 +59,9 @@ use crate::translation::{
     DIALOGUE_TABLE, ITEM_TABLE, NAME_TABLE, PART_TABLE, PAUSE_MENU_TABLE, Translation,
     TranslationExtension,
 };
-use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows, TRANSLATED_PLAYER_NAME};
+use crate::windows::{
+    DEFAULT_PLAYER_NAME, NOTICE_LEVELS, ScriptWindows, TRANSLATED_PLAYER_NAME, draw_notice,
+};
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
 const TALK_START_DELAY: u32 = 3;
@@ -77,6 +81,8 @@ const CHEST_START_DELAY: u32 = 1;
 const CHEST_SOUND: u16 = 0x48;
 /// The sound SELECT plays turning the auto text on or off: the menus' move.
 const AUTO_TEXT_SOUND: u8 = 0x40;
+/// The autosave's notice's top-left corner (a port feature).
+const AUTOSAVE_NOTICE_AT: (usize, usize) = (4, 0);
 const SMALL_CHEST_SOUND: u16 = 0x46;
 const SMALL_CHEST_SPRITE: &str = "tb00";
 const CHEST_OPEN_ANIMATION: usize = 1;
@@ -237,6 +243,14 @@ struct Continuing {
     phase: ContinuePhase,
 }
 
+/// A save the game reads or writes: one of the slots, or the enhanced
+/// mode's autosave.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SaveTarget {
+    Slot(usize),
+    Autosave,
+}
+
 impl Continuing {
     fn darkness(&self) -> u8 {
         match self.phase {
@@ -356,9 +370,16 @@ pub struct Game<'rom> {
     slots: Vec<Box<dyn SaveStorage>>,
     /// The slot the game was continued from or last saved to.
     slot: Option<usize>,
+    /// The enhanced mode's autosave, kept apart from the slots, and the
+    /// queue of games waiting to be written there.
+    autosave: Option<Autosaver>,
+    /// The map the player last walked freely on, to autosave on the next.
+    autosave_map: Option<usize>,
+    /// The notice the field shows while autosaves are written.
+    autosave_notice: Option<Notice>,
     /// The title's list of slots, while the player chooses one to
-    /// continue.
-    slot_picker: Option<SlotPicker>,
+    /// continue, and the save each line stands for.
+    slot_picker: Option<(SlotPicker, Vec<SaveTarget>)>,
     found: Option<Found>,
     previous: Input,
     latched: Input,
@@ -416,6 +437,14 @@ impl<'rom> Game<'rom> {
     #[must_use]
     pub fn save_slot(&self) -> Option<usize> {
         self.slot
+    }
+
+    /// Keeps the enhanced mode's autosave in `storage`, a port feature:
+    /// the game is written there on each change of map while the
+    /// autosave is on, and continuing lists it first once it holds a
+    /// game; saving never offers it.
+    pub fn set_autosave_storage(&mut self, storage: Box<dyn SaveStorage + Send>) {
+        self.autosave = Some(Autosaver::new(storage, self.save.clone()));
     }
 
     /// Ends the demo, a port feature, once the player walks freely on
@@ -556,6 +585,9 @@ impl<'rom> Game<'rom> {
             save,
             slots: Vec::new(),
             slot: None,
+            autosave: None,
+            autosave_map: None,
+            autosave_notice: None,
             slot_picker: None,
             found: None,
             previous: Input::default(),
@@ -681,6 +713,7 @@ impl<'rom> Game<'rom> {
         self.previous = input;
         self.frame += 1;
         Self::emit(&self.extensions, &Event::Frame(self.frame));
+        self.report_autosaves();
         self.latch_screen();
         if select {
             self.toggle_auto_text();
@@ -702,15 +735,7 @@ impl<'rom> Game<'rom> {
             Screen::Title(_) => self.update_title(input, start)?,
             Screen::NameEntry(_) | Screen::LeavingNameEntry(..) => self.update_name_entry(input)?,
             Screen::Loading => {}
-            Screen::Field => {
-                if self.demo_ends_here() {
-                    self.begin_demo_end(input);
-                } else if start && self.player_in_control() {
-                    self.screen = Screen::OpeningMenu(0);
-                } else {
-                    self.update_field(input)?;
-                }
-            }
+            Screen::Field => self.update_field_screen(input, start)?,
             Screen::DemoEnd(_) => self.update_demo_end(input)?,
             Screen::OpeningMenu(frames) => {
                 if let Some(field) = &mut self.field {
@@ -847,14 +872,18 @@ impl<'rom> Game<'rom> {
         let Screen::Title(title) = &mut self.screen else {
             return Ok(());
         };
-        if let Some(picker) = self.slot_picker.as_mut() {
+        if let Some((picker, targets)) = self.slot_picker.as_mut() {
             let pick = picker.update(rom, input, &mut self.windows)?;
             if let Some(pick) = pick {
                 picker.close(&mut self.windows);
+                let target = match pick {
+                    Pick::Slot(line) => targets.get(line).copied(),
+                    Pick::Canceled => None,
+                };
                 self.slot_picker = None;
-                match pick {
-                    Pick::Slot(slot) => self.begin_continue(slot),
-                    Pick::Canceled => title.reopen_menu(input)?,
+                match target {
+                    Some(target) => self.begin_continue(target),
+                    None => title.reopen_menu(input)?,
                 }
             }
             return Ok(());
@@ -880,6 +909,7 @@ impl<'rom> Game<'rom> {
     fn new_game(&mut self, input: Input) -> Result<(), GameError> {
         self.state = self.data.new_game_state()?;
         self.slot = None;
+        self.autosave_map = None;
         self.party = Party::default();
         self.windows.set_flags([]);
         let mut entry = NameEntry::new(&self.data, &self.player_name, input)?;
@@ -897,9 +927,9 @@ impl<'rom> Game<'rom> {
     /// Leaves the title for a guide, which reads what the player has seen
     /// from the save, or from a new game's state when there is none.
     fn open_guide(&mut self, kind: GuideKind) -> Result<(), GameError> {
-        let contents = self.slot_contents();
-        let found = match Self::latest_slot(&self.slots, &contents) {
-            Some(slot) => self.read_slot(slot),
+        let (targets, contents) = self.continue_contents();
+        let found = match self.latest_target(&targets, &contents) {
+            Some(line) => self.read_target(targets[line]),
             None => Found::Missing,
         };
         let state = match found.game() {
@@ -921,28 +951,37 @@ impl<'rom> Game<'rom> {
         Ok(())
     }
 
-    /// つづきから: with several save slots of which one holds anything,
-    /// the list to choose from, the cursor on the latest game; otherwise
-    /// the one slot, as the original.
+    /// つづきから: with several saves of which one holds anything (the
+    /// slots, and the autosave once it holds something), the list to
+    /// choose from, the cursor on the latest game; otherwise the one slot,
+    /// as the original.
     fn choose_continue(&mut self, held: Input) {
-        let contents = self.slot_contents();
-        if self.slots.len() < 2 || contents.iter().all(|slot| *slot == Slot::Empty) {
-            self.begin_continue(0);
+        let (targets, contents) = self.continue_contents();
+        if targets.len() < 2 || contents.iter().all(|slot| *slot == Slot::Empty) {
+            self.begin_continue(SaveTarget::Slot(0));
             return;
         }
-        let line = Self::latest_slot(&self.slots, &contents).unwrap_or(0);
+        let line = self.latest_target(&targets, &contents).unwrap_or(0);
         self.windows.close_window(None);
         let mut picker = SlotPicker::new(contents, Purpose::Load, slots::TITLE_LAYOUT, line);
+        if targets.first() == Some(&SaveTarget::Autosave) {
+            picker = picker.with_autosave();
+        }
         picker.open(held, &mut self.windows);
-        self.slot_picker = Some(picker);
+        self.slot_picker = Some((picker, targets));
     }
 
-    /// Leaves the title for the game saved in `slot`: reads the save now
-    /// and starts the fade.
-    fn begin_continue(&mut self, slot: usize) {
+    /// Leaves the title for the game saved in `target`: reads the save
+    /// now and starts the fade. The autosave is no slot of the game's:
+    /// saving then starts from the pause menu's usual choice.
+    fn begin_continue(&mut self, target: SaveTarget) {
         Self::emit(&self.extensions, &Event::LoadRequested);
-        self.found = Some(self.read_slot(slot));
-        self.slot = Some(slot);
+        self.found = Some(self.read_target(target));
+        self.autosave_map = None;
+        self.slot = match target {
+            SaveTarget::Slot(slot) => Some(slot),
+            SaveTarget::Autosave => None,
+        };
         let screen = std::mem::replace(&mut self.screen, Screen::Loading);
         let Screen::Title(title) = screen else {
             self.screen = screen;
@@ -1060,10 +1099,27 @@ impl<'rom> Game<'rom> {
         Some(progress)
     }
 
-    /// The save memory of `slot`, as continuing finds it; a slot that
+    /// The image stored in `target`, once the autosaves queued are written;
+    /// `None` when there is no such place.
+    fn load_target(&self, target: SaveTarget) -> Option<Result<Option<Vec<u8>>, StorageError>> {
+        match target {
+            SaveTarget::Slot(slot) => self.slots.get(slot).map(|storage| storage.load()),
+            SaveTarget::Autosave => self.autosave.as_ref().map(Autosaver::load),
+        }
+    }
+
+    /// When `target` was last stored, if its place keeps track.
+    fn modified_target(&self, target: SaveTarget) -> Option<std::time::SystemTime> {
+        match target {
+            SaveTarget::Slot(slot) => self.slots.get(slot)?.modified(),
+            SaveTarget::Autosave => self.autosave.as_ref()?.modified(),
+        }
+    }
+
+    /// The save memory of `target`, as continuing finds it; one that
     /// cannot be read is reported and taken as empty.
-    fn read_slot(&self, slot: usize) -> Found {
-        let image = match self.slots.get(slot).map(|storage| storage.load()) {
+    fn read_target(&self, target: SaveTarget) -> Found {
+        let image = match self.load_target(target) {
             Some(Ok(image)) => image,
             Some(Err(error)) => {
                 Self::emit(&self.extensions, &Event::StorageFailed(error.to_string()));
@@ -1074,30 +1130,58 @@ impl<'rom> Game<'rom> {
         self.save.read(image)
     }
 
-    /// What every save slot holds; a game's area is its map record's,
-    /// which is right even in a block made by hand whose area byte was
-    /// never written.
+    /// What `target` holds; a game's area is its map record's, which is
+    /// right even in a block made by hand whose area byte was never
+    /// written.
+    fn content(&self, target: SaveTarget) -> Slot {
+        let found = self.read_target(target);
+        let mut content = Slot::from_found(&found);
+        let record = found
+            .game()
+            .and_then(SavedGame::progress)
+            .and_then(|progress| self.data.map_record(usize::from(progress.map)).ok());
+        if let (Slot::Game(summary), Some(record)) = (&mut content, record) {
+            summary.area = record.id.to_le_bytes()[0];
+        }
+        content
+    }
+
+    /// What every save slot holds.
     fn slot_contents(&self) -> Vec<Slot> {
         (0..self.slots.len())
-            .map(|slot| {
-                let found = self.read_slot(slot);
-                let mut content = Slot::from_found(&found);
-                let record = found
-                    .game()
-                    .and_then(SavedGame::progress)
-                    .and_then(|progress| self.data.map_record(usize::from(progress.map)).ok());
-                if let (Slot::Game(summary), Some(record)) = (&mut content, record) {
-                    summary.area = record.id.to_le_bytes()[0];
-                }
-                content
-            })
+            .map(|slot| self.content(SaveTarget::Slot(slot)))
             .collect()
     }
 
-    /// The slot with the game saved last (see [`slots::latest`]).
-    fn latest_slot(storages: &[Box<dyn SaveStorage>], contents: &[Slot]) -> Option<usize> {
-        let times: Vec<_> = storages.iter().map(|storage| storage.modified()).collect();
+    /// The saves continuing offers and what each holds: the autosave
+    /// first once it holds anything, then every slot.
+    fn continue_contents(&self) -> (Vec<SaveTarget>, Vec<Slot>) {
+        let autosave = self
+            .autosave
+            .as_ref()
+            .map(|_| (SaveTarget::Autosave, self.content(SaveTarget::Autosave)))
+            .filter(|(_, content)| *content != Slot::Empty);
+        let slots = (0..self.slots.len()).map(|slot| {
+            let target = SaveTarget::Slot(slot);
+            (target, self.content(target))
+        });
+        autosave.into_iter().chain(slots).unzip()
+    }
+
+    /// The line of `targets` with the game saved last (see
+    /// [`slots::latest`]).
+    fn latest_target(&self, targets: &[SaveTarget], contents: &[Slot]) -> Option<usize> {
+        let times: Vec<_> = targets
+            .iter()
+            .map(|target| self.modified_target(*target))
+            .collect();
         slots::latest(&times, contents)
+    }
+
+    /// The slot with the game saved last among the slots.
+    fn latest_slot(&self, contents: &[Slot]) -> Option<usize> {
+        let targets: Vec<_> = (0..self.slots.len()).map(SaveTarget::Slot).collect();
+        self.latest_target(&targets, contents)
     }
 
     /// The slot the pause menu's list starts on: the game's own, else the
@@ -1106,7 +1190,7 @@ impl<'rom> Game<'rom> {
         self.slot
             .filter(|slot| *slot < contents.len())
             .or_else(|| contents.iter().position(|slot| *slot == Slot::Empty))
-            .or_else(|| Self::latest_slot(&self.slots, contents))
+            .or_else(|| self.latest_slot(contents))
             .unwrap_or(0)
     }
 
@@ -1151,6 +1235,51 @@ impl<'rom> Game<'rom> {
                 true
             }
             Err(error) => failed(&self.extensions, &error),
+        }
+    }
+
+    /// The enhanced mode's autosave, once the player walks freely on a
+    /// map other than the one they last walked freely on: the game as it
+    /// stands joins the autosave's queue, to be written after the ones
+    /// before it as the pause menu would save it, and the notice shows
+    /// until the queue is empty. The first map walked on after starting or
+    /// continuing is only noted.
+    fn autosave_on_new_map(&mut self) {
+        if !self.play_mode.enhancements().autosave
+            || self.autosave.is_none()
+            || !self.player_in_control()
+        {
+            return;
+        }
+        let Some(map) = self.field.as_ref().map(Field::map) else {
+            return;
+        };
+        if self
+            .autosave_map
+            .replace(map)
+            .is_some_and(|last| last != map)
+        {
+            let party = self.party.clone();
+            if self.update_state(&party)
+                && let Some(autosave) = &self.autosave
+            {
+                autosave.queue(self.state.clone(), self.player_name.clone(), map);
+                self.autosave_notice = Some(Notice::queued(self.autosave_notice));
+            }
+        }
+    }
+
+    /// Reports the autosaves written since the last frame.
+    fn report_autosaves(&self) {
+        let Some(autosave) = &self.autosave else {
+            return;
+        };
+        for (map, result) in autosave.poll() {
+            let event = match result {
+                Ok(()) => Event::Autosaved { map },
+                Err(why) => Event::StorageFailed(why),
+            };
+            Self::emit(&self.extensions, &event);
         }
     }
 
@@ -1332,6 +1461,25 @@ impl<'rom> Game<'rom> {
                     &self.extensions,
                     GameSound::TitleMusic,
                 )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A frame on the field: the end of the demo once it is reached, the
+    /// pause menu on START while the player walks freely, or the field's
+    /// own frame, after which the autosave may be written.
+    fn update_field_screen(&mut self, input: Input, start: bool) -> Result<(), GameError> {
+        if self.demo_ends_here() {
+            self.begin_demo_end(input);
+        } else if start && self.player_in_control() {
+            self.screen = Screen::OpeningMenu(0);
+        } else {
+            let busy = self.autosave.as_ref().is_some_and(Autosaver::is_busy);
+            self.autosave_notice = self.autosave_notice.and_then(|notice| notice.step(busy));
+            self.update_field(input)?;
+            if matches!(self.screen, Screen::Field) {
+                self.autosave_on_new_map();
             }
         }
         Ok(())
@@ -1960,6 +2108,12 @@ impl<'rom> Game<'rom> {
                 }
                 whiten(frame, self.shown_white.0);
                 self.windows.draw_shown(frame, &self.skin, &self.painter);
+                if let Some(notice) = self.autosave_notice {
+                    let text =
+                        port_text(&self.extensions, AUTOSAVE_NOTICE) + &".".repeat(notice.dots());
+                    let level = notice.level(NOTICE_LEVELS);
+                    draw_notice(frame, AUTOSAVE_NOTICE_AT, &text, &self.painter, level);
+                }
                 if self.shown_white.1 {
                     whiten(frame, self.shown_brightness);
                 } else {

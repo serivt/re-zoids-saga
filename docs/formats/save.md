@@ -192,6 +192,48 @@ made by hand may lack. The title's guides read the latest game.
 A slot saved by the port in a new game and in the first chapter continued in the
 reference emulator on the saved map.
 
+## The autosave (a port feature)
+
+Source of knowledge: this project's own design. With the enhanced mode's autosave on
+(see [../launcher.md](../launcher.md)), the game is also saved in a place of its own,
+beside the slots with `.auto` before the extension (`game.auto.sav`), a save memory in
+the format above like theirs. It is written each time the player walks freely on a map
+other than the one they last walked freely on: once the arrival's fade, the map's
+handler and any scene it starts have let go, and the conditions the pause menu opens
+under hold, so the game saved is one the player could have saved by hand there. The
+first map walked on after a new game or a continue is only noted. A warp that an event
+makes in the middle of a scene saves nothing until the player has control again, on
+the map the scene leaves them on. The classic mode never writes it.
+
+Each autosave joins a queue (`crates/game-core/src/autosave.rs`) that a worker thread
+empties in the order the saves were asked for, so the field never waits for the disk
+and quick changes of map are all written, the last one last. Reading the autosave (the
+title's list, continuing) first waits for the queue, and so does leaving the game.
+`Event::Autosaved` reports each save once written, `Event::StorageFailed` one that
+could not be.
+
+While the queue works the field shows `port/autosave/notice` (Autosaving) with one to
+three dots after it, a dot more every 12 frames, at the top left (the glyphs' corner at
+(4, 0), the letters from row 4): the port's small capitals, five pixels tall, with no
+plate, white at 176/256 over the picture and a shadow a pixel down and right in black
+at 128/256. It fades in over 16 frames when a save is queued, stays at least 60 frames
+so it can be read, and once the queue is empty fades out over 16; a save queued
+meanwhile keeps it.
+
+つづきから lists the autosave first once it holds anything, marked `port/save-slots/autosave`
+(Ａ) where the slots show their number, the slots numbered from 1 after it; with it
+under the cursor the help's first line is `port/save-slots/autosave-help`. The list
+grows a line for it, moving up (window 1 at (5, 1) 20×12 with four slots), and the
+cursor starts on the latest game among all of them, as before. The autosave counts as
+a save to choose from, so with one slot and an autosave the list shows too. A game
+continued from it has no slot of its own: the pause menu's セーブ starts on the first
+empty slot, else the latest game. セーブ and the end of the demo never offer the
+autosave, and the title's guides read the latest game, the autosave included.
+
+The autosave was continued in the port on the map it was written on, after walking
+through an exit in the third area, and four changes of map in a row were written in
+their order.
+
 ## Not modeled yet
 
 The counter block, the member records beyond carrying them, units

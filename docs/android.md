@@ -72,6 +72,9 @@ whether each holds a save; choosing one offers:
   puts it in the slot. It must read as a save of the game, with a game to continue;
   the save it replaces is kept beside it as `rom.bak` (`rom.n.bak`).
 
+The enhanced mode's autosave is kept beside them as `rom.auto.sav`; the Saves list
+leaves it out.
+
 ## Building
 
 `tools/package/android.sh [version] [debug|release]` builds

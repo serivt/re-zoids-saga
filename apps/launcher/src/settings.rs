@@ -33,6 +33,8 @@ const BATTLE_ANIMATIONS_KEY: &str = "battle-animations";
 const DAMAGE_NUMBERS_KEY: &str = "damage-numbers";
 /// The enhanced mode's auto text, `1` on or `0` off.
 const AUTO_TEXT_KEY: &str = "auto-text";
+/// The enhanced mode's autosave, `1` on or `0` off.
+const AUTOSAVE_KEY: &str = "autosave";
 const SHARP: &str = "sharp";
 const SMOOTH: &str = "smooth";
 /// The window's size in multiples of the screen, its default and the
@@ -188,6 +190,7 @@ impl Settings {
                 }
                 DAMAGE_NUMBERS_KEY => settings.mode.enhancements.damage_numbers = value == "1",
                 AUTO_TEXT_KEY => settings.mode.enhancements.auto_text = value == "1",
+                AUTOSAVE_KEY => settings.mode.enhancements.autosave = value != "0",
                 _ => {}
             }
         }
@@ -231,10 +234,11 @@ impl Settings {
         };
         let _ = writeln!(
             text,
-            "{MODE_KEY}={mode}\n{BATTLE_ANIMATIONS_KEY}={}\n{DAMAGE_NUMBERS_KEY}={}\n{AUTO_TEXT_KEY}={}",
+            "{MODE_KEY}={mode}\n{BATTLE_ANIMATIONS_KEY}={}\n{DAMAGE_NUMBERS_KEY}={}\n{AUTO_TEXT_KEY}={}\n{AUTOSAVE_KEY}={}",
             u8::from(self.mode.enhancements.battle_animations),
             u8::from(self.mode.enhancements.damage_numbers),
-            u8::from(self.mode.enhancements.auto_text)
+            u8::from(self.mode.enhancements.auto_text),
+            u8::from(self.mode.enhancements.autosave)
         );
         for (button, key) in &self.keys {
             let _ = writeln!(text, "{BUTTON_PREFIX}{}={key}", button.name());
@@ -289,6 +293,7 @@ mod tests {
                     battle_animations: false,
                     damage_numbers: true,
                     auto_text: true,
+                    autosave: false,
                 },
             },
         };
@@ -319,14 +324,17 @@ mod tests {
         assert_eq!(odd.mode.play_mode(), PlayMode::Classic);
         assert!(!odd.mode.enhancements.battle_animations);
         assert!(!odd.mode.enhancements.damage_numbers);
-        let enhanced =
-            Settings::parse("mode=enhanced\nbattle-animations=0\ndamage-numbers=1\nauto-text=1\n");
+        assert!(odd.mode.enhancements.autosave);
+        let enhanced = Settings::parse(
+            "mode=enhanced\nbattle-animations=0\ndamage-numbers=1\nauto-text=1\nautosave=0\n",
+        );
         assert_eq!(
             enhanced.mode.play_mode(),
             PlayMode::Enhanced(Enhancements {
                 battle_animations: false,
                 damage_numbers: true,
                 auto_text: true,
+                autosave: false,
             })
         );
     }

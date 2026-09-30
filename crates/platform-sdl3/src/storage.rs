@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use platform::{SaveStorage, StorageError};
 
 const TEMPORARY_SUFFIX: &str = "tmp";
+/// What the autosave adds to the save's name.
+const AUTOSAVE_TAG: &str = "auto";
 
 /// Where save slot `slot` (from 0) of the save at `base` is kept: the
 /// first slot is `base` itself, so the usual `.sav` stays where emulators
@@ -19,6 +21,21 @@ pub fn slot_path(base: &Path, slot: usize) -> PathBuf {
     }
     let mut name = base.file_stem().unwrap_or_default().to_os_string();
     name.push(format!(".{}", slot + 1));
+    if let Some(extension) = base.extension() {
+        name.push(".");
+        name.push(extension);
+    }
+    base.with_file_name(name)
+}
+
+/// Where the enhanced mode's autosave of the save at `base` is kept:
+/// beside the slots, with `.auto` before the extension, as
+/// `game.auto.sav`; it is a save memory like theirs, which an emulator
+/// reads once renamed.
+#[must_use]
+pub fn autosave_path(base: &Path) -> PathBuf {
+    let mut name = base.file_stem().unwrap_or_default().to_os_string();
+    name.push(format!(".{AUTOSAVE_TAG}"));
     if let Some(extension) = base.extension() {
         name.push(".");
         name.push(extension);
@@ -105,6 +122,15 @@ mod tests {
         assert_eq!(slot_path(base, 1), PathBuf::from("roms/game.2.sav"));
         assert_eq!(slot_path(base, 3), PathBuf::from("roms/game.4.sav"));
         assert_eq!(slot_path(Path::new("save"), 2), PathBuf::from("save.3"));
+    }
+
+    #[test]
+    fn the_autosave_sits_beside_the_slots() {
+        assert_eq!(
+            autosave_path(Path::new("roms/game.sav")),
+            PathBuf::from("roms/game.auto.sav")
+        );
+        assert_eq!(autosave_path(Path::new("save")), PathBuf::from("save.auto"));
     }
 
     #[test]

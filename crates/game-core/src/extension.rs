@@ -129,6 +129,12 @@ pub enum Event {
     SaveRequested,
     /// The player chose to continue a saved game.
     LoadRequested,
+    /// The enhanced mode saved the game into its autosave on arriving at
+    /// `map`.
+    Autosaved {
+        /// The map walked on.
+        map: usize,
+    },
     /// The save could not be read or written; the text says why.
     StorageFailed(String),
 }
