@@ -45,7 +45,7 @@ use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
 use crate::guide::{Cover, Guide, GuideError, GuideKind};
 use crate::menu::{MenuStep, Party, PauseMenu, Shop};
 use crate::objects::AreaObjects;
-use crate::play_mode::{Enhancements, PlayMode};
+use crate::play_mode::{Enhancement, Enhancements, PlayMode};
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptContext, ScriptError, ScriptRunner};
 use crate::slots::{self, Pick, Purpose, Slot, SlotPicker};
@@ -64,6 +64,8 @@ const TALK_START_DELAY: u32 = 3;
 /// update.
 const CHEST_START_DELAY: u32 = 1;
 const CHEST_SOUND: u16 = 0x48;
+/// The sound SELECT plays turning the auto text on or off: the menus' move.
+const AUTO_TEXT_SOUND: u8 = 0x40;
 const SMALL_CHEST_SOUND: u16 = 0x46;
 const SMALL_CHEST_SPRITE: &str = "tb00";
 const CHEST_OPEN_ANIMATION: usize = 1;
@@ -401,6 +403,24 @@ impl<'rom> Game<'rom> {
         self.play_mode
     }
 
+    /// SELECT while a text box shows on the field (its talks, events, shops
+    /// and battles, not the name entry, where SELECT turns the page), in the
+    /// enhanced mode: turns the auto text on or off, with the menus' move
+    /// sound, and tells the extensions (a port feature; the original's text
+    /// boxes ignore SELECT).
+    fn toggle_auto_text(&mut self) {
+        let PlayMode::Enhanced(mut enhancements) = self.play_mode else {
+            return;
+        };
+        if !matches!(self.screen, Screen::Field) || !self.windows.shows_text_box() {
+            return;
+        }
+        enhancements.toggle(Enhancement::AutoText);
+        self.windows.play_sound(AUTO_TEXT_SOUND);
+        self.windows.set_auto_text(enhancements.auto_text);
+        self.take_enhancements(Some(enhancements));
+    }
+
     /// Keeps the enhancements the pause menu hands back, in the enhanced
     /// mode, and tells the extensions when they changed.
     fn take_enhancements(&mut self, chosen: Option<Enhancements>) {
@@ -591,6 +611,7 @@ impl<'rom> Game<'rom> {
             combat.set_attack_scenes(enhancements.battle_animations);
             combat.set_damage_numbers(enhancements.damage_numbers);
         }
+        self.windows.set_auto_text(enhancements.auto_text);
     }
 
     /// Hands the debugging mode to the field and the battle on screen.
@@ -614,10 +635,14 @@ impl<'rom> Game<'rom> {
     pub fn update(&mut self, input: Input) -> Result<(), GameError> {
         let input = std::mem::replace(&mut self.latched, input);
         let start = input.is_held(Button::Start) && !self.previous.is_held(Button::Start);
+        let select = input.is_held(Button::Select) && !self.previous.is_held(Button::Select);
         self.previous = input;
         self.frame += 1;
         Self::emit(&self.extensions, &Event::Frame(self.frame));
         self.latch_screen();
+        if select {
+            self.toggle_auto_text();
+        }
         let rom = self.data.bytes();
         match &mut self.screen {
             Screen::Logo(logo) => {

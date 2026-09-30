@@ -37,6 +37,24 @@ const MENU_MARGIN: usize = 2;
 const FULL_WIDTH_SPACE: char = '\u{3000}';
 const TEXT_MARGIN: usize = 1;
 const PROMPT_FROM_RIGHT: usize = 2;
+/// The auto text's wait (a port feature): frames before a text box goes on
+/// by itself, and frames more for each character on it, Latin letters
+/// read faster than the ROM font's.
+const AUTO_BASE_FRAMES: u32 = 30;
+const AUTO_LATIN_FRAMES: u32 = 3;
+const AUTO_GLYPH_FRAMES: u32 = 6;
+/// The auto text's mark: its text, and how far its plate's right edge is
+/// from the window's, over the top border.
+const AUTO_MARK: &str = "AUTO";
+const AUTO_MARK_FROM_RIGHT: usize = 12;
+/// The room between the plate's frame and its text, across and down, and
+/// the Latin font's capitals: their height and the row they start on.
+const MARK_PADDING: (usize, usize) = (2, 1);
+const MARK_CAPITALS: usize = 8;
+const MARK_CAPITALS_TOP: usize = 2;
+/// The skin's colors the mark takes: the windows' background and ink.
+const BACKGROUND_COLOR: u8 = 1;
+const INK_COLOR: u8 = 15;
 
 /// One open window.
 #[derive(Debug, Clone)]
@@ -306,6 +324,8 @@ pub struct ScriptWindows<'rom> {
     /// How bright the portraits' palette is, 16 as loaded: its copy
     /// reaches the screen in the frame it is made, unlike the windows'.
     portrait_level: u8,
+    /// Whether the text boxes go on by themselves (a port feature).
+    auto_text: bool,
 }
 
 /// A palette level that leaves the colors as loaded.
@@ -339,7 +359,24 @@ impl<'rom> ScriptWindows<'rom> {
             metrics: TextMetrics::default(),
             shown: None,
             portrait_level: NORMAL_LEVEL,
+            auto_text: false,
         }
+    }
+
+    /// Lets the text boxes go on by themselves once their text has been on
+    /// screen long enough to read, with their mark, as the enhanced mode's
+    /// auto text does (a port feature); or wait for A, as the original.
+    pub fn set_auto_text(&mut self, auto: bool) {
+        self.auto_text = auto;
+    }
+
+    /// Whether a text box, a window that types its text, is on screen.
+    #[must_use]
+    pub fn shows_text_box(&self) -> bool {
+        self.windows
+            .iter()
+            .flatten()
+            .any(|window| window.visible && window.style & TYPEWRITER_STYLE != 0)
     }
 
     /// Sets the portraits' palette to `level` (see [`faded_color`]).
@@ -463,13 +500,15 @@ impl<'rom> ScriptWindows<'rom> {
     /// Draws the windows kept by the last [`ScriptWindows::latch`], or the
     /// current ones before any.
     pub fn draw_shown(&self, frame: &mut Frame, skin: &WindowPainter, painter: &TextPainter) {
-        Self::draw_set(
-            self.shown.as_deref().unwrap_or(&self.windows),
-            frame,
-            skin,
-            painter,
-            self.portrait_level,
-        );
+        let windows = self.shown.as_deref().unwrap_or(&self.windows);
+        Self::draw_set(windows, frame, skin, painter, self.portrait_level);
+        if self.auto_text {
+            for window in windows.iter().flatten() {
+                if window.visible && window.style & TYPEWRITER_STYLE != 0 {
+                    draw_auto_mark(frame, window, skin, painter);
+                }
+            }
+        }
     }
 
     fn draw_set(
@@ -706,6 +745,27 @@ impl ScriptHost for ScriptWindows<'_> {
         }
     }
 
+    fn auto_advance(&self, id: u8) -> Option<u32> {
+        if !self.auto_text || !self.typewriter(id) {
+            return None;
+        }
+        let window = self.windows.get(usize::from(id))?.as_ref()?;
+        let read: u32 = window
+            .lines
+            .iter()
+            .flat_map(|line| line.chars())
+            .filter(|ch| !ch.is_whitespace() && !ch.is_control())
+            .map(|ch| {
+                if self.metrics.is_latin(ch) {
+                    AUTO_LATIN_FRAMES
+                } else {
+                    AUTO_GLYPH_FRAMES
+                }
+            })
+            .sum();
+        Some(AUTO_BASE_FRAMES + read)
+    }
+
     fn typewriter(&self, id: u8) -> bool {
         self.windows
             .get(usize::from(id))
@@ -818,6 +878,37 @@ impl ScriptHost for ScriptWindows<'_> {
             .get(usize::from(id))
             .is_some_and(Option::is_some)
     }
+}
+
+/// The auto text's mark over `window`'s top border, near its right corner:
+/// AUTO in the Latin font's capitals on a plate of the window's background,
+/// framed in its ink.
+fn draw_auto_mark(frame: &mut Frame, window: &Window, skin: &WindowPainter, painter: &TextPainter) {
+    let metrics = painter.metrics();
+    let (background, ink) = (
+        skin.palette().color(BACKGROUND_COLOR),
+        skin.palette().color(INK_COLOR),
+    );
+    let width = metrics.plain_width(AUTO_MARK, 1) + 2 * (MARK_PADDING.0 + 1);
+    let height = MARK_CAPITALS + 2 * (MARK_PADDING.1 + 1);
+    let right = (window.x + window.width) * TILE;
+    let (Some(left), Some(top)) = (
+        right.checked_sub(AUTO_MARK_FROM_RIGHT + width),
+        (window.y * TILE).checked_sub(MARK_PADDING.1 + 1),
+    ) else {
+        return;
+    };
+    for y in top..top + height {
+        for x in left..left + width {
+            let edge = y == top || y == top + height - 1 || x == left || x == left + width - 1;
+            frame.set_pixel(x, y, if edge { ink } else { background });
+        }
+    }
+    let text = (
+        left + MARK_PADDING.0 + 1,
+        (top + MARK_PADDING.1 + 1).saturating_sub(MARK_CAPITALS_TOP),
+    );
+    metrics.draw_plain(frame, text, AUTO_MARK, ink, 1);
 }
 
 #[cfg(test)]
@@ -1053,5 +1144,22 @@ mod tests {
             host.windows()[1].as_ref().unwrap().frame_style(),
             FrameStyle::None
         );
+    }
+
+    #[test]
+    fn a_text_box_goes_on_by_itself_only_with_the_auto_text() {
+        let mut host = windows();
+        host.open_window(1, 0x10, (0, 12, 30, 8), 1);
+        host.open_window(2, 0x10, (0, 0, 10, 4), 0);
+        for ch in "はい。".chars() {
+            host.put_char(1, ch);
+        }
+        host.present(None);
+        assert_eq!(host.auto_advance(1), None);
+        host.set_auto_text(true);
+        assert!(host.shows_text_box());
+        let read = 2 * AUTO_GLYPH_FRAMES + AUTO_GLYPH_FRAMES;
+        assert_eq!(host.auto_advance(1), Some(AUTO_BASE_FRAMES + read));
+        assert_eq!(host.auto_advance(2), None);
     }
 }

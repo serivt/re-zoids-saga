@@ -541,12 +541,14 @@ Source of knowledge: this project's own design; the windows, the menu and its so
 the original's. In the classic mode コンフィグ is the original's (above). In the enhanced
 mode (see [launcher.md](launcher.md)) it lists every setting the game lets the player
 change while it plays: window 4, a light menu like the save slots', takes the columns
-from the main list's right edge to the screen's, 8 rows high to cover the status panel,
+from the main list's right edge to the screen's, two rows a line and its frame's two,
+at least 8 to cover the status panel (10 with its four lines),
 a line per setting with its value from cell 13 (further left when a translation's list
 starts further right and the widest value would not fit before the cursor's right mark):
 the message speed (１ to ５, the original's, stored in the party as its list does), the
 battle animations (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Without the attack scenes)
-and the damage numbers (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Damage numbers). The
+the damage numbers (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Damage numbers) and the
+auto text (ＯＮ or ＯＦＦ, see [formats/script-text.md](formats/script-text.md)). The
 help line says what
 the setting under the cursor does, and below it the keys. Up and down move (`0x40`);
 left and right, or A, change the value (`0x40`), the speed stopping at its ends and the

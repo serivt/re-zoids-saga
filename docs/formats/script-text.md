@@ -104,6 +104,20 @@ modes 5 and 6, and mode 6 also right (`0x10`), START (`0x80`) and SELECT (0). A 
 START play `0x47` outside mode 0. The Zoid lab's development waits in mode 6 on the Zoid
 it gives, for A or START.
 
+**Auto text (a port feature).** Source of knowledge: this project's own design. With the
+enhanced mode's auto text on (see [../launcher.md](../launcher.md)), a mode 0 key wait
+in a text box (a window that types its text, style bit 1) and the port's wait on a full
+page of a translation end by themselves once the box's text has been on screen long
+enough to read: 30 frames, and 3 more for each Latin letter on it or 6 for each of the
+ROM font's characters, spaces left out (`ScriptHost::auto_advance`). They end as A
+would, without its sound; A still ends them sooner, and the choices' menus still wait.
+While it is on, every text box shows AUTO in the Latin font on a small plate of its
+background, framed in its ink, over its top border 12 pixels from the right corner.
+SELECT turns it on or off, with sound `0x40`, while a text box shows on the field (its
+talks, events, shops and battles; not in the name entry, where SELECT turns the page);
+the pause menu's settings and the launcher change it too, and the launcher remembers
+it. The original's text boxes ignore SELECT.
+
 Presenting, clearing or opening a window and showing a portrait flush the display,
 which costs one frame each; closing costs one frame, or two when another window stays
 open to be redrawn, and a reset three. After a key or a menu is accepted the next

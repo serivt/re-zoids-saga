@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the scene, so battles take about half as long.
   - **Damage numbers:** each unit a blow lands on shows the damage it took as a number
     under it for a moment, besides the message, in the game's own orange digits.
+  - **Auto text:** the text boxes go on by themselves once their text has been on
+    screen long enough to read, longer the more text they hold, with an AUTO mark on
+    them; SELECT turns it on or off while one shows.
 
 ### Changed
 

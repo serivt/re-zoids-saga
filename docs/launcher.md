@@ -37,6 +37,9 @@ Game mode chooses how the game plays, on a screen of its own:
   - *Damage numbers* on shows, besides each hit's message, the damage every unit
     takes as a number under it for a moment (see [combat.md](combat.md), Damage
     numbers).
+  - *Auto text* on lets the text boxes go on by themselves once their text has been on
+    screen long enough to read, with an AUTO mark on them; SELECT turns it on or off
+    while a text box shows (see [formats/script-text.md](formats/script-text.md)).
 
 The mode is set before the game starts (`Game::set_play_mode`, see
 `crates/game-core/src/play_mode.rs`) and does not change while it plays; saves are the

@@ -26,6 +26,10 @@ pub struct Enhancements {
     /// Whether a battle shows the damage each unit takes as a number under
     /// it for a moment, besides the message.
     pub damage_numbers: bool,
+    /// Whether the text boxes go on by themselves once their text has
+    /// been on screen long enough to read, as a key would; SELECT turns it
+    /// on or off while a text box shows.
+    pub auto_text: bool,
 }
 
 impl Default for Enhancements {
@@ -33,6 +37,7 @@ impl Default for Enhancements {
         Self {
             battle_animations: true,
             damage_numbers: false,
+            auto_text: false,
         }
     }
 }
@@ -44,11 +49,13 @@ pub enum Enhancement {
     BattleAnimations,
     /// See [`Enhancements::damage_numbers`].
     DamageNumbers,
+    /// See [`Enhancements::auto_text`].
+    AutoText,
 }
 
 impl Enhancement {
     /// Every enhancement, in the order the lists show them.
-    pub const ALL: [Self; 2] = [Self::BattleAnimations, Self::DamageNumbers];
+    pub const ALL: [Self; 3] = [Self::BattleAnimations, Self::DamageNumbers, Self::AutoText];
 }
 
 impl Enhancements {
@@ -58,6 +65,7 @@ impl Enhancements {
         match enhancement {
             Enhancement::BattleAnimations => self.battle_animations,
             Enhancement::DamageNumbers => self.damage_numbers,
+            Enhancement::AutoText => self.auto_text,
         }
     }
 
@@ -66,6 +74,7 @@ impl Enhancements {
         let flag = match enhancement {
             Enhancement::BattleAnimations => &mut self.battle_animations,
             Enhancement::DamageNumbers => &mut self.damage_numbers,
+            Enhancement::AutoText => &mut self.auto_text,
         };
         *flag = !*flag;
     }
@@ -92,6 +101,7 @@ mod tests {
         let chosen = Enhancements {
             battle_animations: false,
             damage_numbers: true,
+            auto_text: true,
         };
         assert!(PlayMode::Classic.enhancements().battle_animations);
         assert!(!PlayMode::Classic.enhancements().damage_numbers);
@@ -113,5 +123,6 @@ mod tests {
         assert_eq!(PlayMode::default(), PlayMode::Classic);
         assert!(Enhancements::default().battle_animations);
         assert!(!Enhancements::default().damage_numbers);
+        assert!(!Enhancements::default().auto_text);
     }
 }

@@ -101,6 +101,13 @@ pub trait ScriptHost {
     fn portrait(&mut self, id: u8, character: u8, expression: u8);
     /// Shows or hides the "more" prompt of window `id`.
     fn prompt(&mut self, id: u8, visible: bool);
+    /// The frames a wait for A on window `id`'s text lasts before it goes
+    /// on by itself, as the enhanced mode's auto text does (a port
+    /// feature); `None` waits for the key, as the original.
+    fn auto_advance(&self, id: u8) -> Option<u32> {
+        let _ = id;
+        None
+    }
     /// Plays a sound effect.
     fn play_sound(&mut self, id: u8);
     /// Reads a game flag.
@@ -522,7 +529,8 @@ impl ScriptRunner {
         keys: u16,
         host: &mut impl ScriptHost,
     ) -> bool {
-        let accepted = waited_key(mode, keys, host);
+        let automatic = mode == 0 && auto_due(host, self.window, elapsed);
+        let accepted = waited_key(mode, keys, host).or(automatic.then_some(1));
         let canceled = cancelable && keys & KEY_B != 0;
         if accepted.is_none() && !canceled {
             let elapsed = elapsed + 1;
@@ -541,14 +549,16 @@ impl ScriptRunner {
     }
 
     fn poll_page(&mut self, ch: char, elapsed: u32, keys: u16, host: &mut impl ScriptHost) -> bool {
-        if keys & KEY_A == 0 {
+        if keys & KEY_A == 0 && !auto_due(host, self.text_window, elapsed) {
             let elapsed = elapsed + 1;
             host.prompt(self.text_window, elapsed / PROMPT_HALF_PERIOD % 2 == 1);
             self.wait = Wait::Page { ch, elapsed };
             return false;
         }
         host.prompt(self.text_window, false);
-        host.play_sound(CONFIRM_SOUND);
+        if keys & KEY_A != 0 {
+            host.play_sound(CONFIRM_SOUND);
+        }
         host.turn_page(self.text_window);
         self.wait = Wait::None;
         self.print(ch, host);
@@ -907,6 +917,13 @@ impl ScriptRunner {
     }
 }
 
+/// Whether a wait for A on window `id`, `elapsed` frames old, goes on by
+/// itself now (see [`ScriptHost::auto_advance`]).
+fn auto_due(host: &impl ScriptHost, id: u8, elapsed: u32) -> bool {
+    host.auto_advance(id)
+        .is_some_and(|frames| elapsed + 1 >= frames)
+}
+
 /// What a key wait of `mode` ends with, if a key it takes is down
 /// (`0x0803EA58`): mode 0 takes A (1, sound `0x41`); mode 1 START (1);
 /// modes 2–6 A (1), and in turn L (2) in modes 2, 3, 5 and 6, R (4) in
@@ -1057,9 +1074,14 @@ mod tests {
         page_rows: usize,
         lines: std::collections::HashMap<u8, usize>,
         pending_break: HashSet<u8>,
+        auto: Option<u32>,
     }
 
     impl ScriptHost for Recorder {
+        fn auto_advance(&self, _id: u8) -> Option<u32> {
+            self.auto
+        }
+
         fn open_window(&mut self, id: u8, kind: u8, rect: (u8, u8, u8, u8), style: u8) {
             self.log
                 .push(format!("open {id} {kind:#x} {rect:?} {style}"));
@@ -1277,6 +1299,29 @@ mod tests {
         assert_eq!(waited_key(0, KEY_START, &mut host), None);
         assert_eq!(waited_key(0, KEY_A, &mut host), Some(1));
         assert_eq!(host.log, ["sound 0x47", "sound 0x47", "sound 0x41"]);
+    }
+
+    #[test]
+    fn a_wait_for_a_goes_on_by_itself_with_the_auto_text() {
+        let script = vec![0x01, 1, 0x10, 0, 12, 30, 8, 1, 0x05, 0x00, 0x03, 1, 0x22];
+        let (bytes, offsets) = rom(&[script]);
+        let mut runner = ScriptRunner::new(offsets);
+        let mut host = Recorder {
+            auto: Some(5),
+            ..Recorder::default()
+        };
+        runner.start(0).unwrap();
+        runner.update(&bytes, Input::default(), &mut host).unwrap();
+        runner.update(&bytes, Input::default(), &mut host).unwrap();
+        assert!(runner.is_waiting_for_key());
+        for _ in 0..4 {
+            runner.update(&bytes, Input::default(), &mut host).unwrap();
+            assert!(runner.is_waiting_for_key());
+        }
+        runner.update(&bytes, Input::default(), &mut host).unwrap();
+        assert!(!runner.is_waiting_for_key());
+        assert_eq!(runner.vars()[0], 1);
+        assert!(!host.log.iter().any(|entry| entry == "sound 0x41"));
     }
 
     #[test]
