@@ -92,6 +92,15 @@ const EXPLOSION_SOUND: u16 = 0x5A;
 /// The attribute bit of an exit's cell; an enemy does not reach the player
 /// standing on one.
 const EXIT_BIT: u16 = 0x4000;
+/// A water cell's whole attribute (`0x0800AE7C`): the Gustav drives onto
+/// one only when the party can cross the sea, and a roaming Zoid keeps to
+/// water or to land, as the cell it stands on.
+const WATER: u16 = 0x0006;
+/// The player's sprites on water and back on land (`0x080089A0` with
+/// `0x96` and 0), and the sound of either change.
+const WATER_SPRITE: usize = 0x96;
+const LAND_SPRITE: usize = 0;
+const WATER_SOUND: u16 = 0x6E;
 const IDLE_TIMER_MASK: u16 = 0x7F;
 /// A sprite off the screen by more than this (its top-left 56 pixels left
 /// or 32 above) or whose top-left is past the span from there is skipped
@@ -191,6 +200,9 @@ pub enum FieldEvent {
         /// Index into the field's actors of the enemy.
         enemy: usize,
     },
+    /// The player drives onto water, or back onto land: its sprite
+    /// becomes this one.
+    PlayerSprite(usize),
     /// The player faced chest `chest` (actor `actor`) and pressed A.
     Chest {
         /// Index into the field's actors.
@@ -210,6 +222,14 @@ pub enum FieldEvent {
         /// Index into the field's actors.
         actor: usize,
     },
+}
+
+/// Whether the party can cross the sea (the game state's half-word 0, bit
+/// 0), and whether the player drives on water, with its water sprite.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Sea {
+    crossing: bool,
+    afloat: bool,
 }
 
 /// A walk toward a metatile, as cutscenes give it (the game's commands 10
@@ -771,6 +791,10 @@ pub struct Field {
     /// No enemy meets the player (`0x02000008` bit 1), which some events
     /// set while they run.
     calm: bool,
+    /// The sea's rules for the player.
+    sea: Sea,
+    /// The backdrop's scroll, 16.16 pixels.
+    backdrop: (i32, i32),
     /// The OBJ palette banks: the palette last copied into each, which
     /// every actor reserving that slot is drawn with.
     object_palettes: [Option<[u16; 16]>; OBJECT_PALETTES],
@@ -800,6 +824,8 @@ impl Field {
             sounds: Vec::new(),
             intangible: false,
             calm: false,
+            sea: Sea::default(),
+            backdrop: (0, 0),
             object_palettes: [None; OBJECT_PALETTES],
         }
     }
@@ -853,6 +879,8 @@ impl Field {
             sounds: Vec::new(),
             intangible: false,
             calm: false,
+            sea: Sea::default(),
+            backdrop: (0, 0),
             object_palettes: [None; OBJECT_PALETTES],
         };
         field.player_mut().place((column, row));
@@ -994,6 +1022,14 @@ impl Field {
         event
     }
 
+    /// Advances the objects' animations by a frame, the player's left as
+    /// it is (`0x0800BDE0`, entities 2 on).
+    pub fn tick_object_animations(&mut self) {
+        for actor in self.actors.iter_mut().skip(1) {
+            actor.animation = actor.animation.saturating_add(1);
+        }
+    }
+
     /// Advances every actor's animation by a frame.
     pub fn tick_animations(&mut self) {
         for actor in &mut self.actors {
@@ -1132,6 +1168,7 @@ impl Field {
             } else {
                 PLAYER_SPEED
             };
+            let changed = self.afloat_change(direction);
             let player = &mut self.actors[0];
             let standing = player.animation_shift;
             player.start_step(direction, speed);
@@ -1139,7 +1176,7 @@ impl Field {
             if running {
                 player.animation_shift = RUN_ANIMATION_SHIFT;
             }
-            return None;
+            return changed;
         }
         if let Some(enemy) = self.meeting(0, direction) {
             self.actors[enemy].face(direction.opposite());
@@ -1347,6 +1384,9 @@ impl Field {
         {
             return false;
         }
+        if !self.terrain_allows(index, (column, row)) {
+            return false;
+        }
         !self.actors.iter().enumerate().any(|(other, actor)| {
             other != index
                 && actor.visible
@@ -1354,6 +1394,49 @@ impl Field {
                 && !(self.intangible && index == 0 && Self::roaming_enemy(actor))
                 && (actor.footing() == (column, row) || actor.previous_footing() == (column, row))
         })
+    }
+
+    /// Whether the terrain lets actor `index`, a Zoid, onto `cell`
+    /// (`0x0800AE7C`): the player onto water only when the party can cross
+    /// the sea or it is afloat already; a roaming Zoid only onto a cell of
+    /// its own level and its own water or land.
+    fn terrain_allows(&self, index: usize, (column, row): (usize, usize)) -> bool {
+        let actor = &self.actors[index];
+        if actor.behavior != ZOID_BEHAVIOR {
+            return true;
+        }
+        let target = self.scene.attribute(column, row).unwrap_or(0);
+        if index == 0 {
+            return target != WATER || self.sea.crossing || self.sea.afloat;
+        }
+        let (here_column, here_row) = actor.footing();
+        let here = self.scene.attribute(here_column, here_row).unwrap_or(0);
+        here & LEVEL_BIT == target & LEVEL_BIT && (here == WATER) == (target == WATER)
+    }
+
+    /// The player's sprite change as it drives from land onto water or
+    /// back (`0x0800AE7C`), with its sound.
+    fn afloat_change(&mut self, direction: Direction) -> Option<FieldEvent> {
+        if self.actors[0].behavior != ZOID_BEHAVIOR {
+            return None;
+        }
+        let (column, row) = self.ahead(direction)?;
+        let target = self.scene.attribute(column, row).unwrap_or(0);
+        let afloat = if self.sea.afloat {
+            !(target & 0xFF00 == 0 && target != WATER)
+        } else {
+            target == WATER
+        };
+        if afloat == self.sea.afloat {
+            return None;
+        }
+        self.sea.afloat = afloat;
+        self.sounds.push(WATER_SOUND);
+        Some(FieldEvent::PlayerSprite(if afloat {
+            WATER_SPRITE
+        } else {
+            LAND_SPRITE
+        }))
     }
 
     /// Whether `actor` is an enemy on a Zoid map, which meets the player
@@ -1373,6 +1456,33 @@ impl Field {
     /// (`0x02000008` bit 1): they still block its way.
     pub fn set_calm(&mut self, calm: bool) {
         self.calm = calm;
+    }
+
+    /// The game's next random number (`0x08001080`).
+    pub fn random(&mut self) -> u16 {
+        self.rng.next(self.frame)
+    }
+
+    /// Makes the cells `tiles` tiles on a side (`0x0200000C + 0x18`), the
+    /// actors keeping their cells.
+    pub fn set_cell_tiles(&mut self, tiles: usize) {
+        self.scene.cell_tiles = tiles.max(1);
+        let size = cell_pixels(&self.scene);
+        for actor in &mut self.actors {
+            actor.set_cell_size(size);
+        }
+    }
+
+    /// Sets the backdrop's scroll, 16.16 pixels (the second background's,
+    /// `0x03004B9C + 0x18` and `+ 0x1C`).
+    pub fn set_backdrop(&mut self, scroll: (i32, i32)) {
+        self.backdrop = scroll;
+    }
+
+    /// Lets the party cross the sea, or keeps it off the water (the game
+    /// state's half-word 0, bit 0).
+    pub fn set_sea_crossing(&mut self, crossing: bool) {
+        self.sea.crossing = crossing;
     }
 
     /// Whether actor `index` was left out of the last frame's sprites as
@@ -1466,6 +1576,16 @@ impl Field {
     /// Returns [`FieldError`] when the warp, the map or a sprite cannot be read.
     pub fn warp(&mut self, data: &GameData<'_>, exit: usize) -> Result<Warp, FieldError> {
         let warp = data.warp(self.map, exit)?;
+        self.warp_to(data, warp)
+    }
+
+    /// Follows `warp`, an exit's (or one sent elsewhere): as [`Field::warp`]
+    /// does.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`FieldError`] when the destination cannot be loaded.
+    pub fn warp_to(&mut self, data: &GameData<'_>, warp: Warp) -> Result<Warp, FieldError> {
         let scene = map_scene(data, warp.map)?;
         let objects = data.map_objects(warp.map)?;
         let mut actors = load_actors(data, &objects)?;
@@ -1672,7 +1792,7 @@ impl Field {
         let scroll = shown.camera;
         let tile = |index: usize| self.scene.tiles.tile(index);
         let backdrop = |x: usize, y: usize| self.scene.backdrop.wrapping(x, y);
-        draw_background(frame, backdrop, tile, &self.palettes, scroll, false);
+        draw_background(frame, backdrop, tile, &self.palettes, shown.backdrop, false);
         let map = |x: usize, y: usize| self.scene.map.wrapping(x, y);
         draw_background(frame, map, tile, &self.palettes, scroll, true);
         for sprite in shown.sprites.iter().rev() {
@@ -1746,6 +1866,10 @@ impl Field {
             .collect();
         Shown {
             camera: self.camera(),
+            backdrop: (
+                backdrop_pixels(self.backdrop.0),
+                backdrop_pixels(self.backdrop.1),
+            ),
             sprites,
         }
     }
@@ -1755,6 +1879,8 @@ impl Field {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Shown {
     camera: (usize, usize),
+    /// The backdrop's scroll.
+    backdrop: (usize, usize),
     /// Front to back.
     sprites: Vec<ShownSprite>,
 }
@@ -1766,6 +1892,12 @@ struct ShownSprite {
     /// The frame the sprite table names, and the anchor it was placed from.
     frame: SpriteFrame,
     anchor: (i16, i16),
+}
+
+/// A backdrop scroll's whole pixels, within the 64 kilopixels its layer
+/// wraps in.
+fn backdrop_pixels(scroll: i32) -> usize {
+    usize::try_from((scroll >> FRACTION_BITS).rem_euclid(0x1_0000)).unwrap_or(0)
 }
 
 /// Map `map`'s scene with the attribute grid its record sets.
@@ -2028,6 +2160,51 @@ mod tests {
         );
         assert_eq!(field.actors[1].facing, Direction::Left);
         assert!(!field.player().walking());
+    }
+
+    #[test]
+    fn the_gustav_drives_onto_water_only_when_the_party_can_cross_the_sea() {
+        let mut field = zoid_field();
+        let columns = field.scene.attribute_columns();
+        let (column, row) = field.player().footing();
+        field.scene.attributes[row * columns + column + 1] = WATER;
+        assert_eq!(field.update(held(Direction::Right)), None);
+        assert!(!field.player().walking());
+        field.set_sea_crossing(true);
+        assert_eq!(
+            field.update(held(Direction::Right)),
+            Some(FieldEvent::PlayerSprite(WATER_SPRITE))
+        );
+        assert!(field.player().walking());
+        assert!(field.take_sounds().contains(&WATER_SOUND));
+        for _ in 0..64 {
+            if !field.player().walking() {
+                break;
+            }
+            field.update(Input::default());
+        }
+        assert_eq!(field.player().footing(), (column + 1, row));
+        assert_eq!(
+            field.update(held(Direction::Right)),
+            Some(FieldEvent::PlayerSprite(LAND_SPRITE))
+        );
+    }
+
+    #[test]
+    fn roaming_zoids_keep_to_their_own_level_and_water_or_land() {
+        let mut field = zoid_field();
+        let columns = field.scene.attribute_columns();
+        field.actors.push(enemy(4, 2));
+        let (column, row) = field.actors[1].footing();
+        let at = |column: usize| row * columns + column;
+        field.scene.attributes[at(column - 1)] = WATER;
+        assert!(!field.free(1, Direction::Left, true));
+        assert!(field.free(1, Direction::Right, true));
+        field.scene.attributes[at(column + 1)] = LEVEL_BIT;
+        assert!(!field.free(1, Direction::Right, true));
+        field.scene.attributes[at(column)] = WATER;
+        assert!(field.free(1, Direction::Left, true));
+        assert!(!field.free(1, Direction::Up, true));
     }
 
     #[test]

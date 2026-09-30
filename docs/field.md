@@ -90,6 +90,16 @@ frame by frame in the first room, in Arcana and above its bar.
   frame, less its first tile. The port draws each sprite with the latched frame's
   shape and anchor and the current frame's tiles over the start (checked on the
   explosion against the original).
+- **Backdrop.** The vertical blank (`0x08001E60`) copies each background's scroll
+  from the table at `0x03004B9C` (x and y, 16.16 pixels, per background). The map's
+  layer (BG2, `+0x10`) and the backdrop behind it (BG3, `+0x18`) move together: the
+  camera's moves, the player's steps (`0x080082BA`) and a scene's pans (`0x08008324`),
+  add the same to both. A map's load sets only the map's layer, so the backdrop keeps
+  what it had, from 0 when a game starts or is continued (`0x08000DD8`); and every
+  frame the field runs, the fades' callbacks included, `0x0800BE54` adds a sixteenth
+  of a pixel to its x, so the sea drifts left a pixel every 16 frames. Checked on the
+  sea around New Helic City and the world map of area 8, whose drift and position
+  match the original's, but for the phase the drift starts with after a continue.
 
 ### Wandering
 
@@ -155,6 +165,19 @@ stands still (command 1), like the guard of the thieves' tunnel in map 39 (`mq02
 which bars the way to the canyon's far side in chapter 2, meets the player the same way
 when the carrier walks into it. Meeting and the battle are described in
 [combat.md](combat.md).
+
+### Water
+
+Source: the step check (`0x0800AE7C`), and the Gustav driven against the shore of map 50
+in a reference emulator. A cell whose whole attribute is `0x0006` is water. The
+player's carrier drives onto one only while the party can cross the sea (the game
+state's half-word 0, bit 0, which chapter 8 sets once Dr. D has shown his cannon and
+its first map clears) or while it is afloat already; the Gustav stops at the shore
+otherwise. Driving onto water turns the player's sprite into the boat (`0x080089A0`
+with `0x96`), and driving back onto a plain cell (an attribute with a clear high byte
+that is not water) turns it back (with 0, the carrier), each with sound `0x6E`. A
+roaming Zoid keeps to its level and to water or land, as the cell it stands on. Map 50
+(area 3) has 78 water cells and the world map of area 8 (236) 494.
 
 ### Guards
 

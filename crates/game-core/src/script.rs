@@ -905,7 +905,9 @@ impl ScriptRunner {
         self.vars[usize::from(slot) % VARIABLES]
     }
 
-    fn set_var(&mut self, slot: u8, value: u16) {
+    /// Sets variable `slot` (`0x02007574` on), as a script does, or the
+    /// game's code before a string it has started reads it.
+    pub fn set_var(&mut self, slot: u8, value: u16) {
         self.vars[usize::from(slot) % VARIABLES] = value;
     }
 

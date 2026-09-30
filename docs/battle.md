@@ -180,7 +180,7 @@ its start.
 
 ## Scenes played as attacks
 
-The later scenes (2 to 7 and 20, chapters 5 and 6) run the battles' attack scene
+The later scenes (2 to 9 and 20, chapters 5 to 7) run the battles' attack scene
 ([combat.md](combat.md#attack-scenes)). The module's task (`0x0803DC54`) builds the
 scene's two units from the record (`0x0803DD54`), marks the scene staged (`0x0803DF08`,
 bit 0 of `0x0200EB84`) and starts the attack scene's task (`0x0802BC99`) on them. The
@@ -206,7 +206,12 @@ Chapter 6 stages Van's Blade Liger (`0x3D`, pilot 4) firing its slot 5 at no one
 (scene 4); Raven's Genosaurer (`0x1E`, pilot `0x22`) firing its slot 5, then 4, at Van
 (scenes 5 and 6) and its slot 4 at a Command Wolf (`0x4C`, pilot `0x3A`, scene 20); and
 Gale's Zoid (`0x7F`, pilot `0x1E`) firing its smoke (part `0x6C` on its third rack) on
-its own side (scene 7). The target's line is its reaction when it is hit.
+its own side (scene 7). Chapter 7 stages the Berserk Führer (`0x79`, pilot `0x55`)
+firing its slot 4 at Alster's Liger Zero (`0x8D`, pilot `0x4D`, scene 8), and the Liger
+Zero firing its slot 3 at no one (scene 9). The target's line is its reaction when it is
+hit. A side whose line is `0xFF` has none of its own: the scene's attacker then speaks
+as in a battle (`0x08042884` with the unit's line byte, `+0xD6`, at `0xFF`), its pilot's
+line or its weapon's, and the Führer roars ガオォォォ！
 
 The field runs these through `0x08012040` with a scene or a list of them ended by
 `0xFF` (ROM `0x08669494` holds 4, 5): it plays song `0x17`, each scene with its reload,

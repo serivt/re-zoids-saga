@@ -39,6 +39,7 @@ use crate::data::GameData;
 use crate::demo::{DemoEnd, DemoStep};
 use crate::event::{
     BLACK, ChestKind, EventHost, Events, FIELD_HOOK, FIELD_WATCH, HoldStep, MAP_TASK, Op,
+    WarpRedirect,
 };
 use crate::extension::{Event, GameSound, SharedExtensions};
 use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
@@ -59,6 +60,15 @@ use crate::windows::{DEFAULT_PLAYER_NAME, ScriptWindows, TRANSLATED_PLAYER_NAME}
 use crate::{ScriptHost, TextPainter, WindowPainter};
 
 const TALK_START_DELAY: u32 = 3;
+/// A sixteenth of a pixel, the backdrop's drift each frame (`0x0800BE54`).
+const BACKDROP_DRIFT: i32 = 0x1000;
+
+/// The camera's move from `then` to `now` along an axis, 16.16 pixels.
+fn camera_move(now: usize, then: usize) -> i32 {
+    let pixels = isize::try_from(now).unwrap_or(0) - isize::try_from(then).unwrap_or(0);
+    i32::try_from(pixels).unwrap_or(0) << 16
+}
+
 /// Frames between A and a chest opening. An object whose script is other
 /// code runs it in the frame it is spoken to, from within the player's
 /// update.
@@ -257,6 +267,15 @@ struct StoryEffects {
     whiten: u8,
     /// The guard that last saw the player.
     seen_guard: Option<usize>,
+    /// Where warps go instead, until the next map's handler runs.
+    redirect: Option<WarpRedirect>,
+    /// The song a staged scene's routine remembered.
+    saved_music: Option<u16>,
+    /// The camera the backdrop last moved along with, until a map loads.
+    camera: Option<(usize, usize)>,
+    /// The song the field or the story last asked for (`0x02000B54`),
+    /// which the battles' own songs leave as it is.
+    song: Option<u16>,
 }
 
 /// The running game.
@@ -301,6 +320,15 @@ pub struct Game<'rom> {
     /// The door the exit being taken is, when it is one.
     door_taken: Option<usize>,
     warped: Option<usize>,
+    /// The field's backdrop scroll (`0x03004B9C + 0x18` and `+ 0x1C`, 16.16
+    /// pixels), from 0 when a game starts: `0x0800BE54` drifts it a
+    /// sixteenth of a pixel left every frame the field runs, and the
+    /// camera's moves (`0x08008324`) move it along, while a map's load sets
+    /// only the camera.
+    backdrop: (i32, i32),
+    /// The map an event warp is loading, whose handler runs once its
+    /// objects are placed (`0x08007188`).
+    arriving: Option<usize>,
     /// The map and exit whose portal the player last pushed toward.
     portal_exit: Option<(usize, usize)>,
     chest: Option<(usize, u16)>,
@@ -505,6 +533,8 @@ impl<'rom> Game<'rom> {
             exit_taken: None,
             door_taken: None,
             warped: None,
+            backdrop: (0, 0),
+            arriving: None,
             portal_exit: None,
             chest: None,
             gift: None,
@@ -996,6 +1026,7 @@ impl<'rom> Game<'rom> {
             Self::emit(&self.extensions, &Event::SoundRequested(song));
             self.sound.play(song)?;
         }
+        self.backdrop = (0, 0);
         self.screen = Screen::Field;
         Ok(())
     }
@@ -1142,20 +1173,31 @@ impl<'rom> Game<'rom> {
         self.play_map_music(FIRST_ROOM_MAP)?;
         self.events.set_brightness(BLACK);
         self.events.fade_in_holding();
+        self.backdrop = (0, 0);
         self.screen = Screen::Field;
         Ok(())
     }
 
     /// Loads map `map` with the player on `cell` and runs the map's handler.
     fn enter_map(&mut self, map: usize, cell: (usize, usize)) -> Result<(), GameError> {
+        self.effects.camera = None;
         self.objects
             .enter(&self.data, &mut self.state, map, frame_counter(self.frame));
         let mut field = Field::load(&self.data, map, cell)?;
         AreaObjects::place(&self.data, &self.state, map, &mut field)?;
         field.show_party_zoids(&self.data, &self.state)?;
+        field.set_sea_crossing(sea_crossing(&self.state));
         show_opened_chests(&mut field, &self.windows);
         self.field = Some(field);
         Self::emit(&self.extensions, &Event::RoomEntered { map, cell });
+        self.run_map_handler(map)
+    }
+
+    /// Runs map `map`'s handler as the map is entered: the warps go where
+    /// they lead again (every handler resets the field's hooks,
+    /// `0x0800BEE4`).
+    fn run_map_handler(&mut self, map: usize) -> Result<(), GameError> {
+        self.effects.redirect = None;
         self.run_handler(story::map_handler(map))
     }
 
@@ -1357,6 +1399,49 @@ impl<'rom> Game<'rom> {
     /// A frame on the field. While a chest is searched no actor moves,
     /// animates or reads the keys: the search waits within the player's
     /// update (`0x0800B938`) until the reward.
+    /// Moves the field's backdrop a frame's worth, unless a map is loading:
+    /// its drift, and the camera's move since the frame before on the same
+    /// map load.
+    fn drift_backdrop(&mut self) {
+        if self.events.loading() {
+            return;
+        }
+        let Some(field) = self.field.as_mut() else {
+            return;
+        };
+        let camera = field.camera();
+        if let Some(before) = self.effects.camera.replace(camera) {
+            self.backdrop.0 = self
+                .backdrop
+                .0
+                .wrapping_add(camera_move(camera.0, before.0));
+            self.backdrop.1 = self
+                .backdrop
+                .1
+                .wrapping_add(camera_move(camera.1, before.1));
+        }
+        self.backdrop.0 = self.backdrop.0.wrapping_add(BACKDROP_DRIFT);
+        field.set_backdrop(self.backdrop);
+    }
+
+    /// A frame of a hold after its step: once an event warp's load is over
+    /// its map's handler runs, and while its fade in lasts the callback
+    /// (`0x0800BEA4`) runs the field's watch and the objects' animations.
+    fn after_hold_step(&mut self) -> Result<(), GameError> {
+        if !self.events.loading()
+            && let Some(map) = self.arriving.take()
+        {
+            self.run_map_handler(map)?;
+        }
+        if self.events.fading_in_slowly() {
+            self.update_events(|events, host| events.update_watch_fading(host))?;
+            if let Some(field) = self.field.as_mut() {
+                field.tick_object_animations();
+            }
+        }
+        Ok(())
+    }
+
     fn update_field(&mut self, input: Input) -> Result<(), GameError> {
         if self.field.is_none() {
             return Ok(());
@@ -1370,6 +1455,7 @@ impl<'rom> Game<'rom> {
         if self.events.in_combat() {
             return self.update_combat(input);
         }
+        self.drift_backdrop();
         if self.events.in_dialogue() {
             if self.events.dialogue_in_task()
                 && let Some(field) = self.field.as_mut()
@@ -1381,6 +1467,7 @@ impl<'rom> Game<'rom> {
         if self.events.holding() {
             let mut step = HoldStep::Free;
             self.update_events(|events, host| step = events.update_hold(false, host))?;
+            self.after_hold_step()?;
             match step {
                 HoldStep::Held => return Ok(()),
                 HoldStep::Darkened => {
@@ -1497,6 +1584,12 @@ impl<'rom> Game<'rom> {
                 self.meet_enemy(enemy)?;
                 return Ok(true);
             }
+            Some(FieldEvent::PlayerSprite(sprite)) => {
+                let sheet = self.data.sprite_sheet(sprite)?;
+                if let Some(field) = self.field.as_mut() {
+                    field.set_sheet(0, sheet);
+                }
+            }
             Some(FieldEvent::Wrecked { actor: 0 }) => {
                 self.defeated = true;
                 self.events.fade_out_holding(DEFEAT_FADE_DELAY);
@@ -1523,9 +1616,14 @@ impl<'rom> Game<'rom> {
                 .as_ref()
                 .map_or((0, 0), |field| (field.player().column, field.player().row));
             Self::emit(&self.extensions, &Event::RoomEntered { map, cell });
-            self.play_map_music(map)?;
-            self.events.end(FIELD_WATCH);
-            self.run_handler(story::map_handler(map))?;
+            if self.events.start_music_after_loading(map) {
+                self.events.end(FIELD_WATCH);
+                self.arriving = Some(map);
+            } else {
+                self.play_map_music(map)?;
+                self.events.end(FIELD_WATCH);
+                self.run_map_handler(map)?;
+            }
         }
         Ok(())
     }
@@ -1533,18 +1631,24 @@ impl<'rom> Game<'rom> {
     /// Follows `exit` once the screen is black: loads the destination, runs
     /// its handler and starts its song, then holds black and brightens.
     fn warp(&mut self, exit: usize, black: u8) -> Result<(), GameError> {
+        self.effects.camera = None;
         let Some(field) = self.field.as_mut() else {
             return Ok(());
         };
         let from = field.map();
-        let destination = self.data.warp(from, exit).map_err(FieldError::from)?.map;
+        let mut warp = self.data.warp(from, exit).map_err(FieldError::from)?;
+        if let Some(redirect) = self.effects.redirect {
+            let (map, (column, row)) = redirect.apply(warp.map, (warp.column, warp.row));
+            (warp.map, warp.column, warp.row) = (map, column, row);
+        }
+        let destination = warp.map;
         self.objects.enter(
             &self.data,
             &mut self.state,
             destination,
             frame_counter(self.frame),
         );
-        let warp = field.warp(&self.data, exit)?;
+        let warp = field.warp_to(&self.data, warp)?;
         AreaObjects::place(&self.data, &self.state, destination, field)?;
         field.show_party_zoids(&self.data, &self.state)?;
         show_opened_chests(field, &self.windows);
@@ -1574,7 +1678,7 @@ impl<'rom> Game<'rom> {
         self.events.end(MAP_TASK);
         self.events.end(FIELD_HOOK);
         self.events.end(FIELD_WATCH);
-        self.run_handler(story::map_handler(arrived))
+        self.run_map_handler(arrived)
     }
 
     /// The player and the roaming enemy `enemy` ran into each other: the
@@ -1672,6 +1776,7 @@ impl<'rom> Game<'rom> {
         let mut field = Field::load(&self.data, point.map, point.cell)?;
         AreaObjects::place(&self.data, &self.state, point.map, &mut field)?;
         field.show_party_zoids(&self.data, &self.state)?;
+        field.set_sea_crossing(sea_crossing(&self.state));
         field.player_mut().face(Direction::Up);
         show_opened_chests(&mut field, &self.windows);
         self.field = Some(field);
@@ -1688,7 +1793,7 @@ impl<'rom> Game<'rom> {
         self.events.end(MAP_TASK);
         self.events.end(FIELD_HOOK);
         self.events.end(FIELD_WATCH);
-        self.run_handler(story::map_handler(point.map))
+        self.run_map_handler(point.map)
     }
 
     /// Starts leaving by exit `exit`, a door when `door`: the screen
@@ -1755,6 +1860,7 @@ impl<'rom> Game<'rom> {
             .or_else(|| self.data.map_music(map));
         if let Some(music) = music {
             Self::emit(&self.extensions, &Event::SoundRequested(music));
+            self.effects.song = u16::try_from(music).ok();
             self.sound.play_if_changed(music)?;
         }
         Ok(())
@@ -1973,6 +2079,10 @@ impl EventHost for Host<'_, '_> {
         }
     }
 
+    fn set_dialogue_variable(&mut self, slot: u8, value: u16) {
+        self.dialogue.set_var(slot, value);
+    }
+
     fn start_battle(&mut self, scene: u8) {
         match Staged::new(&self.data, scene) {
             Ok(stage) => *self.battle = Some(Box::new(stage)),
@@ -2082,6 +2192,7 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn play_music(&mut self, song: u16) {
+        self.effects.song = Some(song);
         let song = usize::from(song);
         Game::emit(self.extensions, &Event::SoundRequested(song));
         if let Err(error) = self.sound.play_if_changed(song) {
@@ -2090,6 +2201,7 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn restart_music(&mut self, song: u16) {
+        self.effects.song = Some(song);
         let song = usize::from(song);
         Game::emit(self.extensions, &Event::SoundRequested(song));
         if let Err(error) = self.sound.play(song) {
@@ -2106,6 +2218,7 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn load_map(&mut self, map: usize, player: (usize, usize), objects: u32, count: usize) {
+        self.effects.camera = None;
         let player = if player == crate::event::HERE {
             self.field
                 .as_ref()
@@ -2130,6 +2243,7 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn load_arena(&mut self, game: u8) -> usize {
+        self.effects.camera = None;
         let map = saga_arena::ARENA_MAP;
         self.objects.enter(&self.data, self.state, map, self.frame);
         let loaded = saga_arena::arena_objects(self.data.bytes(), self.state, usize::from(game))
@@ -2324,6 +2438,38 @@ impl EventHost for Host<'_, '_> {
         }
     }
 
+    fn redirect_warps(&mut self, redirect: WarpRedirect) {
+        self.effects.redirect = Some(redirect);
+    }
+
+    fn save_music(&mut self) {
+        self.effects.saved_music = self.effects.song.or_else(|| self.music_playing());
+    }
+
+    fn restore_music(&mut self) {
+        if let Some(song) = self.effects.saved_music {
+            self.play_music(song);
+        }
+    }
+
+    fn rebuild_objects(&mut self) {
+        self.objects
+            .rebuild_current(&self.data, self.state, self.frame);
+    }
+
+    fn set_sea_crossing(&mut self, crossing: bool) {
+        if let Some(byte) = self.state.first_mut() {
+            *byte = if crossing {
+                *byte | SEA_CROSSING_BIT
+            } else {
+                *byte & !SEA_CROSSING_BIT
+            };
+        }
+        if let Some(field) = self.field.as_mut() {
+            field.set_sea_crossing(crossing);
+        }
+    }
+
     fn set_whiten(&mut self, level: u8) {
         self.effects.whiten = level.min(WHITE_LEVELS);
     }
@@ -2454,6 +2600,12 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn warp(&mut self, map: usize, cell: (usize, usize), facing: Option<Direction>) -> usize {
+        self.effects.camera = None;
+        let (map, cell) = match self.effects.redirect {
+            Some(redirect) if cell != crate::event::HERE => redirect.apply(map, cell),
+            Some(redirect) => (redirect.apply(map, cell).0, cell),
+            None => (map, cell),
+        };
         let standing = self.field.as_ref().map(|field| {
             let player = field.player();
             ((player.column, player.row), player.facing)
@@ -2466,6 +2618,7 @@ impl EventHost for Host<'_, '_> {
         let loaded = Field::load(&self.data, map, cell).and_then(|mut field| {
             AreaObjects::place(&self.data, self.state, map, &mut field)?;
             field.show_party_zoids(&self.data, self.state)?;
+            field.set_sea_crossing(sea_crossing(self.state));
             Ok(field)
         });
         match loaded {
@@ -2525,6 +2678,18 @@ fn last_context(
 
 /// Starts string `index` of the dialogue table where the last string left
 /// the interpreter, as a task's call when `called`.
+/// Whether the party can cross the sea: bit 0 of the game state's first
+/// half-word, which chapter 8 sets once the Ultrasaurus comes (`0x080214E0`)
+/// and clears as it opens (`0x0802205C`).
+fn sea_crossing(state: &[u8]) -> bool {
+    state
+        .first()
+        .is_some_and(|byte| byte & SEA_CROSSING_BIT != 0)
+}
+
+/// See [`sea_crossing`].
+const SEA_CROSSING_BIT: u8 = 1;
+
 fn start_dialogue(
     dialogue: &mut ScriptRunner,
     scripts: &[ScriptRunner],

@@ -227,11 +227,11 @@ const BEAM_FLASH: &[Op] = &[
 ];
 
 /// The throne room for the opening (ROM `0x08669888`): the Emperor, and
-/// Gale, Blood and Obscura below.
+/// Gale, Blood and Opis below.
 const THRONE_OBJECTS: u32 = 0x0866_9888;
 const GALE: usize = 2;
 const BLOOD: usize = 3;
-const OBSCURA: usize = 4;
+const OPIS: usize = 4;
 /// The portal room (ROM `0x086698EC`): two soldiers.
 const PORTAL_ROOM_OBJECTS: u32 = 0x0866_98EC;
 /// The room above the base's bar (ROM `0x08669928`): the prince seated,
@@ -256,7 +256,7 @@ const JACK_COMES_IN: &[Op] = &[
     Op::End,
 ];
 
-/// The chapter's opening (task at `0x0801C028`): Blood and Obscura report
+/// The chapter's opening (task at `0x0801C028`): Blood and Opis report
 /// to the Emperor (`0x18D`); Gale is sent for the Death Saurer's data
 /// (`0x18E`) and the Emperor laughs (`0x18F`); in the portal room the
 /// soldiers sense the device in use again (`0x190`); in the room above the
@@ -265,11 +265,11 @@ const OPENING: &[Op] = &[
     Op::Wait(SETTLE),
     Op::Spawn(MAP_TASK + 1, GALE_STEPS_UP),
     Op::Spawn(MAP_TASK + 2, BLOOD_STEPS_UP),
-    glide16(OBSCURA, (0x90, 0x30), 1, true),
+    glide16(OPIS, (0x90, 0x30), 1, true),
     Op::Dialogue(0x18D),
     Op::Spawn(MAP_TASK + 1, BLOOD_LEAVES),
-    glide16(OBSCURA, (0x90, 0xC0), 1, true),
-    Op::Place(OBSCURA, OFF_THE_MAP),
+    glide16(OPIS, (0x90, 0xC0), 1, true),
+    Op::Place(OPIS, OFF_THE_MAP),
     glide16(GALE, (0x80, 0x30), 1, true),
     Op::Face(GALE, Direction::Up),
     Op::Dialogue(0x18E),
@@ -852,10 +852,6 @@ const FAREWELL: &[Op] = &[
     Op::End,
 ];
 const TO_CHAPTER_7: &[Op] = &warp_to(CHAPTER_7_START, (8, 2));
-
-/// Where the port's story stops: chapter 7's first map once Gale is
-/// beaten.
-pub(super) const STORY_END: (usize, u16) = (CHAPTER_7_START, GALE_BEATEN);
 
 /// The plains (`0x0801B284`): the portal brings the party the first time;
 /// then, as the story goes, Stinger's ambush, the wrecks and Raven's

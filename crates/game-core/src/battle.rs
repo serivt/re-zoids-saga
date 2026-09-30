@@ -746,7 +746,6 @@ impl StagedAttack {
             (record.party, record.enemy, false)
         };
         let weapon = attacker.weapon.ok_or(missing)?;
-        let quote = attacker.quote.ok_or(missing)?;
         let targets: Vec<SceneUnit> = if record.target_stands && other.zoid != 0 {
             vec![SceneUnit::staged(rom, &other, !enemy, STAGED_SLOT)]
         } else {
@@ -761,7 +760,8 @@ impl StagedAttack {
                 targets,
                 roll: 0,
                 aim: None,
-                staged: Some(quote),
+                staged: true,
+                staged_line: attacker.quote,
                 staged_reaction: other.quote.filter(|_| count > 0),
                 aim_only: false,
             },

@@ -118,7 +118,9 @@ frames.
 |---|---|
 | Entering a map | Held at 31 for a frame, then one level less each frame; the world runs in the frame the level reaches 0 |
 | Taking an exit, arrival at frame R | Level 1 at R+2 … level 31 and the load at R+32; black until R+42; level 30 at R+43 … 0 at R+73; the world runs at R+74. The tasks the map's handler spawned and the actors' animations already run at R+73, unless the handler loaded the map again (Arcana), whose tasks run with the world |
-| Cutscene load, event warp | 6 frames plus one per object |
+| Cutscene load, event warp | 6 frames plus one per object; an event warp (`0x08007188`) starts the map's song and then runs its handler once the objects are placed |
+| An event warp's fade in (`0x080014A8` with 1) | Two frames a level; its callback (`0x0800BEA4`) runs the field's hook and the objects' animations every frame of it, the player left as it is |
+| A map its handler loads again while a fade in holds | The fade waits for the load, and the map's song starts once the objects are placed |
 | Exit onto the world map (map 1) | Level 30 six frames later than a room's: the load takes longer |
 | Input | The game acts on the buttons of the frame before |
 | Display | A frame shows the field, the windows and the brightness as the frame before left them (see [field.md](field.md), Drawing) |
@@ -643,7 +645,7 @@ chapter's story:
 
 | Where | Handler | Condition | What happens | Sets |
 |---|---|---|---|---|
-| 205 | `0x0801BF40` | not `0x194` | The characters of group 5 are met (`0x080099F0`); the opening (task `0x0801C028`): Blood and Obscura report (`0x18D`), Gale is sent for the Death Saurer's data (`0x18E`, `0x18F`); the soldiers sense the device (213, `0x190`); Jack brings the news (214, `0x191`) | `0x194` |
+| 205 | `0x0801BF40` | not `0x194` | The characters of group 5 are met (`0x080099F0`); the opening (task `0x0801C028`): Blood and Opis report (`0x18D`), Gale is sent for the Death Saurer's data (`0x18E`, `0x18F`); the soldiers sense the device (213, `0x190`); Jack brings the news (214, `0x191`) | `0x194` |
 | 176 | `0x0801B284` | `0x194`, not `0x195` | The portal brings the Gustav (task `0x0801C35C`, `0x193`); return point 16 | `0x195` |
 | 177 | `0x0801B584` | `0x195`, not `0x196` | The view sweeps the festive streets, two pixels a frame for 192 frames (task `0x0801C47C`, `0x194`) | `0x196` |
 | 177 | | not `0x19C` | The hook `0x0801B618` (x `0x98` to `0xD8`, y `0x60`): to song 6 the party spots Gale (task `0x0801C4E0`, `0x19A` to `0x19C`) and follows him to the castle's grounds (178, `0x19D`) | `0x19C` |
@@ -700,10 +702,135 @@ but for the loads, the staged scenes' first shots, and the guards' wandering aft
 continue (the random numbers' state then differs, see [field.md](field.md)); a guard
 sees the player on the frame after it stands, as in the original.
 
+## Chapter 7
+
+Source of knowledge: own reading of the area's map handlers (`0x0801EBB4` to
+`0x0801EFFC`), the tasks and field hooks they install, the objects' code and the
+routines named below; checked against a reference emulator with saves patched to each
+scene's flags, as the earlier chapters'. Implemented in
+`crates/game-core/src/story/chapter7.rs`.
+
+Area 7 is maps 217 to 235: the forest (217), a Zoid map with the portal; the village
+(218); Blue Gem's house (220); Solid's camp (221) and its command room (222); the old
+fuel base where the Berserk Führer nests (224); and the Emperor's castle and the
+kingdom's base again (225 to 235). The chapter's story:
+
+| Where | Handler | Condition | What happens | Sets |
+|---|---|---|---|---|
+| 225 | `0x0801EF1C` | not `0x1AB` | The characters of group 6 are met (`0x080099FC`); the opening (task `0x0801F008`): Gale reports on the Death Saurer (`0x1E6`), a soldier reports that Fran has used the device and the Emperor sends Blood after her (`0x1E7`, `0x1E8`); the soldiers sense the device twice (228, `0x1E9`); Jack brings the news (234, `0x1EA`) | `0x1AB` |
+| 217 | `0x0801EBB4` | `0x1AB`, not `0x1AC` | The portal brings the party (task `0x0801F2CC`, `0x1EB`); the Berserk Führer charges (`0x1EC`) and Alster's Liger Zero cuts in (`0x1ED`); the hook `0x0801F47C` stages battle scenes 8 and 9 (the list at ROM `0x08669EF0`); Alster meets the party (task `0x0801F4B8`, `0x1EE`, `0x1EF`) and the hook `0x0801F5A0` takes it to the village (218) | `0x1AC` |
+| 220 | `0x0801ED3C` | `0x1AC`, not `0x1AD` | Blue Gem and Parti (task `0x0801F5D0`, `0x1F5` to `0x1F8`); blasts; at the village's gate (218, `0x1F9`, `0x1FA`) and in its square the Empire orders the forest burnt and Solid holds to it until the party offers to hunt the Führer (`0x1FB` to `0x1FF`); Alster and Parti join (lists 26 and 27); return point 17; back to the forest | `0x1AD` |
+| 217 | | `0x1AD`, not `0x1AF` | The hook `0x0801EC58` (x `0xA0` to `0x140`, y `0x260`): Solid sends the party to his camp first (task `0x0801FBDC`, `0x200`) and the player walks a cell back north | |
+| 221 | `0x0801EDB0` | `0x1AD`, not `0x1AE` | The soldier at the gate salutes Captain Solid and tells of a woman rescued (task `0x0801FC8C`, `0x201`) | `0x1AE` |
+| 222 | `0x0801EE1C` | `0x1AE`, not `0x1AF` | Fran in the command room (task `0x0801FCF4`, `0x202` to `0x204`) | `0x1AF` |
+| 224 | `0x0801EE94` | `0x1AF`, not `0x1B0` | The hook `0x0801EEC8` (`0xA0`, `0x40`): the lair (task `0x08020118`, `0x205`, `0x206`); story battle 29 (hook `0x08020208`); won, the plan is called off (task `0x0802028C`, `0x207`) | `0x1B0` |
+| 218 | `0x0801ECB4` | `0x1B0`, not `0x1B1`, the player on cell (22, 17) | The farewell (task `0x0802033C`): Solid leaves and Parti takes Fran home (`0x208` to `0x20B`); Solid asks Blue Gem to study the Führer's core (220, `0x20C`, `0x20D`); Blood raids the square (`0x20E` to `0x214`) and Fran leaves with him and the core (`0x215`); the party promises Blue Gem to get it back (`0x216`, `0x217`); Blue Gem gives four Zi data (`0x218`: `0x90`, `0x43`, `0x44`, `0x45`); the goodbyes (`0x219`), Alster and Parti leave; the hook `0x08020B98` warps to map 262, chapter 8's first | |
+
+Nothing sets `0x1B1`: chapter 8's first map sets `0x1B2`, and the party does not come
+back to the village's cell.
+
+The teachers use `0x08012090`: deck command 12 (`0x08006CEC`), and 4 (`0x080094B0`
+through `0x08009430`, dialogues `0x390` and `0x391` of the table at ROM `0x08328EC4`).
+The keepers (`0x08009318` on): item shops 13 and 14, armaments shops 20 and 21, and the
+labs 12 and 13.
+
+Battle scene 8 is the Führer's attack on the Liger Zero: its record's line is `0xFF`,
+so the attacker speaks as in a battle, its pilot's own line (`0x08042884`: the unit's
+line byte, `+0xD6`, is `0xFF`); see [battle.md](battle.md).
+
+What the chapter needed of the engine: a test of the player's cell (`Op::IfPlayer`),
+the player walked a cell in a given direction (`Op::StepPlayer`, entity command 10),
+and staged scenes whose attacker has no line of its own.
+
+Checked against the original, scene by scene from patched saves: the opening, the
+arrival and the staged fight to the village, Blue Gem's scene to the forest, the way
+south before the camp, the camp, Fran, the lair and story battle 29 (with the enemies'
+hit points kept at 1 in the original and the party given 9999 hit points and the
+protagonist overpowered in the port), and the farewell to chapter 8's first map. Every
+interval that no key bounds is equal but for the loads and the staged scenes' first
+shots; the portal's and the Gustav's idle animations run a phase apart after the
+continue, as in chapter 6.
+
+## Chapter 8
+
+Source of knowledge: own reading of the area's map handlers (`0x08020F24` to
+`0x0802214C`), the tasks and field hooks they install, the objects' code and the
+routines named below; checked against a reference emulator with saves patched to each
+scene's flags, as the earlier chapters'. Implemented in
+`crates/game-core/src/story/chapter8.rs`.
+
+Area 8 is maps 236 to 272: the world map (236); the plains around New Helic City (237),
+a Zoid map with the portal; the city's ruins (238); Raven's hideout (242); the
+Ultrasaurus's hold (243) and bridge (244); the ruins where Dr. D fits his cannon (245,
+246 once Blood is beaten); the island's ruins (247 to 251) and the western ruins (252 to
+256), each with three Planetal Sites; Eve Polis and its way (257, 258); and the
+Emperor's castle and the kingdom's base again (262 to 272). The chapter's story:
+
+| Where | Handler | Condition | What happens | Sets |
+|---|---|---|---|---|
+| 262 | `0x0802205C` | not `0x1B2` | The characters of group 7 are met (`0x08009A08`); the party is kept off the sea again (the game state's half-word 0, bit 0 cleared); the opening (task `0x08022158`): the Emperor dismisses Blood and Fran (`0x21A` to `0x21C`) and asks Opis for the Death Stinger (`0x21D` to `0x21F`); the soldiers sense the device (270, `0x220`); Jack brings the news (271, `0x221`) | `0x1B2` |
+| 237 | `0x080211B8` | `0x1B2`, not `0x1B3` | The portal brings the party (task `0x08022628`, `0x223`); blasts near it (`0x08016CA8`, `0x224`); Raven faces Hiltz (`0x225`); the hooks stage the Death Stinger's shot at Raven (`0x080227B8`, battle scene 10), Reese (task `0x080227F0`, `0x226` to `0x228`) and the charged particle beam (`0x080228B0`, scene 11); the beam whitens the field amid blasts (task `0x080228E8`, `0x0801D93C`, `0x0801D968`, `0x229`) | `0x1B3` |
+| 238 | `0x08021670` | `0x1B3`, not `0x1B4` | The party mourns the city (task `0x08022A00`, `0x22A`); return point 18 | `0x1B4` |
+| 238 | | `0x1B4`, not `0x1C8` | The hooks `0x08021814` (x `0x178` to `0x198`, y `0xE0`, sets `0x1C9`) and `0x0802185C` (y `0xF0`): Opis in the ruins (task `0x080252E0`, `0x22B` to `0x22E`) | `0x1C8` |
+| 237 | | `0x1C8`, not `0x1B5` | Blood claims the Death Stinger (task `0x08022A60`, `0x230`, `0x231`) | `0x1B5` |
+| 237 | | `0x1B5`, not `0x1B6` | The hook `0x080213F0` (`0x80`, `0x280`): Schwarz (task `0x08022AF0`, `0x232`) joins (list 28) | `0x1B6` |
+| 237 | | `0x1B6`, not `0x1B7` | The hook `0x0802144C` (x `0x180`, y `0x280` to `0x2E0`): the Ultrasaurus rises (task `0x08022BA0`, `0x233`, `0x234`), Schwarz leaves; in the hold Van and his friends (243, `0x235` to `0x237`); on the bridge Hiltz taunts the crew (244, `0x238` to `0x23B`); Van holds off the Hellcats (`0x23C`); the hook `0x08022EE8` builds the area's Zoids again (`0x08006E4C`) | `0x1B7` |
+| 237 | | `0x1B7`, not `0x1B9` | The hooks `0x080215C8` and `0x0802163C`: explosions on one of four cells at random (ROM `0x0866A7D0`); the Death Stinger (object 4, `0x080214B4`): Hiltz (task `0x0802307C`, `0x23D`), story battle 30 (hook `0x080230C4`); held off, it fires at the Ultrasaurus (task `0x08023134`, `0x23E`; hook `0x0802319C`, scene 12) and leaves (task `0x080231D8`, `0x23F`, `0x240`) | `0x1B9` |
+| 237 | | `0x1B9`, not `0x1BA` | The hook `0x080214E0` (x `0x180`, y `0x280` to `0x2E0`): Hermann's message (task `0x080232A4`, `0x241`); Dr. D and his Gravity Cannon (245, `0x242`, `0x243`), lists 29 and 30 join; the Planetal Sites (236, `0x244`); return point 21; the party may cross the sea (the game state's half-word 0, bit 0) | `0x1BA` |
+| 238 | | `0x1B3`, not `0x1C4`, not `0x1BB` | The hook `0x080217C0` (`0x218`, `0xC0`): Raven by the ruins (task `0x080235F8`, `0x246` to `0x248`) and in his hideout with Reese (242, `0x249`); they join (lists 31 and 32) | `0x1BB` |
+| 247, 250, 251, 252, 253, 255 | `0x08021A1C`, `0x08021E64`, `0x08021E84`, `0x08021EA4`, `0x08021F88`, `0x08021FB4` | | A Planetal Site (objects `0x08021B00` to `0x08021C84`), once found, stands open; spoken to the first time (task `0x08021DA0`): Earth reports it (`0x245`), Jack counts the ruin's left (`0x2D6` through `0x08021D1C`: script variable 0 is three less those found), and with all six Dr. D calls (`0x24A`). Entering a ruin's first room (247 on cell (23, 23), 252 on (20, 23)) with some of its sites left and Blood not beaten, Jack counts them (tasks `0x08021AC0`, `0x08021F48`) | `0x1BC` to `0x1C1`; 247 and 252 also set `0x1BA` |
+| 245 | `0x08021940` | the six sites, not `0x1C2` | Blood demands the Sites (task `0x080239F0`, `0x24B`); story battle 31 (hook `0x08023A74`); won, return point 19, Opis turns on Blood (task `0x08023B18`, `0x24C` to `0x24E`), the Gravity Cannon fires (hook `0x08023C50`, scene 13), Opis flees and Blood leaves (task `0x08023CA8`, `0x24F` to `0x252`); Dr. D finishes his cannon (`0x253`), lists 29 and 30 leave; the bridge (244, `0x255`) | `0x1C2` |
+| 243 | `0x080218E8` | `0x1C2`, not `0x1C6` | The second hook `0x08021918` sends the warps to 236 and 237 to the world map's cell (12, 16) | |
+| 236 | `0x08020F24` | `0x1C2`, not `0x1C3` | Jack's orders for the defense (task `0x08023E78`, `0x256`) | `0x1C3` |
+| 236 | | `0x1C3`, not `0x1C4` | The count of roaming battles won starts again (the game state's half-word `+0x0A`); the hook `0x08021050`: stepping onto cell (12, 16) with two won or fewer, the party goes back into the hold (task `0x080210F4`, hook `0x0802113C`); with more than two won, the cannon strikes (task `0x08023F94`, `0x257` to `0x25A`; hook `0x08024190`, scene 14) and the Death Stinger revives (task `0x080241C8`, `0x25B` to `0x25F`); with Raven along, he and Reese leave (`0x260`) | `0x1C4`, `0x199` |
+| 236 | | `0x1C4`, not `0x1C6` | Hermann (object 2, `0x08021168`, `0x261`) sends the party to Eve Polis (task `0x08024488`); return point 22 | `0x1C6`; clears `0x199` |
+| 237 | | `0x1C6`, not `0x1C7` | The second hook `0x0802155C` sends the warps to 257 to Eve Polis (258) | |
+| 258 | `0x08021FEC` | `0x1C6`, not `0x1C7` | Eve Polis (task `0x080245B4`, `0x262` to `0x265`): the Death Stinger merges with the Death Saurer; story battle 33 (hook `0x080247B0`); won, Van's plan (task `0x08024820`, `0x266` to `0x269`); story battle 34 (hook `0x08024974`); won, the last charge (task `0x080249E4`, `0x26A`, `0x26B`), battle scenes 15 to 18 (hook `0x08024A5C`, the list at ROM `0x0866A6B0`), the Death Saurer falls and Van meets the party on foot (task `0x08024A98`, `0x26C`, `0x26D`) | `0x1C7` |
+| 237 | | `0x1C7` | The hook `0x08021574` (`0x200`, `0x140`): Opis cornered at the portal (task `0x080250FC`, `0x26E`); story battle 35 (hook `0x080251F8`); won, the Zoid factor is already the Emperor's (task `0x08025260`, `0x26F`, `0x270`) and the hook `0x080252AC` warps to map 281, chapter 9's first | |
+
+Nothing reads `0x199`, and nothing sets `0x1B8` or `0x1C5`. The first rooms of the two
+ruins set `0x1BA` whenever they are entered: their handlers test what `0x08000F88`
+leaves in `r0`, which is the flag's own number, so the test always passes. Dialogues
+`0x222`, `0x22F` and `0x254` are never shown.
+
+The teachers use `0x08012090`: deck commands 7 (`0x08006D04`) and 15 (`0x08006D1C`),
+and 17 (`0x0800954C` through `0x08009430`, dialogues `0x3AB` and `0x3AC`). The keepers
+(`0x08009360` on): item shops 15 to 17, armaments shops 22 and 23, and the labs 14 to 16
+and 21.
+
+The sea: once Dr. D has shown his cannon, the party's Gustav may drive onto water (see
+[field.md](field.md), Water).
+
+What the chapter needed of the engine: a script variable set for a dialogue
+(`Op::DialogueCounting`), the sea crossing (`Op::SeaCrossing`), warps sent elsewhere
+(`Op::RedirectWarps`, the field's second hook), the song kept around staged scenes
+(`Op::SaveMusic`, `Op::RestoreMusic`), a random cell (`Op::PlaceRandom`), a map's cells
+walked on foot (`Op::CellTiles`), the area's Zoids built again (`Op::RebuildObjects`),
+the player's step tested (`Op::IfPlayerWalking`), an event warp's song, handler and
+fade callback as the original times them (the table above), the song a staged scene
+gives back taken from `0x02000B54` (which a battle's song leaves as it is), and the
+backdrop's scroll (see [field.md](field.md), Drawing).
+
+Checked against the original, scene by scene from patched saves: the opening, the
+arrival and the city razed, the ruins, Opis, Blood's claim, Schwarz, the Ultrasaurus
+to the explosions, the Death Stinger with story battle 30 and scene 12, Dr. D, Raven,
+the Planetal Sites and their count, Blood at the dig with story battle 31 and scene
+13, the defense's orders, Hermann, the cannon's strike (the count of battles won set
+to 3 in the original's memory, and in the port's save with the handler's reset of it
+left out for the test), Eve Polis with story battles 33 and 34 and scenes 15 to 18,
+and Opis cornered with story battle 35 up to chapter 9's first map (the story battles
+won with the enemies' hit points kept at 1 in the original and the party given 9999
+hit points in the port). Every interval that no key bounds is equal but for the
+continue's load, a Zoid map's load (the original's is 2 to 5 frames longer) and the
+staged scenes' reload (6 to 9 frames shorter in the port, as in chapters 6 and 7); the
+pictures differ only in the animations' phase after the continue and in the random
+cells of the barrage.
+
 ## The end of the demo (a port feature)
 
-Source of knowledge: this project's own design. The port's story stops where chapter 6
-does, in chapter 7's first map (225) once Gale is beaten (flag `0x19B`).
+Source of knowledge: this project's own design. The port's story stops where chapter 8
+does, in chapter 9's first map (281) once the true Death Saurer is beaten (flag
+`0x1C7`).
 When
 the player walks freely there in full light (after the scene's fade in, or after
 continuing a save made there), the game waits a second and ends the demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the

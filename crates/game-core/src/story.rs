@@ -13,6 +13,8 @@ mod chapter3;
 mod chapter4;
 mod chapter5;
 mod chapter6;
+mod chapter7;
+mod chapter8;
 
 use crate::event::{
     AT_THE_PORTAL, BELOW_THE_PORTAL, BLACK, ChestKind, EXIT_ARRIVAL, FIELD_HOOK, HERE, MAP_TASK,
@@ -1717,9 +1719,9 @@ const PORTAL_ARRIVAL_SOUND: u16 = 0x49;
 const PORTAL_BRINGS_STEP: usize = 32;
 /// Sand Colony's field, where the party goes on (map 31).
 const SAND_COLONY_FIELD: usize = 31;
-/// Where the port's story stops, and its demo ends: chapter 7's first map
-/// once chapter 6 is over.
-pub const DEMO_END: (usize, u16) = chapter6::STORY_END;
+/// Where the port's story stops, and its demo ends: chapter 9's first map
+/// once chapter 8 is over.
+pub const DEMO_END: (usize, u16) = chapter8::STORY_END;
 /// A cell off the map, left of its top row.
 const BESIDE_THE_MAP: (usize, usize) = (0xFF, 0);
 
@@ -2198,7 +2200,9 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
         _ => chapter3::map_handler(map)
             .or_else(|| chapter4::map_handler(map))
             .or_else(|| chapter5::map_handler(map))
-            .or_else(|| chapter6::map_handler(map)),
+            .or_else(|| chapter6::map_handler(map))
+            .or_else(|| chapter7::map_handler(map))
+            .or_else(|| chapter8::map_handler(map)),
     }
 }
 
@@ -2275,6 +2279,8 @@ pub fn talk_handler(address: u32) -> Option<&'static [Op]> {
             .or_else(|| chapter3::talk_handler(address))
             .or_else(|| chapter4::talk_handler(address))
             .or_else(|| chapter5::talk_handler(address))
-            .or_else(|| chapter6::talk_handler(address)),
+            .or_else(|| chapter6::talk_handler(address))
+            .or_else(|| chapter7::talk_handler(address))
+            .or_else(|| chapter8::talk_handler(address)),
     }
 }

@@ -260,9 +260,13 @@ pub struct Attack {
     /// For the party's attack, what the player's aim chooses from; the
     /// weapon and the targets come from it.
     pub aim: Option<AimSetup>,
-    /// For a staged scene (`0x0200EB84` bit 0), the `battle` string the
-    /// attacker speaks: the pauses are longer and A skips nothing.
-    pub staged: Option<usize>,
+    /// Whether it is a staged scene (`0x0200EB84` bit 0): the pauses are
+    /// longer and A skips nothing.
+    pub staged: bool,
+    /// For a staged scene whose attacker has a line of its own, that line
+    /// (the record's, a string of the special pilots' script); without
+    /// one it speaks its pilot's, as in a battle.
+    pub staged_line: Option<usize>,
     /// For a staged scene whose target has a line of its own, that line
     /// (the record's), spoken in place of its pilot's reaction.
     pub staged_reaction: Option<usize>,
@@ -657,11 +661,11 @@ impl AttackScene {
     }
 
     fn held_a(&self) -> bool {
-        self.attack.staged.is_none() && self.input.is_held(Button::A)
+        !self.attack.staged && self.input.is_held(Button::A)
     }
 
     fn pause_frames(&self) -> u32 {
-        if self.attack.staged.is_some() {
+        if self.attack.staged {
             STAGED_PAUSE_FRAMES
         } else {
             PAUSE_FRAMES
@@ -1020,8 +1024,8 @@ impl AttackScene {
         Ok(())
     }
 
-    /// The attacker's line (`0x08042884`): in a staged scene the scene's
-    /// own (`0x08042916`); for a weapon for its own side
+    /// The attacker's line (`0x08042884`): in a staged scene whose attacker
+    /// has one, the scene's own (`0x08042916`); for a weapon for its own side
     /// its pilot's fourth; for a weapon with a line of its own that line;
     /// otherwise one of its pilot's three, picked by the turn's first roll.
     /// (A special pilot's lines, ROM `0x755FE0`, belong to the staged
@@ -1034,7 +1038,7 @@ impl AttackScene {
         let pilot = self.attack.attacker.pilot;
         let part = self.weapon_part(&self.attack.attacker);
         let own_line = WEAPON_LINES.iter().find(|(weapon, _)| *weapon == part);
-        let (string, variant) = if let Some(quote) = self.attack.staged {
+        let (string, variant) = if let Some(quote) = self.attack.staged_line {
             (quote, 0)
         } else if self.own_side(rom) {
             (usize::from(pilot), QUOTE_OWN_SIDE)
@@ -1069,7 +1073,7 @@ impl AttackScene {
     fn after_reaction(&mut self) {
         self.entities.pause_shots(false);
         self.update_shots();
-        self.hold = if self.attack.staged.is_some() {
+        self.hold = if self.attack.staged {
             STAGED_REACTION_HOLD
         } else if self.skip == 0 {
             SKIPPED_REACTION_HOLD

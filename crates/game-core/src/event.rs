@@ -78,6 +78,15 @@ pub enum Op {
     /// Runs a string of the `dialogue` table, holding the game until it
     /// ends (`0x08008B58`).
     Dialogue(u16),
+    /// Runs dialogue string `index` as [`Op::Dialogue`] does, with script
+    /// variable 0 (`0x02007574`) set to how many of `flags` are clear, as
+    /// the count of what is left to find (`0x08021D1C`).
+    DialogueCounting {
+        /// The dialogue string.
+        index: u16,
+        /// The flags of what has been found.
+        flags: &'static [u16],
+    },
     /// Starts actor `actor` walking to `to` (entity command 10, or 11
     /// through everything); does not wait for it to arrive.
     Walk {
@@ -255,6 +264,26 @@ pub enum Op {
         columns: Option<(usize, usize)>,
         /// First and last row that count.
         rows: Option<(usize, usize)>,
+    },
+    /// Runs `then` while the player is taking a step (entity `+0x4A` at 2,
+    /// its cell already the one it steps onto), `otherwise` else.
+    IfPlayerWalking {
+        /// Program run when it is.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// Runs `then` when the player's cell is within `columns` and `rows`
+    /// (as [`Op::AwaitPlayer`] counts them), `otherwise` else.
+    IfPlayer {
+        /// First and last column that count.
+        columns: Option<(usize, usize)>,
+        /// First and last row that count.
+        rows: Option<(usize, usize)>,
+        /// Program run when it is.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
     },
     /// Waits until the player's sprite is within `x` and `y`, inclusive
     /// ranges of map pixels of its box's top-left (the hooks that test the
@@ -459,6 +488,16 @@ pub enum Op {
         /// Animation tick shift while walking.
         shift: i8,
     },
+    /// Walks the player from its cell to the one `by` cells away, not
+    /// through walls and actors (entity command 10 toward that cell).
+    StepPlayer {
+        /// Columns and rows to go.
+        by: (isize, isize),
+        /// Pixels a frame, 16.16 fixed point.
+        speed: i32,
+        /// Animation tick shift while walking.
+        shift: i8,
+    },
     /// Loads map `map` with `count` objects from the list at ROM address
     /// `objects` and the player on `player` (`0x080079E8`); the game holds
     /// while it decompresses and places one object a frame.
@@ -475,6 +514,27 @@ pub enum Op {
     /// Keeps the enemies from meeting the player (`0x02000008` bit 1 set),
     /// or lets them again.
     Calm(bool),
+    /// Lets the party cross the sea, or keeps it off the water (the game
+    /// state's half-word 0, bit 0).
+    SeaCrossing(bool),
+    /// Remembers the song the field or the story last asked for
+    /// (`0x02000B54`, which a battle's own song leaves as it is), as the
+    /// staged scenes' routine does before it plays theirs (`0x08012040`).
+    SaveMusic,
+    /// Plays the song [`Op::SaveMusic`] remembered again.
+    RestoreMusic,
+    /// Places actor `actor` on one of `cells`, drawn with the game's random
+    /// numbers (`0x08001080`, modulo their count).
+    PlaceRandom(usize, &'static [(usize, usize)]),
+    /// Makes the field's cells `tiles` tiles on a side (`0x0200000C +
+    /// 0x18`), as a cutscene does to walk people on a Zoid map.
+    CellTiles(usize),
+    /// Builds the area's roaming enemies and objects again (`0x08006E4C`).
+    RebuildObjects,
+    /// Sends the warps to another map until the next map's handler runs
+    /// (the field's second hook, `0x02000004`, which the warp routine
+    /// `0x08007188` calls with the destination).
+    RedirectWarps(WarpRedirect),
     /// Brightens the field's layers and sprites toward white, the windows
     /// left out (`BLDCNT` `0xBE` with `BLDY` at `level` of 16), or stops
     /// (level 0).
@@ -528,6 +588,8 @@ pub trait EventHost {
     /// Starts dialogue string `index`, as a task's call when `called`; the
     /// game holds until it ends.
     fn start_dialogue(&mut self, index: u16, called: bool);
+    /// Sets script variable `slot` of the dialogue just started.
+    fn set_dialogue_variable(&mut self, slot: u8, value: u16);
     /// Starts battle scene `scene`; the game holds until it ends.
     fn start_battle(&mut self, scene: u8);
     /// Opens `shop`; the game holds until it closes.
@@ -551,6 +613,16 @@ pub trait EventHost {
     fn load_arena(&mut self, game: u8) -> usize;
     /// Keeps the enemies from meeting the player, or lets them.
     fn set_calm(&mut self, calm: bool);
+    /// Lets the party cross the sea, or keeps it off the water.
+    fn set_sea_crossing(&mut self, crossing: bool);
+    /// Sends the warps elsewhere until the next map's handler runs.
+    fn redirect_warps(&mut self, redirect: WarpRedirect);
+    /// Builds the area's roaming enemies and objects again.
+    fn rebuild_objects(&mut self);
+    /// Remembers the song the field or the story last asked for.
+    fn save_music(&mut self);
+    /// Plays the song remembered again.
+    fn restore_music(&mut self);
     /// Brightens the field toward white by `level` of 16.
     fn set_whiten(&mut self, level: u8);
     /// The guard that last saw the player.
@@ -779,6 +851,9 @@ pub struct Events {
     /// The map a task's cutscene load brings, whose song starts once the
     /// load is over.
     loading_map: Option<usize>,
+    /// The song of a map a handler loaded while a fade in holds the game,
+    /// and the frames its load takes before the song starts.
+    handler_music: Option<(u32, usize)>,
     /// Whether a task's dialogue started this frame: the other tasks have
     /// had their turn in it already.
     dialogue_started: bool,
@@ -921,6 +996,14 @@ impl Events {
     /// (`dialogue_done`) lets the task that started it go on, then the
     /// tasks after it run; a fade moves a level.
     pub fn update_hold(&mut self, dialogue_done: bool, host: &mut impl EventHost) -> HoldStep {
+        if let Some((frames, map)) = self.handler_music {
+            if frames > 1 {
+                self.handler_music = Some((frames - 1, map));
+            } else {
+                self.handler_music = None;
+                host.start_map_music(map);
+            }
+        }
         match self.hold {
             None => HoldStep::Free,
             Some(
@@ -1005,6 +1088,24 @@ impl Events {
         }
     }
 
+    /// Whether a map's load holds the game.
+    #[must_use]
+    pub fn loading(&self) -> bool {
+        matches!(self.hold, Some(Hold::Loading { .. }))
+    }
+
+    /// Starts map `map`'s song once the load holding the game ends, as the
+    /// warp routine (`0x08007188`) does after placing the objects; `false`
+    /// when no load holds the game.
+    pub fn start_music_after_loading(&mut self, map: usize) -> bool {
+        if self.loading() {
+            self.loading_map = Some(map);
+            true
+        } else {
+            false
+        }
+    }
+
     /// The end of a load: the task that made it goes on, then the tasks
     /// after it run.
     fn end_loading(&mut self, slot: usize, host: &mut impl EventHost) {
@@ -1069,9 +1170,27 @@ impl Events {
     /// Runs the field's watch ([`FIELD_WATCH`]) for one frame, unless
     /// something holds the game.
     pub fn update_watch(&mut self, host: &mut impl EventHost) {
-        if self.hold.is_some() {
-            return;
+        if self.hold.is_none() {
+            self.step_watch(host);
         }
+    }
+
+    /// Whether a story warp's fade in holds the game (`0x080014A8` with 1):
+    /// its callback (`0x0800BEA4`) runs the field's hook and the objects
+    /// every frame of it.
+    #[must_use]
+    pub fn fading_in_slowly(&self) -> bool {
+        matches!(self.hold, Some(Hold::FadeIn { slow: true, .. }))
+    }
+
+    /// Runs the field's watch for one frame of a story warp's fade in.
+    pub fn update_watch_fading(&mut self, host: &mut impl EventHost) {
+        if self.fading_in_slowly() {
+            self.step_watch(host);
+        }
+    }
+
+    fn step_watch(&mut self, host: &mut impl EventHost) {
         if let Some(task) = self.tasks[FIELD_WATCH].as_mut() {
             if task.wait > 1 {
                 task.wait -= 1;
@@ -1165,16 +1284,10 @@ impl Events {
     fn execute(&mut self, slot: usize, op: Op, host: &mut impl EventHost) -> Flow {
         let op = resolve(op, host);
         match op {
+            op if starts_hold(&op) => self.wait(slot, op, host),
             Op::Wait(_)
-            | Op::Dialogue(_)
-            | Op::Battle(_)
-            | Op::Shop(_)
-            | Op::Combat
-            | Op::StoryBattle(_)
             | Op::WarpHome
             | Op::Freeze(_)
-            | Op::Script(..)
-            | Op::ChestName
             | Op::AwaitArrival(_)
             | Op::AwaitAnimation(_)
             | Op::AwaitStepEnd(..)
@@ -1201,6 +1314,8 @@ impl Events {
             | Op::IfRegulation { .. }
             | Op::IfSeen { .. }
             | Op::IfStateSet { .. }
+            | Op::IfPlayer { .. }
+            | Op::IfPlayerWalking { .. }
             | Op::IfPlayerSprite { .. }
             | Op::IfPlayerOn { .. }
             | Op::IfBattlesWon { .. }
@@ -1249,6 +1364,9 @@ impl Events {
             | Op::Animate(..)
             | Op::Shift(..)
             | Op::StepBack { .. }
+            | Op::StepPlayer { .. }
+            | Op::PlaceRandom(..)
+            | Op::CellTiles(_)
             | Op::Once(_)
             | Op::Pan(..) => {
                 if let Some(field) = host.field() {
@@ -1277,13 +1395,7 @@ impl Events {
                 }
                 return Flow::Yield;
             }
-            Op::Dialogue(_)
-            | Op::Script(..)
-            | Op::ChestName
-            | Op::Battle(_)
-            | Op::Shop(_)
-            | Op::Combat
-            | Op::StoryBattle(_) => {
+            op if starts_hold(&op) => {
                 self.advance(slot);
                 self.hold = Some(start_hold(slot, op, host));
                 self.dialogue_started = self.task_dialogue().is_some();
@@ -1313,7 +1425,12 @@ impl Events {
             } => {
                 host.load_map(map, player, objects, count);
                 if slot == IMMEDIATE {
-                    host.start_map_music(map);
+                    if matches!(self.hold, Some(Hold::FadeIn { .. })) {
+                        let frames = LOAD_FRAMES + u32::try_from(count).unwrap_or(u32::MAX);
+                        self.handler_music = Some((frames, map));
+                    } else {
+                        host.start_map_music(map);
+                    }
                 } else {
                     self.loading_map = Some(map);
                 }
@@ -1499,6 +1616,10 @@ impl Events {
 
     /// Ops that decide where the task goes next.
     fn branch(&mut self, slot: usize, op: Op, host: &mut impl EventHost) -> Flow {
+        if let Some((yes, then, otherwise)) = field_condition(op, host) {
+            self.push(slot, if yes { then } else { otherwise }, 1);
+            return Flow::Continue;
+        }
         let taken = |yes: bool, then, otherwise| if yes { then } else { otherwise };
         let program = match op {
             Op::IfFlags {
@@ -1542,28 +1663,12 @@ impl Events {
                 then,
                 otherwise,
             } => taken(host.meets_regulation(game), then, otherwise),
-            Op::IfSeen {
-                guards,
-                then,
-                otherwise,
-            } => taken(guard_sees(host, guards), then, otherwise),
             Op::IfStateSet {
                 at,
                 then,
                 otherwise,
             } => taken(host.state_byte(at) != 0, then, otherwise),
-            Op::IfPlayerSprite {
-                x,
-                y,
-                then,
-                otherwise,
-            } => taken(sprite_within(host, x, y), then, otherwise),
             Op::IfLost { then, otherwise } => taken(host.battle_lost(), then, otherwise),
-            Op::IfPlayerOn {
-                bits,
-                then,
-                otherwise,
-            } => taken(player_on(host, bits), then, otherwise),
             Op::IfBattlesWon {
                 more_than,
                 then,
@@ -1579,11 +1684,6 @@ impl Events {
                 then,
                 otherwise,
             } => taken(self.task_running(other), then, otherwise),
-            Op::IfPortal { then, otherwise } => taken(
-                host.field().and_then(|field| field.portal()).is_some(),
-                then,
-                otherwise,
-            ),
             Op::Call(program) => program,
             Op::Loop(_) | Op::Repeat(..) | Op::Spawn(..) => return self.start(slot, op),
             _ => return Flow::Stop,
@@ -1640,6 +1740,48 @@ impl Events {
 
 /// Whether the player's cell is within `columns` and `rows`, each an
 /// inclusive range when given.
+/// For a condition on the field (the player's place and step, a guard's
+/// sight, the portal), whether it holds and the programs it picks between.
+fn field_condition(
+    op: Op,
+    host: &mut impl EventHost,
+) -> Option<(bool, &'static [Op], &'static [Op])> {
+    match op {
+        Op::IfPlayerSprite {
+            x,
+            y,
+            then,
+            otherwise,
+        } => Some((sprite_within(host, x, y), then, otherwise)),
+        Op::IfPlayer {
+            columns,
+            rows,
+            then,
+            otherwise,
+        } => Some((player_within(host, columns, rows), then, otherwise)),
+        Op::IfPlayerWalking { then, otherwise } => {
+            let walking = host.field().is_some_and(|field| field.player().walking());
+            Some((walking, then, otherwise))
+        }
+        Op::IfPlayerOn {
+            bits,
+            then,
+            otherwise,
+        } => Some((player_on(host, bits), then, otherwise)),
+        Op::IfSeen {
+            guards,
+            then,
+            otherwise,
+        } => Some((guard_sees(host, guards), then, otherwise)),
+        Op::IfPortal { then, otherwise } => Some((
+            host.field().and_then(|field| field.portal()).is_some(),
+            then,
+            otherwise,
+        )),
+        _ => None,
+    }
+}
+
 fn player_within(
     host: &mut impl EventHost,
     columns: Option<(usize, usize)>,
@@ -1813,6 +1955,11 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::TakeChest => host.take_chest(),
         Op::Gift(reward) => host.set_gift(reward),
         Op::Calm(calm) => host.set_calm(calm),
+        Op::SeaCrossing(crossing) => host.set_sea_crossing(crossing),
+        Op::RedirectWarps(redirect) => host.redirect_warps(redirect),
+        Op::RebuildObjects => host.rebuild_objects(),
+        Op::SaveMusic => host.save_music(),
+        Op::RestoreMusic => host.restore_music(),
         Op::Whiten(level) => host.set_whiten(level),
         Op::AfterCombat => host.after_combat(),
         Op::RestartMapMusic => host.restart_map_music(),
@@ -1905,18 +2052,72 @@ fn command_actor(field: &mut Field, op: Op) {
         }
         Op::Pan(dx, dy) => field.pan_by(dx, dy),
         Op::StepBack { speed, shift } => {
-            let player = field.player_mut();
-            let (dx, dy) = player.facing.opposite().delta();
-            player.command = Command::WalkTo(Walk {
-                column: player.column.saturating_add_signed(dx),
-                row: player.row.saturating_add_signed(dy),
-                speed,
-                animation_shift: shift,
-                through: true,
-            });
+            let by = field.player().facing.opposite().delta();
+            step_player(field, by, speed, shift, true);
         }
+        Op::StepPlayer { by, speed, shift } => step_player(field, by, speed, shift, false),
+        Op::PlaceRandom(actor, cells) => {
+            let draw = usize::from(field.random());
+            if let Some(&cell) = cells.get(draw % cells.len().max(1)) {
+                field.place_actor(actor, cell);
+            }
+        }
+        Op::CellTiles(tiles) => field.set_cell_tiles(tiles),
         _ => {}
     }
+}
+
+/// Walks the player to the cell `by` cells from its own, `through` walls
+/// and actors or not.
+fn step_player(field: &mut Field, by: (isize, isize), speed: i32, shift: i8, through: bool) {
+    let player = field.player_mut();
+    player.command = Command::WalkTo(Walk {
+        column: player.column.saturating_add_signed(by.0),
+        row: player.row.saturating_add_signed(by.1),
+        speed,
+        animation_shift: shift,
+        through,
+    });
+}
+
+/// Where warps go instead while a map's second hook is set: those to a map
+/// within `from` go to `to`, on `cell` when given, else on the warp's own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WarpRedirect {
+    /// First and last map sent elsewhere.
+    pub from: (usize, usize),
+    /// The map they go to.
+    pub to: usize,
+    /// The cell they arrive on, when not the warp's.
+    pub cell: Option<(usize, usize)>,
+}
+
+impl WarpRedirect {
+    /// Where a warp to `cell` of `map` goes.
+    #[must_use]
+    pub fn apply(&self, map: usize, cell: (usize, usize)) -> (usize, (usize, usize)) {
+        if (self.from.0..=self.from.1).contains(&map) {
+            (self.to, self.cell.unwrap_or(cell))
+        } else {
+            (map, cell)
+        }
+    }
+}
+
+/// Whether `op` starts something the game holds for: a dialogue or
+/// another table's string, a battle scene, a shop or a battle.
+const fn starts_hold(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::Dialogue(_)
+            | Op::DialogueCounting { .. }
+            | Op::Script(..)
+            | Op::ChestName
+            | Op::Battle(_)
+            | Op::Shop(_)
+            | Op::Combat
+            | Op::StoryBattle(_)
+    )
 }
 
 /// Starts what `op` holds the game for, for the task in `slot`: a
@@ -1949,6 +2150,12 @@ fn start_hold(slot: usize, op: Op, host: &mut impl EventHost) -> Hold {
         }
         Op::Dialogue(index) => {
             host.start_dialogue(index, slot < IMMEDIATE);
+            Hold::Dialogue(slot)
+        }
+        Op::DialogueCounting { index, flags } => {
+            let left = flags.iter().filter(|&&flag| !host.flag(flag)).count();
+            host.start_dialogue(index, slot < IMMEDIATE);
+            host.set_dialogue_variable(0, u16::try_from(left).unwrap_or(u16::MAX));
             Hold::Dialogue(slot)
         }
         _ => Hold::Dialogue(slot),
@@ -1985,6 +2192,10 @@ mod tests {
 
         fn start_dialogue(&mut self, index: u16, _called: bool) {
             self.log.push(format!("dialogue {index}"));
+        }
+
+        fn set_dialogue_variable(&mut self, slot: u8, value: u16) {
+            self.log.push(format!("variable {slot} = {value}"));
         }
 
         fn start_battle(&mut self, scene: u8) {
@@ -2030,6 +2241,26 @@ mod tests {
 
         fn set_calm(&mut self, calm: bool) {
             self.log.push(format!("calm {calm}"));
+        }
+
+        fn set_sea_crossing(&mut self, crossing: bool) {
+            self.log.push(format!("sea crossing {crossing}"));
+        }
+
+        fn redirect_warps(&mut self, redirect: WarpRedirect) {
+            self.log.push(format!("redirect {redirect:?}"));
+        }
+
+        fn rebuild_objects(&mut self) {
+            self.log.push("rebuild".to_owned());
+        }
+
+        fn save_music(&mut self) {
+            self.log.push("save music".to_owned());
+        }
+
+        fn restore_music(&mut self) {
+            self.log.push("restore music".to_owned());
         }
 
         fn set_whiten(&mut self, level: u8) {

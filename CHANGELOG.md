@@ -25,15 +25,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Auto text:** the text boxes go on by themselves once their text has been on
     screen long enough to read, longer the more text they hold, with an AUTO mark on
     them; SELECT turns it on or off while one shows.
+- The story of chapter 7: Fran's flight through the device, the forest of the Berserk
+  Fury with Alster, Blue Gem, Palty and Solid, story battle 29 at the Fury's lair, and
+  Blood's raid on the village, with the area's shops, labs and teachers.
+- The story of chapter 8: the Death Stinger razes New Helic City; Schwarz, the
+  Ultrasaurus and Dr. D's Gravity Cannon; the six Planetal Sites and their count; Opis
+  turning on Blood; the defense of the Ultrasaurus; and story battles 30 to 35 up to
+  the true Death Saurer at Eve Polis, with the area's shops, labs and teachers. The
+  party may cross the sea once Dr. D has shown his cannon.
 
 ### Changed
 
+- The demo ends at the start of chapter 9.
+- A story warp starts the map's song and runs the map's handler once its objects are
+  placed, and its fade in runs the field's hook and the objects' animations, as in the
+  original; a map a handler loads again starts its song once loaded.
+- The song a staged battle scene gives back is the one the story last asked for, not
+  a battle's.
 - With a translation, the game's numbers (money, levels, hit points, the menus' figures
   and the battle messages) show in the translation's Latin digits instead of the
   Japanese font's, each in the place the original gives it.
 
 ### Fixed
 
+- The Gustav no longer drives over the sea (as in area 3's map 50) before the story
+  lets the party cross it.
+- The sea and the other backdrops drift and scroll as in the original: they move with
+  the camera but keep their place through map loads, and drift a pixel left every 16
+  frames.
 - **Screen tearing.** The window waits for the screen's vertical blank before showing a
   picture, so the picture no longer splits along a line that drifts up or down while
   the screen scrolls (seen on Windows); the game keeps the GBA's rate whatever the
