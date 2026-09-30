@@ -589,6 +589,14 @@ impl Combat {
         self.fight.overpowered = overpowered;
     }
 
+    /// Plays the attacks with their scenes, as the original, or without
+    /// them, as the enhanced mode can (a port feature): the enemies' attacks
+    /// then show only their outcome, and the party's scene stops at the
+    /// aim.
+    pub fn set_attack_scenes(&mut self, shown: bool) {
+        self.fight.quick = !shown;
+    }
+
     /// Draws from `rng` from now on, the vertical blank counter at
     /// `vblank` (IWRAM `0x03002338`): to replay a battle of the original's.
     pub fn resume_random(&mut self, rng: Rng, vblank: u16) {

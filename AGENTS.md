@@ -167,6 +167,7 @@ Placement rules:
 - **No translation data is committed.** PO files live in the translations repository and on players' machines, templates only on translators' machines; the repository holds only the exporter and the loader. Original Japanese text is copyrighted ROM content: it is produced by extraction on the user's machine and is never committed.
 - **`data/` is always gitignored.** Nothing derived from a ROM enters version control — including test fixtures, which must be synthetic. End users never see this directory; their extracted data lives in the OS user-data directory managed by the launcher.
 - **New code follows [docs/extensibility.md](docs/extensibility.md):** game logic reads data through a provider by stable identifier, behavior flows through events and hooks, and the engine's own features use the same contracts a mod would.
+- **Port conveniences live behind the enhanced mode.** A behavior the original never had and that changes how the game plays (skipped animations, faster text, other quality-of-life changes) is an `Enhancements` field in `game-core`'s `play_mode`, off by default and ignored in `PlayMode::Classic`, which must stay faithful to the original. Debugging aids stay behind the `debug-mode` feature instead.
 - Dependency direction is strictly downward: `apps → games → game-core → (gba-runtime, localization, extraction, formats) → platform`. A crate importing from a layer above it is an architecture violation.
 
 ## Code Style

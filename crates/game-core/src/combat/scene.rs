@@ -266,6 +266,11 @@ pub struct Attack {
     /// For a staged scene whose target has a line of its own, that line
     /// (the record's), spoken in place of its pilot's reaction.
     pub staged_reaction: Option<usize>,
+    /// Whether the scene is only the player's aim, as the enhanced mode
+    /// plays it without the attack scenes (a port feature): once the aim
+    /// is chosen the scene fades out with nothing fired, and the battle
+    /// applies the attack itself.
+    pub aim_only: bool,
 }
 
 /// What a scene asks of the battle as it runs.
@@ -861,7 +866,7 @@ impl AttackScene {
                 self.fade += FADE_STEP;
                 self.update_shots();
                 if self.fade > BLACK {
-                    self.step = if self.cancelled {
+                    self.step = if self.cancelled || self.attack.aim_only {
                         Step::End
                     } else {
                         Step::NextTarget
@@ -1153,7 +1158,11 @@ impl AttackScene {
                     side,
                     targets,
                 });
-                self.step = Step::Pause(PAUSE_FRAMES);
+                self.step = if self.attack.aim_only {
+                    Step::FadeOut
+                } else {
+                    Step::Pause(PAUSE_FRAMES)
+                };
             }
             AimOutcome::Cancelled => {
                 self.cancelled = true;

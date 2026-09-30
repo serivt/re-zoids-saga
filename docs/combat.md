@@ -1103,6 +1103,26 @@ few frames apart from the original's and the rolls mix in the frame counter.
   load (lines 16 to 93 in the traced scene). The port takes line 16 throughout, so a
   band that moves a pixel in a frame can show it some lines early.
 
+## Without the attack scenes (a port feature)
+
+Source of knowledge: this project's own design. The enhanced mode can turn the battle
+animations off (see [launcher.md](launcher.md), `Combat::set_attack_scenes`). The
+original has no such setting: its コンフィグ holds only the message speed.
+
+- **An enemy's attack.** The screen fades out as always (state 4000), and in place of
+  the scene (`0x1068`, `0x10CC`) the attack is applied at once (`0x08046918`,
+  `0x08033E40`); the return (`0x1388`) rebuilds the screen, fades in and shows the
+  outcome: the hit display, the explosions and the messages, as after a scene.
+- **The party's attack.** The scene runs until the player's aim (`0x1052`, `0x1054`),
+  since the aim lives in it; once a weapon and its targets are chosen the attacker's
+  view fades out with nothing fired, the scene ends as a finished one (`0x2000`) and
+  the battle applies the attack before the return. An aim given up rebuilds the screen
+  for the menu as in the original.
+
+The rolls, the damage and every other outcome are the original's; only the scenes'
+frames go. A battle of chapter 6 (on map 212, the A button pressed every other frame) took
+2427 frames without the scenes against 4621 with them.
+
 ## Debugging aid
 
 In the port's debugging mode (F10 in a launcher built with the `debug-mode` feature, see [field.md](field.md)) the

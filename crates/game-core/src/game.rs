@@ -45,6 +45,7 @@ use crate::field::{Command, Direction, Field, FieldError, FieldEvent};
 use crate::guide::{Cover, Guide, GuideError, GuideKind};
 use crate::menu::{MenuStep, Party, PauseMenu, Shop};
 use crate::objects::AreaObjects;
+use crate::play_mode::PlayMode;
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptContext, ScriptError, ScriptRunner};
 use crate::slots::{self, Pick, Purpose, Slot, SlotPicker};
@@ -289,6 +290,8 @@ pub struct Game<'rom> {
     debug: bool,
     /// The map and flag where the demo ends (see [`Game::set_demo_end`]).
     demo_end: Option<(usize, u16)>,
+    /// How the game plays (see [`Game::set_play_mode`]).
+    play_mode: PlayMode,
     events: Events,
     screen: Screen,
     pending_talk: Option<(Talk, u32)>,
@@ -385,6 +388,19 @@ impl<'rom> Game<'rom> {
         self.demo_end = end;
     }
 
+    /// Plays as the original, or with the port's enhancements (see
+    /// [`crate::play_mode`]). The launcher sets it before the game starts;
+    /// by default the game plays as the original.
+    pub fn set_play_mode(&mut self, mode: PlayMode) {
+        self.play_mode = mode;
+    }
+
+    /// How the game plays.
+    #[must_use]
+    pub fn play_mode(&self) -> PlayMode {
+        self.play_mode
+    }
+
     /// The extensions the game raises events to and asks questions of.
     #[must_use]
     pub fn extensions(&self) -> &SharedExtensions {
@@ -450,6 +466,7 @@ impl<'rom> Game<'rom> {
             field: None,
             debug: false,
             demo_end: Some(story::DEMO_END),
+            play_mode: PlayMode::default(),
             events: Events::new(),
             screen: Screen::Loading,
             pending_talk: None,
@@ -525,9 +542,11 @@ impl<'rom> Game<'rom> {
     /// Keeps what the field screen shows this frame: the original copies its
     /// sprite table, scroll, text layers and brightness at the vertical
     /// blank, so a frame shows them as the frame before left them. The
-    /// field or battle just set up takes the debugging mode too.
+    /// field or battle just set up takes the debugging mode and the play
+    /// mode's enhancements too.
     fn latch_screen(&mut self) {
         self.latch_debug_mode();
+        self.latch_enhancements();
         if let Some(field) = self.field.as_mut() {
             field.latch();
         }
@@ -551,6 +570,14 @@ impl<'rom> Game<'rom> {
         self.debug = !self.debug;
         self.latch_debug_mode();
         self.debug
+    }
+
+    /// Hands the enhancements that apply to the battle on screen.
+    fn latch_enhancements(&mut self) {
+        let enhancements = self.play_mode.enhancements();
+        if let Some(combat) = self.combat.as_mut() {
+            combat.set_attack_scenes(enhancements.battle_animations);
+        }
     }
 
     /// Hands the debugging mode to the field and the battle on screen.

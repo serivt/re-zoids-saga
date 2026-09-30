@@ -663,6 +663,10 @@ pub(super) struct Fight {
     /// The port's debugging aid: the protagonist's attacks always land
     /// and beat what they hurt.
     pub(super) overpowered: bool,
+    /// The enhanced mode without the attack scenes (a port feature): an
+    /// enemy's attack goes from the fade out straight to the return, and
+    /// the party's scene ends once the player has aimed.
+    pub(super) quick: bool,
     pub(super) order: Vec<(usize, usize)>,
     pub(super) index: usize,
     pub(super) rolls: [u16; ROLLS],
@@ -856,6 +860,10 @@ impl Combat {
                     self.fade = None;
                     Stage::StartScene
                 }),
+            Stage::StartScene if self.fight.quick && self.enemy_acts() => {
+                self.apply_attack();
+                Some(Stage::Return)
+            }
             Stage::StartScene => {
                 self.start_scene(rom);
                 Some(Stage::Scene)
@@ -868,10 +876,12 @@ impl Combat {
                 .then(|| {
                     self.fight.scene = None;
                     if std::mem::take(&mut self.fight.cancelled) {
-                        Stage::Rebuild
-                    } else {
-                        Stage::Return
+                        return Stage::Rebuild;
                     }
+                    if self.fight.quick {
+                        self.apply_attack();
+                    }
+                    Stage::Return
                 }),
             Stage::Rebuild => Some(self.rebuild()),
             Stage::AwaitRebuild => self
@@ -1198,6 +1208,7 @@ impl Combat {
                 aim,
                 staged: None,
                 staged_reaction: None,
+                aim_only: self.fight.quick,
             },
         ));
     }
@@ -1321,6 +1332,11 @@ impl Combat {
         self.sounds.extend(scene.take_sounds());
         self.fight.scene = Some(scene);
         Ok(())
+    }
+
+    /// Whether the actor is an enemy's unit.
+    fn enemy_acts(&self) -> bool {
+        self.actor().is_some_and(|(side, _)| side == ENEMY)
     }
 
     /// Whether the actor is the protagonist while the port's debugging aid

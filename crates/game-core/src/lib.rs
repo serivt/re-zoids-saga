@@ -12,6 +12,7 @@ pub mod game;
 pub mod guide;
 pub mod menu;
 pub mod objects;
+pub mod play_mode;
 pub mod port_text;
 pub mod rng;
 pub mod save;
@@ -34,6 +35,7 @@ pub use field::{
 };
 pub use game::{Game, GameError, Stage};
 pub use menu::{Member, MenuStep, Party, PauseMenu, Roster};
+pub use play_mode::{Enhancements, PlayMode};
 pub use rng::Rng;
 pub use save::{Found, SaveError, SaveFile, SavedGame};
 pub use script::{ScriptError, ScriptHost, ScriptRunner};
