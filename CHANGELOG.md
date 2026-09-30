@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   picture, so the picture no longer splits along a line that drifts up or down while
   the screen scrolls (seen on Windows); the game keeps the GBA's rate whatever the
   screen's refresh.
+- **Invisible enemies.** An enemy beaten on the world map or in a cave no longer comes
+  back unseen when its map loads again. It went after the party and started battles
+  without showing, so a visible enemy could seem to start one from afar; continuing a
+  save brought every enemy back and hid the problem.
 
 ## [0.2.0] - 2026-09-28
 

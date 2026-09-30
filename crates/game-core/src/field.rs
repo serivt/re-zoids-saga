@@ -865,8 +865,10 @@ impl Field {
     /// game-state block's object states, as the map loader does
     /// (`0x08007188`): object `n` (from 1) takes state `first + n − 1`,
     /// its sprite, cell, command and parameter; an object whose state is
-    /// gone is not loaded. `first` is `None` when the table has no state
-    /// for the map, which loads none of its objects.
+    /// gone is not loaded: its actor stays hidden and idle, so a beaten
+    /// roaming enemy neither shows nor goes after the player when its map
+    /// loads again. `first` is `None` when the table has no state for the
+    /// map, which loads none of its objects.
     ///
     /// # Errors
     ///
@@ -886,6 +888,7 @@ impl Field {
             let actor = &mut self.actors[index];
             let Some(state) = state else {
                 actor.visible = false;
+                actor.command = Command::Idle;
                 actor.slot = None;
                 continue;
             };
@@ -2048,6 +2051,21 @@ mod tests {
             }
         }
         assert_eq!(met, Some(FieldEvent::Encounter { enemy: 1 }));
+    }
+
+    #[test]
+    fn an_enemy_its_state_leaves_out_neither_shows_nor_meets_the_carrier() {
+        let mut field = zoid_field();
+        field.actors.push(enemy(5, 1));
+        let Ok(()) = field.apply_object_states(&GameData::new(&[]), &[], None) else {
+            panic!("no sprite is read for a state left out");
+        };
+        assert!(!field.actors[1].visible);
+        let footing = field.actors[1].footing();
+        for _ in 0..200 {
+            assert_eq!(field.update(Input::default()), None);
+        }
+        assert_eq!(field.actors[1].footing(), footing);
     }
 
     #[test]

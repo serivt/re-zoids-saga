@@ -117,7 +117,10 @@ Halfway through each step the stepping command also writes the character's metat
 into its object state at RAM `0x02000B5C + 0x50 + index × 16` (`+2` x, `+3` y). For maps
 whose record id has bit 15 the loader builds the objects from those states instead of
 the map's list (`0x08007188`): the sprite, the cell, the command and the parameter come
-from the state, and an object whose state lost bit 15 is not loaded. See
+from the state, and an object whose state lost bit 15 is not loaded: the port keeps its
+actor hidden and idle, so an enemy beaten on the map neither shows nor goes after the
+player when the map loads again within the same area (the table is rebuilt, and the
+enemies back, only on entering another area or on a continue). See
 [formats/save.md](formats/save.md) and [combat.md](combat.md) for how the states are
 built. The port writes an actor's cell back every frame, from the cell that stops
 blocking halfway, which is the same value.
