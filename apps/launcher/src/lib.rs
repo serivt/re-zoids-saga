@@ -5,6 +5,7 @@
 
 mod download;
 mod front;
+mod pacing;
 mod quit;
 mod saves;
 mod settings;
@@ -377,7 +378,6 @@ fn play(
     };
     display.set_touch_pad(touch)?;
     let volume = i32::from(settings.volume);
-    let full = i32::from(settings::FULL_VOLUME);
     let mut audio = match display.open_audio(SAMPLE_RATE) {
         Ok(audio) => Some(audio),
         Err(error) => {
@@ -389,8 +389,14 @@ fn play(
     let metrics = game_core::TextMetrics::standard();
     let mut quitting: Option<quit::QuitPrompt> = None;
     let mut settling = false;
+    let mut pacer = pacing::Pacer::new(FRAME_DURATION, std::time::Instant::now());
     loop {
-        let started = std::time::Instant::now();
+        let now = std::time::Instant::now();
+        let due = pacer.due(now);
+        if due == 0 {
+            std::thread::sleep(pacer.until_next(now));
+            continue;
+        }
         for event in display.poll_events() {
             match event {
                 Event::Quit => return Ok(()),
@@ -428,24 +434,15 @@ fn play(
             }
         }
         settling &= input != Input::default();
-        if quitting.is_none() {
+        for _ in 0..due {
+            if quitting.is_some() {
+                break;
+            }
             game.update(if settling { Input::default() } else { input })?;
-        }
-        if let Some(audio) = &mut audio
-            && quitting.is_none()
-            && audio.queued_pairs() < SAMPLES_PER_FRAME * AUDIO_QUEUE_FRAMES
-        {
-            if volume == full {
-                audio.queue(game.audio())?;
-            } else {
-                let quieter: Vec<i16> = game
-                    .audio()
-                    .iter()
-                    .map(|&sample| {
-                        i16::try_from(i32::from(sample) * volume / full).unwrap_or(sample)
-                    })
-                    .collect();
-                audio.queue(&quieter)?;
+            if let Some(audio) = &mut audio
+                && audio.queued_pairs() < SAMPLES_PER_FRAME * AUDIO_QUEUE_FRAMES
+            {
+                queue_audio(audio, game.audio(), volume)?;
             }
         }
         game.draw(&mut frame);
@@ -455,8 +452,22 @@ fn play(
             });
         }
         display.present(&frame)?;
-        std::thread::sleep(FRAME_DURATION.saturating_sub(started.elapsed()));
     }
+}
+
+/// Queues a frame's `samples` at `volume` percent.
+fn queue_audio(audio: &mut impl AudioOut, samples: &[i16], volume: i32) -> Result<()> {
+    let full = i32::from(settings::FULL_VOLUME);
+    if volume == full {
+        audio.queue(samples)?;
+    } else {
+        let quieter: Vec<i16> = samples
+            .iter()
+            .map(|&sample| i16::try_from(i32::from(sample) * volume / full).unwrap_or(sample))
+            .collect();
+        audio.queue(&quieter)?;
+    }
+    Ok(())
 }
 
 fn export_template(rom: &[u8], path: &Path, scopes: &[String]) -> Result<()> {

@@ -2116,8 +2116,13 @@ pub fn run(display: &mut Sdl3Display, settings_path: Option<&Path>) -> Result<Op
         gba_runtime::ppu::SCREEN_HEIGHT,
         Rgb::default(),
     );
+    let mut pacer = crate::pacing::Pacer::new(crate::FRAME_DURATION, std::time::Instant::now());
     loop {
-        let started = std::time::Instant::now();
+        let now = std::time::Instant::now();
+        if pacer.due(now) == 0 {
+            std::thread::sleep(pacer.until_next(now));
+            continue;
+        }
         let events = display.poll_events();
         front.gamepads = display.gamepads();
         if front.events(&events) {
@@ -2157,7 +2162,6 @@ pub fn run(display: &mut Sdl3Display, settings_path: Option<&Path>) -> Result<Op
         }
         front.draw(&mut frame);
         display.present(&frame)?;
-        std::thread::sleep(crate::FRAME_DURATION.saturating_sub(started.elapsed()));
     }
 }
 

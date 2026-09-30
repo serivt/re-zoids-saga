@@ -69,6 +69,18 @@ folder where SDL keeps a program's preferences (Application Support on macOS,
 Esc on the launcher's screen, or while the game plays, asks before closing (No is chosen
 at first; Esc again stays), and the game waits while it asks.
 
+The game runs at the GBA's rate, a frame every 16.743 ms (280 896 cycles of its clock),
+about 59.73 a second, whatever the screen's refresh. The window waits for the screen's
+vertical blank before it shows a picture (vsync, SDL's `SDL_RENDER_VSYNC`), so a picture
+never shows half drawn: without it a screen tears, the top of the picture showing one
+frame and the bottom the one before, along a line that drifts up or down as the game's
+rate and the screen's differ. Each time around, the launcher runs the frames due since
+the last (usually one, none now and then on a 60 Hz screen, which shows a picture twice
+about every 4 seconds, as before) and waits for the next only when none is due, which
+paces a screen without vsync too; a hold up longer than 4 frames is skipped rather than
+caught up (`apps/launcher/src/pacing.rs`). The sound takes each frame's samples as
+before, so it keeps the game's rate. Source of knowledge: this project's own design.
+
 On Android the launcher is the same, answering taps, with the options of the on-screen
 pad and the saves' export and import in place of the window's and the keyboard's; see
 [android.md](android.md).

@@ -26,6 +26,9 @@ use sdl3::video::{WindowContext, WindowPos};
 use sdl3::{EventPump, Sdl};
 
 const BACKEND: &str = "sdl3";
+/// The hint that makes a renderer wait for the screen's vertical blank
+/// before it shows a picture, so none shows half drawn (tearing).
+const VSYNC_HINT: &str = "SDL_RENDER_VSYNC";
 const AUDIO_CHANNELS: i32 = 2;
 const BYTES_PER_PAIR: usize = 4;
 const BYTES_PER_PIXEL: usize = 3;
@@ -96,6 +99,7 @@ impl Sdl3Display {
             .position_centered()
             .build()
             .map_err(backend_error)?;
+        sdl3::hint::set(VSYNC_HINT, "1");
         let mut canvas = window.into_canvas();
         canvas
             .set_logical_size(

@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the battle messages) show in the translation's Latin digits instead of the
   Japanese font's, each in the place the original gives it.
 
+### Fixed
+
+- **Screen tearing.** The window waits for the screen's vertical blank before showing a
+  picture, so the picture no longer splits along a line that drifts up or down while
+  the screen scrolls (seen on Windows); the game keeps the GBA's rate whatever the
+  screen's refresh.
+
 ## [0.2.0] - 2026-09-28
 
 ### Added
