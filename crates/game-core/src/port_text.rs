@@ -55,6 +55,10 @@ pub const OPTIONS_SPEED_HELP: &str = "port/options/speed-help";
 pub const OPTIONS_ANIMATIONS: &str = "port/options/battle-animations";
 /// See [`OPTIONS_ANIMATIONS`].
 pub const OPTIONS_ANIMATIONS_HELP: &str = "port/options/battle-animations-help";
+/// The damage numbers' line and help.
+pub const OPTIONS_DAMAGE_NUMBERS: &str = "port/options/damage-numbers";
+/// See [`OPTIONS_DAMAGE_NUMBERS`].
+pub const OPTIONS_DAMAGE_NUMBERS_HELP: &str = "port/options/damage-numbers-help";
 /// A setting that is on, and off.
 pub const OPTIONS_ON: &str = "port/options/on";
 /// See [`OPTIONS_ON`].
@@ -231,6 +235,8 @@ pub const LAUNCHER_ENHANCED: &str = "port/launcher/enhanced";
 /// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_BATTLE_ANIMATIONS: &str = "port/launcher/battle-animations";
 /// See [`LAUNCHER_MODE`].
+pub const LAUNCHER_DAMAGE_NUMBERS: &str = "port/launcher/damage-numbers";
+/// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_PICK_MODE: &str = "port/launcher/pick-mode";
 /// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_CLASSIC_NOTE: &str = "port/launcher/classic-note";
@@ -337,6 +343,11 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         LAUNCHER_BATTLE_ANIMATIONS,
         "Battle animations",
         "The enhanced mode's line that shows or skips the battles' attack scenes",
+    ),
+    launcher(
+        LAUNCHER_DAMAGE_NUMBERS,
+        "Damage numbers",
+        "The enhanced mode's line that shows the damage each unit takes as a number under it",
     ),
     launcher_line(
         LAUNCHER_PICK_MODE,
@@ -771,6 +782,18 @@ pub const PORT_TEXTS: &[PortText] = &[
         key: OPTIONS_ANIMATIONS_HELP,
         text: "ＯＦＦで攻撃シーンを省略",
         note: "The help line for the battle animations: off skips the attack scenes; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: OPTIONS_DAMAGE_NUMBERS,
+        text: "ダメージ表示",
+        note: "The pause menu's settings, enhanced mode: the damage numbers' line, before its value at cell 13 (96 pixels)",
+        pixels: 96,
+    },
+    PortText {
+        key: OPTIONS_DAMAGE_NUMBERS_HELP,
+        text: "受けたダメージを数字で表示",
+        note: "The help line for the damage numbers: on shows each unit's damage as a number under it; 224 pixels",
         pixels: 224,
     },
     PortText {

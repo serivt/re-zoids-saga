@@ -106,6 +106,8 @@ translated message wider than its note allows.
 | `port/options/speed-help` | 戦闘メッセージの速さ　１が速い | Its help line, 224 pixels |
 | `port/options/battle-animations` | 戦闘アニメ | The battle animations' line, 96 pixels |
 | `port/options/battle-animations-help` | ＯＦＦで攻撃シーンを省略 | Its help line, 224 pixels |
+| `port/options/damage-numbers` | ダメージ表示 | The damage numbers' line, 96 pixels |
+| `port/options/damage-numbers-help` | 受けたダメージを数字で表示 | Its help line, 224 pixels |
 | `port/options/on`, `port/options/off` | ＯＮ, ＯＦＦ | A setting's value, 48 pixels |
 | `port/options/keys` | 左右：変更　Ｂ：もどる | The help's second line, 224 pixels |
 | `port/demo/thanks` | あそんでくれて　ありがとう！ and two more lines | The thanks at the end of the demo, 3 lines of 224 pixels |

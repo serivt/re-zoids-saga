@@ -13,10 +13,11 @@ use super::{HELP_WINDOW, LEAVE_SOUND, MENU_MOVE_SOUND, MENU_WINDOW, MenuState, P
 use crate::ScriptHost;
 use crate::guide::GuideError;
 use crate::menu::MenuStep;
-use crate::play_mode::Enhancements;
+use crate::play_mode::{Enhancement, Enhancements};
 use crate::port_text::{
-    OPTIONS_ANIMATIONS, OPTIONS_ANIMATIONS_HELP, OPTIONS_KEYS, OPTIONS_OFF, OPTIONS_ON,
-    OPTIONS_SPEED, OPTIONS_SPEED_HELP, full_width, port_text,
+    OPTIONS_ANIMATIONS, OPTIONS_ANIMATIONS_HELP, OPTIONS_DAMAGE_NUMBERS,
+    OPTIONS_DAMAGE_NUMBERS_HELP, OPTIONS_KEYS, OPTIONS_OFF, OPTIONS_ON, OPTIONS_SPEED,
+    OPTIONS_SPEED_HELP, full_width, port_text,
 };
 use crate::script::{MOVED_DOWN, MOVED_LEFT, MOVED_RIGHT, MOVED_UP, ScriptRunner};
 use crate::windows::ScriptWindows;
@@ -43,14 +44,33 @@ const CONFIRMED: u16 = 1;
 /// The message speeds, fastest first.
 const SPEEDS: std::ops::RangeInclusive<u16> = 1..=5;
 
-/// A line of the list.
+/// A line of the list: the message speed, or an enhancement on or off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Setting {
     MessageSpeed,
-    BattleAnimations,
+    Enhancement(Enhancement),
 }
 
-const SETTINGS: [Setting; 2] = [Setting::MessageSpeed, Setting::BattleAnimations];
+const SETTINGS: [Setting; 3] = [
+    Setting::MessageSpeed,
+    Setting::Enhancement(Enhancement::BattleAnimations),
+    Setting::Enhancement(Enhancement::DamageNumbers),
+];
+
+impl Setting {
+    /// The line's label and its help.
+    fn texts(self) -> (&'static str, &'static str) {
+        match self {
+            Self::MessageSpeed => (OPTIONS_SPEED, OPTIONS_SPEED_HELP),
+            Self::Enhancement(Enhancement::BattleAnimations) => {
+                (OPTIONS_ANIMATIONS, OPTIONS_ANIMATIONS_HELP)
+            }
+            Self::Enhancement(Enhancement::DamageNumbers) => {
+                (OPTIONS_DAMAGE_NUMBERS, OPTIONS_DAMAGE_NUMBERS_HELP)
+            }
+        }
+    }
+}
 
 /// The enhanced mode's settings the menu offers, and the list while it is
 /// on screen.
@@ -163,11 +183,11 @@ impl PauseMenu {
                 self.party.message_speed = next;
                 next != speed
             }
-            Setting::BattleAnimations => {
+            Setting::Enhancement(enhancement) => {
                 let Some(enhancements) = self.options.enhancements.as_mut() else {
                     return false;
                 };
-                enhancements.battle_animations = !enhancements.battle_animations;
+                enhancements.toggle(enhancement);
                 true
             }
         }
@@ -182,18 +202,16 @@ impl PauseMenu {
             if index > 0 {
                 windows.line_break(LIST_WINDOW);
             }
-            let (label, value) = match setting {
-                Setting::MessageSpeed => (
-                    OPTIONS_SPEED,
-                    full_width(u32::from(self.party.message_speed)),
-                ),
-                Setting::BattleAnimations => {
-                    let shown = self
+            let (label, _) = setting.texts();
+            let value = match *setting {
+                Setting::MessageSpeed => full_width(u32::from(self.party.message_speed)),
+                Setting::Enhancement(enhancement) => {
+                    let on = self
                         .options
                         .enhancements
-                        .is_none_or(|enhancements| enhancements.battle_animations);
-                    let key = if shown { OPTIONS_ON } else { OPTIONS_OFF };
-                    (OPTIONS_ANIMATIONS, port_text(&extensions, key))
+                        .unwrap_or_default()
+                        .is_on(enhancement);
+                    port_text(&extensions, if on { OPTIONS_ON } else { OPTIONS_OFF })
                 }
             };
             put_text(windows, &port_text(&extensions, label));
@@ -209,10 +227,7 @@ impl PauseMenu {
     /// keys.
     fn describe_option(&self, windows: &mut ScriptWindows<'_>) {
         let extensions = windows.extensions().clone();
-        let help = match SETTINGS[self.options.line] {
-            Setting::MessageSpeed => OPTIONS_SPEED_HELP,
-            Setting::BattleAnimations => OPTIONS_ANIMATIONS_HELP,
-        };
+        let (_, help) = SETTINGS[self.options.line].texts();
         windows.clear_window(HELP_WINDOW);
         for ch in port_text(&extensions, help).chars() {
             windows.put_char(HELP_WINDOW, ch);

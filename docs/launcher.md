@@ -34,6 +34,9 @@ Game mode chooses how the game plays, on a screen of its own:
     from the fade out straight to its outcome on the battle's screen, and the party's
     scene stops once the player has aimed (see [combat.md](combat.md), Without the
     attack scenes).
+  - *Damage numbers* on shows, besides each hit's message, the damage every unit
+    takes as a number under it for a moment (see [combat.md](combat.md), Damage
+    numbers).
 
 The mode is set before the game starts (`Game::set_play_mode`, see
 `crates/game-core/src/play_mode.rs`) and does not change while it plays; saves are the

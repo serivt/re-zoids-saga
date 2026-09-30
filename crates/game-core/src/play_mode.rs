@@ -23,13 +23,51 @@ pub struct Enhancements {
     /// enemy's attack goes straight to its outcome and the party's scene
     /// stops once the player has aimed.
     pub battle_animations: bool,
+    /// Whether a battle shows the damage each unit takes as a number under
+    /// it for a moment, besides the message.
+    pub damage_numbers: bool,
 }
 
 impl Default for Enhancements {
     fn default() -> Self {
         Self {
             battle_animations: true,
+            damage_numbers: false,
         }
+    }
+}
+
+/// One of the enhanced mode's conveniences, each on or off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Enhancement {
+    /// See [`Enhancements::battle_animations`].
+    BattleAnimations,
+    /// See [`Enhancements::damage_numbers`].
+    DamageNumbers,
+}
+
+impl Enhancement {
+    /// Every enhancement, in the order the lists show them.
+    pub const ALL: [Self; 2] = [Self::BattleAnimations, Self::DamageNumbers];
+}
+
+impl Enhancements {
+    /// Whether `enhancement` is on.
+    #[must_use]
+    pub fn is_on(self, enhancement: Enhancement) -> bool {
+        match enhancement {
+            Enhancement::BattleAnimations => self.battle_animations,
+            Enhancement::DamageNumbers => self.damage_numbers,
+        }
+    }
+
+    /// Turns `enhancement` on or off, the other way than it is.
+    pub fn toggle(&mut self, enhancement: Enhancement) {
+        let flag = match enhancement {
+            Enhancement::BattleAnimations => &mut self.battle_animations,
+            Enhancement::DamageNumbers => &mut self.damage_numbers,
+        };
+        *flag = !*flag;
     }
 }
 
@@ -53,14 +91,27 @@ mod tests {
     fn the_classic_mode_ignores_the_enhancements_chosen() {
         let chosen = Enhancements {
             battle_animations: false,
+            damage_numbers: true,
         };
         assert!(PlayMode::Classic.enhancements().battle_animations);
-        assert!(!PlayMode::Enhanced(chosen).enhancements().battle_animations);
+        assert!(!PlayMode::Classic.enhancements().damage_numbers);
+        assert_eq!(PlayMode::Enhanced(chosen).enhancements(), chosen);
+    }
+
+    #[test]
+    fn toggling_an_enhancement_changes_only_it() {
+        let mut enhancements = Enhancements::default();
+        enhancements.toggle(Enhancement::DamageNumbers);
+        assert!(enhancements.is_on(Enhancement::DamageNumbers));
+        assert!(enhancements.is_on(Enhancement::BattleAnimations));
+        enhancements.toggle(Enhancement::BattleAnimations);
+        assert!(!enhancements.is_on(Enhancement::BattleAnimations));
     }
 
     #[test]
     fn the_enhancements_start_as_the_original_plays() {
         assert_eq!(PlayMode::default(), PlayMode::Classic);
         assert!(Enhancements::default().battle_animations);
+        assert!(!Enhancements::default().damage_numbers);
     }
 }

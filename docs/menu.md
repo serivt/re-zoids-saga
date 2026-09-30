@@ -542,12 +542,13 @@ the original's. In the classic mode コンフィグ is the original's (above). I
 mode (see [launcher.md](launcher.md)) it lists every setting the game lets the player
 change while it plays: window 4, a light menu like the save slots', takes the columns
 from the main list's right edge to the screen's, 8 rows high to cover the status panel,
-a line per setting with its value from cell 13: the message speed (１ to ５, the
-original's, stored in the party as its list does) and the battle animations (ＯＮ or
-ＯＦＦ, see [combat.md](combat.md), Without the attack scenes). The help line says what
+a line per setting with its value from cell 13: the message speed (１ to ５, the original's, stored in the party as its list does), the
+battle animations (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Without the attack scenes)
+and the damage numbers (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Damage numbers). The
+help line says what
 the setting under the cursor does, and below it the keys. Up and down move (`0x40`);
 left and right, or A, change the value (`0x40`), the speed stopping at its ends and the
-animations switching; B plays `0x3F` and goes back to the main list with the cursor on
+enhancements switching; B plays `0x3F` and goes back to the main list with the cursor on
 コンフィグ. The settings hold from then on; the launcher remembers the enhancements for
 the next game. The port's messages are keyed `port/options/...` (see
 [translation.md](translation.md)). Implemented in `crates/game-core/src/menu/options.rs`.

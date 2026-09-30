@@ -589,6 +589,7 @@ impl<'rom> Game<'rom> {
         let enhancements = self.play_mode.enhancements();
         if let Some(combat) = self.combat.as_mut() {
             combat.set_attack_scenes(enhancements.battle_animations);
+            combat.set_damage_numbers(enhancements.damage_numbers);
         }
     }
 

@@ -1123,6 +1123,25 @@ The rolls, the damage and every other outcome are the original's; only the scene
 frames go. A battle of chapter 6 (on map 212, the A button pressed every other frame) took
 2427 frames without the scenes against 4621 with them.
 
+## Damage numbers (a port feature)
+
+Source of knowledge: this project's own design; the digits and the places are the
+original's. The enhanced mode can show the damage each unit takes as a number (see
+[launcher.md](launcher.md), `Combat::set_damage_numbers`); the original only says it in
+the hit's message.
+
+As the hit display starts (`0x0802D36C`), every unit a blow landed on shows its damage
+(the blow's 16.16 amount, at most 9999) in the orange digits of the figures L shows
+(ROM `0x3664EC`, palette `0x366238`), 7 pixels apart and outlined in their own shadow
+color. The number is centered on the unit's place, the bottom center of its sprite, and
+rests right under it, rising the 6 pixels to there a pixel a frame; the front row's rest
+higher, over their feet, so that the number ends above the message window (row 128),
+which covers it while it rises. It follows a unit moving up a row and the grounds'
+scroll, shows over the units and their sparks, stays 90 frames, blinking every 4 in the
+last 20, and gives way to the next hit's. Dodged blows show none, and neither do the
+support parts' changes and repairs. Implemented in
+`crates/game-core/src/combat/numbers.rs`.
+
 ## Debugging aid
 
 In the port's debugging mode (F10 in a launcher built with the `debug-mode` feature, see [field.md](field.md)) the

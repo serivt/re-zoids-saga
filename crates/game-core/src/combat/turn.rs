@@ -699,6 +699,8 @@ pub(super) struct Fight {
     pub(super) rebuild: u32,
     /// The parts whose effects ran out this round, for their messages.
     pub(super) expired: Vec<u16>,
+    /// The damage numbers (a port feature).
+    pub(super) numbers: super::numbers::DamageNumbers,
 }
 
 impl Combat {
@@ -1755,6 +1757,7 @@ impl Combat {
             .copied()
             .filter(Blow::landed)
             .collect();
+        self.show_damage(&landed);
         self.fight.hits = Some(if landed.is_empty() {
             HitStep::Start(HitStage::Dazed)
         } else {

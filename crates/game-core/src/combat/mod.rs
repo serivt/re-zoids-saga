@@ -21,6 +21,7 @@ mod commands;
 pub mod deck;
 pub mod effects;
 mod items;
+mod numbers;
 mod results;
 mod rows;
 pub mod scene;
@@ -666,6 +667,7 @@ impl Combat {
             .unwrap_or_default();
         self.shown_gone = self.fight.gone;
         self.shown_row_moves.clone_from(&self.fight.row_moves);
+        self.fight.numbers.latch();
         if let Some(scene) = self.fight.scene.as_mut() {
             scene.latch();
         }
@@ -700,6 +702,7 @@ impl Combat {
             self.update_slot5(rom, windows)?;
         }
         self.update_figures();
+        self.age_numbers();
         if let Some(id) = self.panels_held
             && windows
                 .windows()
@@ -1420,6 +1423,7 @@ impl Combat {
             self.draw_sparks(frame);
             self.draw_figures(frame);
             self.draw_marker(frame);
+            self.draw_numbers(frame);
             self.draw_panels(frame, skin, painter);
             windows.draw_shown(frame, skin, painter);
         }

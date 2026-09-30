@@ -22,11 +22,11 @@ use extraction::{Identification, IdentifyError, Title};
 use game_core::port_text::{
     LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_BACK, LAUNCHER_BATTLE_ANIMATIONS,
     LAUNCHER_CHOOSE_TRANSLATION, LAUNCHER_CLASSIC, LAUNCHER_CLASSIC_NOTE, LAUNCHER_CONTROLS_HELP,
-    LAUNCHER_COPY_FAILED, LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED,
-    LAUNCHER_DOWNLOADED, LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS, LAUNCHER_ENHANCED,
-    LAUNCHER_ENHANCED_NOTE, LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED,
-    LAUNCHER_FILTER, LAUNCHER_FROM_FILE, LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD, LAUNCHER_HELP,
-    LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP, LAUNCHER_IMPORTED, LAUNCHER_KEYBOARD,
+    LAUNCHER_COPY_FAILED, LAUNCHER_DAMAGE_NUMBERS, LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN,
+    LAUNCHER_DOWNLOAD_FAILED, LAUNCHER_DOWNLOADED, LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS,
+    LAUNCHER_ENHANCED, LAUNCHER_ENHANCED_NOTE, LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP,
+    LAUNCHER_EXPORTED, LAUNCHER_FILTER, LAUNCHER_FROM_FILE, LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD,
+    LAUNCHER_HELP, LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP, LAUNCHER_IMPORTED, LAUNCHER_KEYBOARD,
     LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LEFT, LAUNCHER_LICENSE,
     LAUNCHER_LOOKING_UP, LAUNCHER_MODE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM,
     LAUNCHER_NO_TRANSLATION, LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON,
@@ -43,7 +43,7 @@ use game_core::port_text::{
     LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE,
     LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WINDOW, default_text,
 };
-use game_core::{TextMetrics, Translation};
+use game_core::{Enhancement, TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
 use platform_sdl3::{
     FileChoice, Filter, KeyMap, Sdl3Display, default_keys, default_pad_buttons, key_name, open_url,
@@ -217,11 +217,16 @@ const SETTINGS: &[Setting] = if cfg!(target_os = "android") {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModeLine {
     Mode,
-    BattleAnimations,
+    Enhancement(Enhancement),
     Back,
 }
 
-const MODE_LINES: [ModeLine; 3] = [ModeLine::Mode, ModeLine::BattleAnimations, ModeLine::Back];
+const MODE_LINES: [ModeLine; 4] = [
+    ModeLine::Mode,
+    ModeLine::Enhancement(Enhancement::BattleAnimations),
+    ModeLine::Enhancement(Enhancement::DamageNumbers),
+    ModeLine::Back,
+];
 
 /// How much a step of the pad's size or opacity changes it, in percent.
 const TOUCH_STEP: u8 = 10;
@@ -1075,9 +1080,8 @@ impl Front {
             .any(|button| pressed.is_held(button));
         match MODE_LINES[line] {
             ModeLine::Mode if switched => self.mode.enhanced = !self.mode.enhanced,
-            ModeLine::BattleAnimations if switched && self.mode.enhanced => {
-                let enhancements = &mut self.mode.enhancements;
-                enhancements.battle_animations = !enhancements.battle_animations;
+            ModeLine::Enhancement(enhancement) if switched && self.mode.enhanced => {
+                self.mode.enhancements.toggle(enhancement);
             }
             ModeLine::Back if pressed.is_held(Button::A) => self.screen = Screen::Main,
             _ => {}
@@ -1369,14 +1373,14 @@ impl Front {
             let y = OPTIONS_FIRST_LINE_Y + index * OPTION_LINE_HEIGHT;
             let is_selected = index == selected;
             let color = match line {
-                ModeLine::BattleAnimations if !self.mode.enhanced => UNAVAILABLE,
+                ModeLine::Enhancement(_) if !self.mode.enhanced => UNAVAILABLE,
                 _ if is_selected => TEXT,
                 _ => DIM,
             };
             let value = match line {
                 ModeLine::Mode => Some((self.mode_name(), self.mode_color())),
-                ModeLine::BattleAnimations => {
-                    let key = if self.mode.enhancements.battle_animations {
+                ModeLine::Enhancement(enhancement) => {
+                    let key = if self.mode.enhancements.is_on(*enhancement) {
                         LAUNCHER_ON
                     } else {
                         LAUNCHER_OFF
@@ -1794,7 +1798,8 @@ impl ModeLine {
     fn label(self) -> &'static str {
         match self {
             Self::Mode => LAUNCHER_MODE,
-            Self::BattleAnimations => LAUNCHER_BATTLE_ANIMATIONS,
+            Self::Enhancement(Enhancement::BattleAnimations) => LAUNCHER_BATTLE_ANIMATIONS,
+            Self::Enhancement(Enhancement::DamageNumbers) => LAUNCHER_DAMAGE_NUMBERS,
             Self::Back => LAUNCHER_BACK,
         }
     }
@@ -2363,7 +2368,7 @@ mod tests {
         let mode = MODE_LINES.iter().position(|line| *line == ModeLine::Mode);
         let animations = MODE_LINES
             .iter()
-            .position(|line| *line == ModeLine::BattleAnimations);
+            .position(|line| *line == ModeLine::Enhancement(Enhancement::BattleAnimations));
         let (Some(mode), Some(animations)) = (mode, animations) else {
             panic!("the game mode's screen lacks a line");
         };
@@ -2371,8 +2376,13 @@ mod tests {
         assert!(front.settings().mode.enhancements.battle_animations);
         front.update_mode(mode, press(Button::Right));
         front.update_mode(animations, press(Button::A));
+        let numbers = MODE_LINES
+            .iter()
+            .position(|line| *line == ModeLine::Enhancement(Enhancement::DamageNumbers));
+        front.update_mode(numbers.unwrap_or(animations), press(Button::Right));
         let chosen = front.settings().mode;
         assert!(chosen.enhanced && !chosen.enhancements.battle_animations);
+        assert!(chosen.enhancements.damage_numbers);
         front.update_mode(mode, press(Button::Left));
         let kept = front.settings().mode;
         assert!(!kept.enhanced && !kept.enhancements.battle_animations);

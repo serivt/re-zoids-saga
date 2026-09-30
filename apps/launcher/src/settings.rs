@@ -29,6 +29,8 @@ const CLASSIC: &str = "classic";
 const ENHANCED: &str = "enhanced";
 /// The enhanced mode's battle animations, `1` shown or `0` skipped.
 const BATTLE_ANIMATIONS_KEY: &str = "battle-animations";
+/// The enhanced mode's damage numbers, `1` shown or `0` not.
+const DAMAGE_NUMBERS_KEY: &str = "damage-numbers";
 const SHARP: &str = "sharp";
 const SMOOTH: &str = "smooth";
 /// The window's size in multiples of the screen, its default and the
@@ -182,6 +184,7 @@ impl Settings {
                 BATTLE_ANIMATIONS_KEY => {
                     settings.mode.enhancements.battle_animations = value != "0";
                 }
+                DAMAGE_NUMBERS_KEY => settings.mode.enhancements.damage_numbers = value == "1",
                 _ => {}
             }
         }
@@ -225,8 +228,9 @@ impl Settings {
         };
         let _ = writeln!(
             text,
-            "{MODE_KEY}={mode}\n{BATTLE_ANIMATIONS_KEY}={}",
-            u8::from(self.mode.enhancements.battle_animations)
+            "{MODE_KEY}={mode}\n{BATTLE_ANIMATIONS_KEY}={}\n{DAMAGE_NUMBERS_KEY}={}",
+            u8::from(self.mode.enhancements.battle_animations),
+            u8::from(self.mode.enhancements.damage_numbers)
         );
         for (button, key) in &self.keys {
             let _ = writeln!(text, "{BUTTON_PREFIX}{}={key}", button.name());
@@ -279,6 +283,7 @@ mod tests {
                 enhanced: true,
                 enhancements: Enhancements {
                     battle_animations: false,
+                    damage_numbers: true,
                 },
             },
         };
@@ -308,11 +313,13 @@ mod tests {
         let odd = Settings::parse("mode=turbo\nbattle-animations=0\n");
         assert_eq!(odd.mode.play_mode(), PlayMode::Classic);
         assert!(!odd.mode.enhancements.battle_animations);
-        let enhanced = Settings::parse("mode=enhanced\nbattle-animations=0\n");
+        assert!(!odd.mode.enhancements.damage_numbers);
+        let enhanced = Settings::parse("mode=enhanced\nbattle-animations=0\ndamage-numbers=1\n");
         assert_eq!(
             enhanced.mode.play_mode(),
             PlayMode::Enhanced(Enhancements {
-                battle_animations: false
+                battle_animations: false,
+                damage_numbers: true,
             })
         );
     }
