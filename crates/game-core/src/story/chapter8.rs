@@ -2383,10 +2383,6 @@ const EVE_POLIS_ARRIVAL: &[Op] = &[Op::IfFlags {
     otherwise: &[],
 }];
 
-/// Where the port's story stops: chapter 9's first map once the Death
-/// Saurer is beaten.
-pub(super) const STORY_END: (usize, u16) = (CHAPTER_9_START, SAURER_BEATEN);
-
 /// A teacher of deck command `command` (`0x08012090` with the pitch and
 /// the reminder, or `0x08009430`'s pair of lines).
 macro_rules! teacher {

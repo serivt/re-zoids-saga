@@ -1360,44 +1360,7 @@ impl AttackScene {
 
     /// The scenery's line routine (the jump table at `0x080441B8`).
     fn run_lines(&mut self, rom: &[u8]) {
-        for op in line_program(self.scenery) {
-            match *op {
-                LineOp::Add(first, last, amount) => {
-                    for line in first..=last {
-                        self.lines[line] = self.lines[line].wrapping_add(amount);
-                    }
-                }
-                LineOp::Ramp(first, last, at_first, step) => {
-                    for line in first..=last {
-                        let index = i32::try_from(line - first).unwrap_or(0);
-                        self.lines[line] = self.lines[line].wrapping_add(at_first + step * index);
-                    }
-                }
-                LineOp::Wave {
-                    first,
-                    last,
-                    origin,
-                    spacing,
-                    speed,
-                    shift,
-                } => {
-                    self.phase = self.phase.wrapping_add(speed);
-                    for line in first..=last {
-                        let offset = (line.wrapping_sub(origin)).wrapping_mul(spacing);
-                        let index = u8::try_from(offset & 0xFF)
-                            .unwrap_or(0)
-                            .wrapping_add(self.phase);
-                        let wave = unsigned(saga_battle::wave(rom, index).unwrap_or(0));
-                        self.lines[line] = match shift {
-                            WaveShift::Pixels16 => i32::from(wave >> 4) << 16,
-                            WaveShift::Fraction(bits) => {
-                                i32::from_ne_bytes((u32::from(wave) << bits).to_ne_bytes())
-                            }
-                        };
-                    }
-                }
-            }
-        }
+        run_line_program(rom, self.scenery, &mut self.lines, &mut self.phase);
     }
 
     /// The horizontal scroll of the scenery on screen line `line`.
@@ -1622,6 +1585,48 @@ fn line_program(scenery: u8) -> &'static [LineOp] {
     }
 }
 
+/// The scenery's line routine (the jump table at `0x080441B8`): a frame of
+/// the lines' own scrolls, which the layer's lines are drawn off by.
+pub(crate) fn run_line_program(rom: &[u8], scenery: u8, lines: &mut [i32; HEIGHT], phase: &mut u8) {
+    for op in line_program(scenery) {
+        match *op {
+            LineOp::Add(first, last, amount) => {
+                for value in &mut lines[first..=last] {
+                    *value = value.wrapping_add(amount);
+                }
+            }
+            LineOp::Ramp(first, last, at_first, step) => {
+                for (index, value) in (0..).zip(&mut lines[first..=last]) {
+                    *value = value.wrapping_add(at_first + step * index);
+                }
+            }
+            LineOp::Wave {
+                first,
+                last,
+                origin,
+                spacing,
+                speed,
+                shift,
+            } => {
+                *phase = phase.wrapping_add(speed);
+                for (line, value) in (first..=last).zip(&mut lines[first..=last]) {
+                    let offset = (line.wrapping_sub(origin)).wrapping_mul(spacing);
+                    let index = u8::try_from(offset & 0xFF)
+                        .unwrap_or(0)
+                        .wrapping_add(*phase);
+                    let wave = unsigned(saga_battle::wave(rom, index).unwrap_or(0));
+                    *value = match shift {
+                        WaveShift::Pixels16 => i32::from(wave >> 4) << 16,
+                        WaveShift::Fraction(bits) => {
+                            i32::from_ne_bytes((u32::from(wave) << bits).to_ne_bytes())
+                        }
+                    };
+                }
+            }
+        }
+    }
+}
+
 /// The `system` table's strings (ROM `0x6D0880`).
 fn saga_battle_system_offsets(rom: &[u8]) -> Vec<usize> {
     extraction::saga_guide::SYSTEM_SCRIPTS
@@ -1744,7 +1749,7 @@ fn unsigned(value: i16) -> u16 {
     u16::from_ne_bytes(value.to_ne_bytes())
 }
 
-fn wrap(x: usize, scroll: i32, width: usize) -> usize {
+pub(crate) fn wrap(x: usize, scroll: i32, width: usize) -> usize {
     let width = i64::try_from(width).unwrap_or(i64::MAX);
     let position = i64::try_from(x).unwrap_or(0) + i64::from(scroll);
     usize::try_from(position.rem_euclid(width)).unwrap_or(0)

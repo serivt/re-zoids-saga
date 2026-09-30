@@ -297,6 +297,15 @@ enum Packing {
 }
 
 fn sprite_record(rom: &[u8], at: usize, packing: Packing) -> Option<EffectSprite> {
+    sprite_record_with(rom, at, packing, EFFECT_ANIMATIONS)
+}
+
+fn sprite_record_with(
+    rom: &[u8],
+    at: usize,
+    packing: Packing,
+    animations: usize,
+) -> Option<EffectSprite> {
     let record = rom.get(at..at + EFFECT_LEN)?;
     let pointer = |at: usize| rom_offset(&record[at..at + 4]);
     let tile_bytes = match packing {
@@ -309,7 +318,13 @@ fn sprite_record(rom: &[u8], at: usize, packing: Packing) -> Option<EffectSprite
     } else {
         parse_palette(rom.get(pointer(4)?..pointer(4)? + 32)?)?
     };
-    sprite_parts(rom, &tile_bytes, palette, pointer(8)?, pointer(12)?)
+    sprite_parts(
+        rom,
+        &tile_bytes,
+        palette,
+        (pointer(8)?, animations),
+        pointer(12)?,
+    )
 }
 
 /// The battle screen's own sprites (0x2C-byte records at ROM `0x66B5F8`,
@@ -333,7 +348,13 @@ pub fn screen_sprite(rom: &[u8], id: usize) -> Option<EffectSprite> {
         |at: usize| usize::try_from(u32::from_le_bytes(record[at..at + 4].try_into().ok()?)).ok();
     let palette = parse_palette(rom.get(pointer(0)?..pointer(0)? + 32)?)?;
     let tiles = rom.get(pointer(0xC)?..pointer(0xC)? + size(0x14)?)?;
-    sprite_parts(rom, tiles, palette, pointer(0x18)?, pointer(0x1C)?)
+    sprite_parts(
+        rom,
+        tiles,
+        palette,
+        (pointer(0x18)?, EFFECT_ANIMATIONS),
+        pointer(0x1C)?,
+    )
 }
 
 /// A sprite from its tiles, palette, and animation and frame tables.
@@ -341,13 +362,13 @@ fn sprite_parts(
     rom: &[u8],
     tile_bytes: &[u8],
     palette: [u16; 16],
-    table: usize,
+    (table, count): (usize, usize),
     frame_table: usize,
 ) -> Option<EffectSprite> {
     let first_animation = rom_offset(rom.get(table..table + 4)?)?;
     let animation = read_steps(rom, first_animation)?;
     let mut animations = vec![animation.clone()];
-    for index in 1..EFFECT_ANIMATIONS {
+    for index in 1..count {
         let at = table + index * 4;
         let Some(steps) = rom
             .get(at..at + 4)
@@ -509,6 +530,37 @@ pub fn zoid_image(rom: &[u8], zoid: u8) -> Option<BattleImage> {
     image(rom, ZOID_TILES + slot, ZOID_PALETTES + slot)
 }
 
+/// Scenery image `scenery` whole, as its loader entries give it
+/// (`0x08043CE4`): all its tiles, and all its colors with the palette
+/// index the first one goes to. The attack scenes' sceneries are 256
+/// tiles with 64 colors from 64; the few that fill the palette from 0 are
+/// 512 tiles, the staff roll's plains.
+#[must_use]
+pub fn scenery_picture(rom: &[u8], scenery: u8) -> Option<(BattleImage, usize)> {
+    let slot = usize::from(scenery) * LOAD_ENTRY_LEN;
+    let tiles = decompress_at(rom, SCENERY_TILES + slot)?
+        .chunks_exact(TILE_PIXELS)
+        .map(|chunk| {
+            let mut tile = [0; TILE_PIXELS];
+            tile.copy_from_slice(chunk);
+            tile
+        })
+        .collect();
+    let entry = SCENERY_PALETTES + slot;
+    let destination = rom.get(entry + 4..entry + 8)?;
+    let destination = u32::from_le_bytes(destination.try_into().ok()?);
+    let start = usize::try_from(destination.checked_sub(PALETTE_RAM)? / 2).ok()?;
+    let palette = decompress_at(rom, entry)?
+        .chunks_exact(2)
+        .take(PALETTE_COLORS.checked_sub(start)?)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    Some((BattleImage { tiles, palette }, start))
+}
+
+const PALETTE_RAM: u32 = 0x0500_0000;
+const PALETTE_COLORS: usize = 256;
+
 fn image(rom: &[u8], tiles: usize, palette: usize) -> Option<BattleImage> {
     let tile_bytes = decompress_at(rom, tiles)?;
     let palette_bytes = decompress_at(rom, palette)?;
@@ -558,6 +610,58 @@ const SPAWN_TIMING: usize = 0xDA;
 const SPAWN_SOUND: usize = 0xFE;
 const SPREADS: usize = 0x006E_8A88;
 const WAVE: usize = 0x006D_3B94;
+
+/// Shot sprite `id` with its first `animations` animations read, for the
+/// sprites that have more than [`EFFECT_ANIMATIONS`]: the staff roll's
+/// lines are the animations of one.
+#[must_use]
+pub fn shot_sprite_with(rom: &[u8], id: u8, animations: usize) -> Option<EffectSprite> {
+    let id = SHOT_SPRITES + usize::from(id);
+    if id >= EFFECT_COUNT {
+        return None;
+    }
+    sprite_record_with(rom, EFFECTS + id * EFFECT_LEN, Packing::Effect, animations)
+}
+
+/// A group of the staff roll's lines (the 0x1C-byte records at ROM
+/// `0x6D3E58`, read by `0x080439E0`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaffGroup {
+    /// How far the lines rise a frame, 16.16.
+    pub speed: i32,
+    /// The lines: animations of the lines' sprite, top to bottom.
+    pub lines: Vec<u8>,
+}
+
+const STAFF_ROLL: usize = 0x006D_3E58;
+const STAFF_GROUP_LEN: usize = 0x1C;
+const STAFF_LINES: usize = 8;
+/// Lines a group holds at most.
+pub const STAFF_GROUP_LINES: usize = 20;
+const STAFF_END: u8 = 0xFF;
+
+/// The staff roll's groups, up to the record whose first byte is `0xFF`.
+#[must_use]
+pub fn staff_roll(rom: &[u8]) -> Option<Vec<StaffGroup>> {
+    let mut groups = Vec::new();
+    for index in 0.. {
+        let at = STAFF_ROLL + index * STAFF_GROUP_LEN;
+        let record = rom.get(at..at + STAFF_GROUP_LEN)?;
+        if record[0] == STAFF_END {
+            return Some(groups);
+        }
+        let lines = record[STAFF_LINES..STAFF_LINES + STAFF_GROUP_LINES]
+            .iter()
+            .copied()
+            .take_while(|&line| line != STAFF_END)
+            .collect();
+        groups.push(StaffGroup {
+            speed: i32::from_le_bytes(record[4..8].try_into().ok()?),
+            lines,
+        });
+    }
+    None
+}
 
 /// The shot sprite `id` of an animation (`0x080483B4`).
 #[must_use]

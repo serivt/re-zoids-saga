@@ -3,6 +3,7 @@
 pub mod battle;
 pub mod boot;
 pub mod combat;
+pub mod credits;
 pub mod data;
 pub mod demo;
 pub mod event;

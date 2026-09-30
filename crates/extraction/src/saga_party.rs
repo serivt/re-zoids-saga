@@ -1095,6 +1095,13 @@ pub fn leave_group(rom: &[u8], state: &mut [u8], list: usize) -> Option<()> {
     for (character, _, _) in starting_list(rom, list)? {
         remove_character(rom, state, character)?;
     }
+    repair_when_all_broken(state);
+    Some(())
+}
+
+/// When no member is left with a working unit, the prince's is repaired
+/// (`0x08037510`).
+fn repair_when_all_broken(state: &mut [u8]) {
     if !members(state).iter().any(|&member| {
         character_unit(state, member).is_some_and(|unit| half(state, unit_at(unit)) & BROKEN == 0)
     }) && let Some(unit) = character_unit(state, 0)
@@ -1109,6 +1116,93 @@ pub fn leave_group(rom: &[u8], state: &mut [u8], list: usize) -> Option<()> {
         let flags = half(state, at) & !BROKEN;
         set_half(state, at, flags);
     }
+}
+
+/// The characters chapter 9's base offers to come along (ROM `0x32AF28`,
+/// 8-byte records: the character, its Zoid and what offers it).
+const COMPANIONS: usize = 0x0032_AF28;
+const COMPANION_LEN: usize = 8;
+/// Records the table holds.
+pub const COMPANION_COUNT: usize = 0x1D;
+/// The level bits a companion joins with (`0x08026614`).
+const COMPANION_BITS: u16 = 0xE;
+/// The characters whose first flag bit offers the records of kinds 2 and
+/// 3 (`+0x34EC` and `+0x34F0` of the game state).
+const COMPANION_KEYS: [u8; 2] = [0x12, 0x13];
+
+/// A record of the companions' table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Companion {
+    /// The character.
+    pub character: u8,
+    /// The Zoid they come with.
+    pub zoid: u16,
+    /// What offers them: 0 always, 1 their own character's first flag bit,
+    /// 2 and 3 that of characters `0x12` and `0x13`.
+    pub offered_by: u16,
+}
+
+/// Record `index` of the companions' table, `None` past it.
+#[must_use]
+pub fn companion(rom: &[u8], index: usize) -> Option<Companion> {
+    if index >= COMPANION_COUNT {
+        return None;
+    }
+    let at = COMPANIONS + index * COMPANION_LEN;
+    let record = rom.get(at..at + COMPANION_LEN)?;
+    Some(Companion {
+        character: u8::try_from(half(record, 0)).ok()?,
+        zoid: half(record, 2),
+        offered_by: half(record, 4),
+    })
+}
+
+/// Whether record `index` is offered (`0x08026694`): always, or when its
+/// character, or character `0x12` or `0x13`, has the first flag bit.
+#[must_use]
+pub fn companion_offered(rom: &[u8], state: &[u8], index: usize) -> bool {
+    let Some(companion) = companion(rom, index) else {
+        return false;
+    };
+    let flagged = |character: u8| {
+        let entry = CHARACTERS + usize::from(character) * CHARACTER_LEN;
+        state
+            .get(entry..entry + 2)
+            .is_some_and(|flags| flags[0] & 1 != 0)
+    };
+    match companion.offered_by {
+        0 => true,
+        1 => flagged(companion.character),
+        kind @ (2 | 3) => flagged(COMPANION_KEYS[usize::from(kind - 2)]),
+        _ => false,
+    }
+}
+
+/// Adds the character of record `index` to the party with a unit of its
+/// Zoid (`0x08026614`, `0x080372D0` with bits `0xE`).
+pub fn join_companion(rom: &[u8], state: &mut [u8], index: usize) -> Option<()> {
+    if state.len() != STATE_LEN {
+        return None;
+    }
+    let companion = companion(rom, index)?;
+    add_character(
+        rom,
+        state,
+        companion.character,
+        COMPANION_BITS,
+        companion.zoid,
+    )
+}
+
+/// Takes the character of record `index` out of the party (`0x08026634`:
+/// `0x0803738C`, then `0x08037510`).
+pub fn leave_companion(rom: &[u8], state: &mut [u8], index: usize) -> Option<()> {
+    if state.len() != STATE_LEN {
+        return None;
+    }
+    let companion = companion(rom, index)?;
+    remove_character(rom, state, companion.character)?;
+    repair_when_all_broken(state);
     Some(())
 }
 

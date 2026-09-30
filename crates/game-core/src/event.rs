@@ -24,6 +24,17 @@ use extraction::saga::Reward;
 pub const TASKS: usize = 16;
 /// The slot of a map's own event.
 pub const MAP_TASK: usize = 3;
+/// The companions' slots in the game-state block (`+0xCD0`, `+0xCD1`):
+/// the record each holds, [`NO_COMPANION`] when empty.
+const COMPANION_SLOTS: usize = 0xCD0;
+const NO_COMPANION: u8 = 0xFF;
+/// Records of the companions' table, and the flag set once they are
+/// offered.
+const COMPANION_RECORDS: usize = 0x1D;
+const COMPANIONS_OFFERED: u16 = 0x1D;
+/// The records that are two forms of one character: one taken hides the
+/// other.
+const COMPANION_FORMS: [[u8; 2]; 2] = [[0x19, 0x1B], [0x1A, 0x1C]];
 /// The slot that stands for the field's per-frame hook (RAM
 /// `0x02000000`), which runs outside the tasks: a slot before the map's
 /// task, so a load the hook makes lets the map's handler start its task.
@@ -45,6 +56,8 @@ const SLOW_FADE_IN_DELAY: u8 = 2;
 /// Frames the scene loader holds the game besides one per object: the
 /// decompressions it waits a frame after, and the frame it returns on.
 const LOAD_FRAMES: u32 = 6;
+/// The same for the loader `0x080079E8`, which waits a frame less.
+const SCENE_LOAD_FRAMES: u32 = 5;
 /// A walking animation's number past its standing one.
 const WALKING: usize = 4;
 
@@ -175,6 +188,38 @@ pub enum Op {
     Join(u8),
     /// Takes the characters of list `list` out of the party (`0x080374E4`).
     Leave(u8),
+    /// Works out which companions chapter 9's base offers (`0x08026694`):
+    /// game flag `n`, for each record `n` of the companions' table (0 to
+    /// `0x1C`), set when the record is offered; flag `0x1D` set.
+    OfferCompanions,
+    /// Takes the companion in slot `slot` off the lists: its record's flag
+    /// cleared, with the other form of the same character (records `0x19`
+    /// and `0x1B`, `0x1A` and `0x1C`).
+    HideCompanion(usize),
+    /// Runs `then` when companion slot `slot` (game state `+0xCD0` on) holds
+    /// a record, `otherwise` when it is empty (`0xFF`).
+    IfCompanion {
+        /// The slot: 0 Jack's pick, 1 Earth's.
+        slot: usize,
+        /// Program run when the slot holds a record.
+        then: &'static [Op],
+        /// Program run otherwise.
+        otherwise: &'static [Op],
+    },
+    /// When the menu just shown picked a record (script variable 1 below
+    /// `0x1D`), puts it in companion slot `slot`, adds its character to the
+    /// party with a unit of its Zoid (`0x08026614`) and runs `then`.
+    TakeCompanion {
+        /// The slot.
+        slot: usize,
+        /// Program run once a record is taken.
+        then: &'static [Op],
+    },
+    /// Sends the companion in slot `slot` away (`0x08026634`) and empties
+    /// the slot.
+    DropCompanion(usize),
+    /// Empties both companion slots, sending no one away.
+    ForgetCompanions,
     /// Steps the brightness toward black every `mask + 1` frames until it
     /// is black (the loop of the task at `0x0800C6A4`).
     FadeOut(u16),
@@ -252,6 +297,16 @@ pub enum Op {
     Pose(usize, usize),
     /// Lets actor `actor`'s animation loop again from the start of `anim`.
     Animate(usize, usize),
+    /// Takes actor `actor`'s animation to the last frame of step `step` (a
+    /// task writing the entity's `+0x34` with its countdown `+0x36` at 1).
+    RestartStep(usize, usize),
+    /// Stands actor `actor` on the cell its sprite's position falls in.
+    Settle(usize),
+    /// Stops the music and every sound (`0x08001988`).
+    Silence,
+    /// Makes the fades brighten toward white (`BLDCNT` `0x3FBF`, every
+    /// layer) or darken toward black (`0x3FFF`), as the fade level rises.
+    FadeToWhite(bool),
     /// Sets actor `actor`'s animation tick shift.
     Shift(usize, i8),
     /// Waits until one of the flags is set.
@@ -398,6 +453,9 @@ pub enum Op {
     /// Fights story battle `n` (`0x08008D28`, the battle module in story
     /// mode), holding the game until it hands back.
     StoryBattle(u8),
+    /// Rolls the staff credits (`0x0800C430`), holding the game until they
+    /// are over.
+    Credits,
     /// Runs `then` when the last battle was lost (`0x08008D28` returned 1),
     /// `otherwise` else.
     IfLost {
@@ -511,6 +569,18 @@ pub enum Op {
         /// Objects in the list.
         count: usize,
     },
+    /// Loads a map for a cutscene as `0x080079E8` does: as
+    /// [`Op::LoadMap`], but the map's song is left as it is.
+    LoadScene {
+        /// Map record.
+        map: usize,
+        /// The player's metatile.
+        player: (usize, usize),
+        /// ROM address of the object list.
+        objects: u32,
+        /// Objects in the list.
+        count: usize,
+    },
     /// Keeps the enemies from meeting the player (`0x02000008` bit 1 set),
     /// or lets them again.
     Calm(bool),
@@ -555,6 +625,9 @@ pub enum Op {
     /// Places actor `actor` on the player's cell moved by `(dx, dy)`
     /// cells, as the handlers that read the player's entity do.
     PlaceNearPlayer(usize, (i32, i32)),
+    /// Places actor `actor` on the cell of actor `other`, as the tasks that
+    /// read another entity's cell do.
+    PlaceOnActor(usize, usize),
     /// Glides actor `actor` to the player's cell moved by `by` cells.
     GlideNearPlayer {
         /// Actor index.
@@ -592,6 +665,8 @@ pub trait EventHost {
     fn set_dialogue_variable(&mut self, slot: u8, value: u16);
     /// Starts battle scene `scene`; the game holds until it ends.
     fn start_battle(&mut self, scene: u8);
+    /// Starts the staff credits; the game holds until they are over.
+    fn start_credits(&mut self);
     /// Opens `shop`; the game holds until it closes.
     fn start_shop(&mut self, shop: Shop);
     /// Starts the battle against the enemy the player met; the game holds
@@ -625,6 +700,10 @@ pub trait EventHost {
     fn restore_music(&mut self);
     /// Brightens the field toward white by `level` of 16.
     fn set_whiten(&mut self, level: u8);
+    /// Makes the fade level brighten toward white instead of darkening.
+    fn set_fade_to_white(&mut self, white: bool);
+    /// Stops the music and every sound.
+    fn silence(&mut self);
     /// The guard that last saw the player.
     fn seen_guard(&self) -> Option<usize>;
     /// Remembers `guard` as the one that saw the player.
@@ -640,6 +719,15 @@ pub trait EventHost {
     fn join(&mut self, list: u8);
     /// Takes the characters of list `list` out of the party.
     fn leave(&mut self, list: u8);
+    /// Whether record `index` of the companions' table is offered.
+    fn companion_offered(&self, index: usize) -> bool;
+    /// Adds the character of the companions' record `index` to the party.
+    fn join_companion(&mut self, index: u8);
+    /// Takes the character of the companions' record `index` out of the
+    /// party.
+    fn leave_companion(&mut self, index: u8);
+    /// Sets byte `at` of the game-state block.
+    fn set_state_byte(&mut self, at: usize, value: u8);
     /// Starts string `index` of script table `table`; the game holds until
     /// it ends.
     fn start_script(&mut self, table: &'static str, index: u16);
@@ -800,6 +888,9 @@ enum Hold {
         /// The task that loads.
         slot: usize,
     },
+    /// Holding the game this many more frames, every task then going on
+    /// as it was: a map loaded within a warp's call.
+    Frozen(u32),
     /// A fade in holding the game after `delay` frames of waiting, and
     /// `settle` more once normal.
     FadeIn {
@@ -857,6 +948,10 @@ pub struct Events {
     /// Whether a task's dialogue started this frame: the other tasks have
     /// had their turn in it already.
     dialogue_started: bool,
+    /// The slot of the task whose load last ended, and the slot whose
+    /// spawns are lost while the handler of a map that task warped to runs.
+    loaded_by: Option<usize>,
+    within: Option<usize>,
 }
 
 impl Events {
@@ -943,7 +1038,9 @@ impl Events {
         // The original's load runs within the task's own call: a map's
         // handler spawning into that task's slot is overwritten when the
         // task, going on, next yields.
-        if matches!(self.hold, Some(Hold::Loading { slot: loading, .. }) if loading == slot) {
+        if matches!(self.hold, Some(Hold::Loading { slot: loading, .. }) if loading == slot)
+            || self.within == Some(slot)
+        {
             return;
         }
         if let Some(task) = self.tasks.get_mut(slot) {
@@ -963,6 +1060,16 @@ impl Events {
     pub fn run_now(&mut self, program: &'static [Op], host: &mut impl EventHost) {
         self.tasks[IMMEDIATE] = Some(Task::new(program));
         self.run_task(IMMEDIATE, host);
+    }
+
+    /// Runs the handler of the map a task's warp just loaded: the original
+    /// runs it within the task's own call, so what it spawns into that
+    /// task's slot is overwritten when the task, going on, next yields, and
+    /// a map it loads holds the game before the task goes on.
+    pub fn run_after_load(&mut self, program: &'static [Op], host: &mut impl EventHost) {
+        self.within = self.loaded_by.take();
+        self.run_now(program, host);
+        self.within = None;
     }
 
     /// Holds the game while the screen brightens one level a frame, after
@@ -1019,6 +1126,10 @@ impl Events {
                 {
                     self.run_slots(0, host);
                 }
+                HoldStep::Held
+            }
+            Some(Hold::Frozen(frames)) => {
+                self.hold = (frames > 1).then_some(Hold::Frozen(frames - 1));
                 HoldStep::Held
             }
             Some(Hold::Loading { frames, slot }) => {
@@ -1106,10 +1217,51 @@ impl Events {
         }
     }
 
+    /// A cutscene's map load ([`Op::LoadMap`] or [`Op::LoadScene`]): the
+    /// game holds while it lasts, and the first starts the map's song once
+    /// it is over, or, run by a handler while a fade in holds the game,
+    /// once its load would be.
+    fn load(&mut self, slot: usize, op: Op, host: &mut impl EventHost) -> Flow {
+        let (Op::LoadMap {
+            map,
+            player,
+            objects,
+            count,
+        }
+        | Op::LoadScene {
+            map,
+            player,
+            objects,
+            count,
+        }) = op
+        else {
+            return Flow::Next;
+        };
+        host.load_map(map, player, objects, count);
+        let music = matches!(op, Op::LoadMap { .. });
+        if music && slot == IMMEDIATE {
+            if matches!(self.hold, Some(Hold::FadeIn { .. })) {
+                let frames = LOAD_FRAMES + u32::try_from(count).unwrap_or(u32::MAX);
+                self.handler_music = Some((frames, map));
+            } else {
+                host.start_map_music(map);
+            }
+        } else if music {
+            self.loading_map = Some(map);
+        }
+        let base = if music {
+            LOAD_FRAMES
+        } else {
+            SCENE_LOAD_FRAMES
+        };
+        self.hold_frames(slot, base + u32::try_from(count).unwrap_or(u32::MAX))
+    }
+
     /// The end of a load: the task that made it goes on, then the tasks
     /// after it run.
     fn end_loading(&mut self, slot: usize, host: &mut impl EventHost) {
         self.hold = None;
+        self.loaded_by = Some(slot);
         if let Some(map) = self.loading_map.take() {
             host.start_map_music(map);
         }
@@ -1300,33 +1452,11 @@ impl Events {
             | Op::FadeOutHolding
             | Op::FadeOutHoldingAfter(_)
             | Op::LoadMap { .. }
+            | Op::LoadScene { .. }
             | Op::LoadArena(_)
             | Op::TakeExit
             | Op::Warp { .. } => self.wait(slot, op, host),
-            Op::IfFlags { .. }
-            | Op::IfCommand { .. }
-            | Op::IfArea { .. }
-            | Op::IfChoice { .. }
-            | Op::IfLost { .. }
-            | Op::IfChest { .. }
-            | Op::IfZiDataHeld { .. }
-            | Op::IfZoidOwned { .. }
-            | Op::IfRegulation { .. }
-            | Op::IfSeen { .. }
-            | Op::IfStateSet { .. }
-            | Op::IfPlayer { .. }
-            | Op::IfPlayerWalking { .. }
-            | Op::IfPlayerSprite { .. }
-            | Op::IfPlayerOn { .. }
-            | Op::IfBattlesWon { .. }
-            | Op::IfMusic { .. }
-            | Op::IfTask { .. }
-            | Op::IfPortal { .. }
-            | Op::Call(_)
-            | Op::Loop(_)
-            | Op::Repeat(..)
-            | Op::Spawn(..)
-            | Op::End => self.branch(slot, op, host),
+            op if branches(&op) => self.branch(slot, op, host),
             Op::Sprite(actor, sprite) => {
                 host.set_sprite(actor, sprite);
                 Flow::Next
@@ -1363,6 +1493,8 @@ impl Events {
             | Op::Pose(..)
             | Op::Animate(..)
             | Op::Shift(..)
+            | Op::RestartStep(..)
+            | Op::Settle(_)
             | Op::StepBack { .. }
             | Op::StepPlayer { .. }
             | Op::PlaceRandom(..)
@@ -1417,25 +1549,7 @@ impl Events {
                 self.hold_fade(slot, op);
                 return Flow::Yield;
             }
-            Op::LoadMap {
-                map,
-                player,
-                objects,
-                count,
-            } => {
-                host.load_map(map, player, objects, count);
-                if slot == IMMEDIATE {
-                    if matches!(self.hold, Some(Hold::FadeIn { .. })) {
-                        let frames = LOAD_FRAMES + u32::try_from(count).unwrap_or(u32::MAX);
-                        self.handler_music = Some((frames, map));
-                    } else {
-                        host.start_map_music(map);
-                    }
-                } else {
-                    self.loading_map = Some(map);
-                }
-                return self.hold_loading(slot, count);
-            }
+            Op::LoadMap { .. } | Op::LoadScene { .. } => return self.load(slot, op, host),
             Op::LoadArena(game) => {
                 let count = host.load_arena(game);
                 self.loading_map = Some(extraction::saga_arena::ARENA_MAP);
@@ -1586,11 +1700,17 @@ impl Events {
         Flow::Yield
     }
 
-    /// Holds the game while a map loads. A handler the game calls directly
-    /// loads within the entry that called it: a map's handler run by a
-    /// warp delays the warp's fade in by the load instead.
+    /// Holds the game while a map of `count` objects loads through the
+    /// scene loader (see [`Self::hold_frames`]).
     fn hold_loading(&mut self, slot: usize, count: usize) -> Flow {
-        let frames = LOAD_FRAMES + u32::try_from(count).unwrap_or(u32::MAX);
+        self.hold_frames(slot, LOAD_FRAMES + u32::try_from(count).unwrap_or(u32::MAX))
+    }
+
+    /// Holds the game `frames` frames while a map loads. A handler the game
+    /// calls directly loads within the entry that called it: a map's
+    /// handler run by a warp delays the warp's fade in by the load instead,
+    /// and one run within a task's warp holds the game as it loads.
+    fn hold_frames(&mut self, slot: usize, frames: u32) -> Flow {
         if slot == IMMEDIATE {
             if let Some(Hold::FadeIn {
                 delay,
@@ -1606,6 +1726,8 @@ impl Events {
                     tasks_first: false,
                     slow,
                 });
+            } else if self.within.is_some() && self.hold.is_none() {
+                self.hold = Some(Hold::Frozen(frames));
             }
             return Flow::Next;
         }
@@ -1646,6 +1768,21 @@ impl Events {
             Op::IfChoice { then, otherwise } => {
                 let vars = host.saved_vars();
                 taken(vars[1] == 0 && vars[0] != 0, then, otherwise)
+            }
+            Op::IfCompanion {
+                slot,
+                then,
+                otherwise,
+            } => taken(companion(host, slot).is_some(), then, otherwise),
+            Op::TakeCompanion { slot, then } => {
+                let picked = u8::try_from(host.saved_vars()[1])
+                    .ok()
+                    .filter(|&index| usize::from(index) < COMPANION_RECORDS);
+                if let Some(index) = picked {
+                    host.set_state_byte(COMPANION_SLOTS + slot, index);
+                    host.join_companion(index);
+                }
+                taken(picked.is_some(), then, &[])
             }
             Op::IfChest {
                 kind,
@@ -1875,6 +2012,10 @@ fn resolve_near(op: Op, host: &mut impl EventHost) -> Op {
             });
             facing.map_or(Op::Wait(0), |facing| Op::Face(0, facing))
         }
+        Op::PlaceOnActor(actor, other) => host
+            .field()
+            .and_then(|field| field.actor(other).map(|placed| (placed.column, placed.row)))
+            .map_or(Op::Wait(0), |cell| Op::Place(actor, cell)),
         Op::PlaceNearPlayer(actor, by) => host.field().map_or(op, |field| {
             let (column, row, _) = near(field, by);
             let cell = |value: i32| usize::try_from(value).unwrap_or(usize::from(u8::MAX));
@@ -1947,6 +2088,39 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::Meet(group) => host.meet(group),
         Op::Join(list) => host.join(list),
         Op::Leave(list) => host.leave(list),
+        Op::OfferCompanions => {
+            for index in 0..COMPANION_RECORDS {
+                let flag = u16::try_from(index).unwrap_or(u16::MAX);
+                host.set_flag(flag, false);
+                if host.companion_offered(index) {
+                    host.set_flag(flag, true);
+                }
+            }
+            host.set_flag(COMPANIONS_OFFERED, true);
+        }
+        Op::HideCompanion(slot) => {
+            if let Some(index) = companion(host, slot) {
+                host.set_flag(u16::from(index), false);
+                for pair in COMPANION_FORMS {
+                    if pair.contains(&index) {
+                        for form in pair {
+                            host.set_flag(u16::from(form), false);
+                        }
+                    }
+                }
+            }
+        }
+        Op::DropCompanion(slot) => {
+            if let Some(index) = companion(host, slot) {
+                host.leave_companion(index);
+            }
+            host.set_state_byte(COMPANION_SLOTS + slot, NO_COMPANION);
+        }
+        Op::ForgetCompanions => {
+            for slot in 0..2 {
+                host.set_state_byte(COMPANION_SLOTS + slot, NO_COMPANION);
+            }
+        }
         Op::LearnCommand(command) => host.learn_command(command),
         Op::FormParty(choice) => host.form_party(choice),
         Op::SeeZoid(id) => host.see_zoid(id),
@@ -1961,6 +2135,8 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::SaveMusic => host.save_music(),
         Op::RestoreMusic => host.restore_music(),
         Op::Whiten(level) => host.set_whiten(level),
+        Op::FadeToWhite(white) => host.set_fade_to_white(white),
+        Op::Silence => host.silence(),
         Op::AfterCombat => host.after_combat(),
         Op::RestartMapMusic => host.restart_map_music(),
         Op::ForgetBattlesWon => host.forget_battles_won(),
@@ -2050,6 +2226,7 @@ fn command_actor(field: &mut Field, op: Op) {
                 actor.animation_shift = shift;
             }
         }
+        Op::RestartStep(..) | Op::Settle(_) => set_actor_in_place(field, op),
         Op::Pan(dx, dy) => field.pan_by(dx, dy),
         Op::StepBack { speed, shift } => {
             let by = field.player().facing.opposite().delta();
@@ -2117,6 +2294,7 @@ const fn starts_hold(op: &Op) -> bool {
             | Op::Shop(_)
             | Op::Combat
             | Op::StoryBattle(_)
+            | Op::Credits
     )
 }
 
@@ -2134,6 +2312,10 @@ fn start_hold(slot: usize, op: Op, host: &mut impl EventHost) -> Hold {
         }
         Op::Battle(scene) => {
             host.start_battle(scene);
+            Hold::Battle(slot)
+        }
+        Op::Credits => {
+            host.start_credits();
             Hold::Battle(slot)
         }
         Op::Shop(shop) => {
@@ -2160,6 +2342,62 @@ fn start_hold(slot: usize, op: Op, host: &mut impl EventHost) -> Hold {
         }
         _ => Hold::Dialogue(slot),
     }
+}
+
+/// The ops that set an actor where it stands: its animation's step, or its
+/// cell under its sprite.
+fn set_actor_in_place(field: &mut Field, op: Op) {
+    match op {
+        Op::RestartStep(actor, step) => {
+            if let Some(actor) = field.actor_mut(actor) {
+                actor.restart_at_step(step);
+            }
+        }
+        Op::Settle(actor) => {
+            if let Some(actor) = field.actor_mut(actor) {
+                actor.settle();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Whether `op` picks the program that runs next.
+fn branches(op: &Op) -> bool {
+    matches!(
+        op,
+        Op::IfFlags { .. }
+            | Op::IfCommand { .. }
+            | Op::IfArea { .. }
+            | Op::IfChoice { .. }
+            | Op::IfLost { .. }
+            | Op::IfChest { .. }
+            | Op::IfZiDataHeld { .. }
+            | Op::IfZoidOwned { .. }
+            | Op::IfRegulation { .. }
+            | Op::IfSeen { .. }
+            | Op::IfStateSet { .. }
+            | Op::IfPlayer { .. }
+            | Op::IfPlayerWalking { .. }
+            | Op::IfPlayerSprite { .. }
+            | Op::IfPlayerOn { .. }
+            | Op::IfBattlesWon { .. }
+            | Op::IfMusic { .. }
+            | Op::IfTask { .. }
+            | Op::IfPortal { .. }
+            | Op::IfCompanion { .. }
+            | Op::TakeCompanion { .. }
+            | Op::Call(_)
+            | Op::Loop(_)
+            | Op::Repeat(..)
+            | Op::Spawn(..)
+            | Op::End
+    )
+}
+
+/// The record companion slot `slot` holds, `None` when it is empty.
+fn companion(host: &impl EventHost, slot: usize) -> Option<u8> {
+    Some(host.state_byte(COMPANION_SLOTS + slot)).filter(|&index| index != NO_COMPANION)
 }
 
 #[cfg(test)]
@@ -2200,6 +2438,10 @@ mod tests {
 
         fn start_battle(&mut self, scene: u8) {
             self.log.push(format!("battle {scene}"));
+        }
+
+        fn start_credits(&mut self) {
+            self.log.push("credits".to_owned());
         }
 
         fn start_shop(&mut self, shop: Shop) {
@@ -2267,6 +2509,14 @@ mod tests {
             self.log.push(format!("whiten {level}"));
         }
 
+        fn set_fade_to_white(&mut self, white: bool) {
+            self.log.push(format!("fade to white {white}"));
+        }
+
+        fn silence(&mut self) {
+            self.log.push("silence".to_owned());
+        }
+
         fn seen_guard(&self) -> Option<usize> {
             None
         }
@@ -2287,6 +2537,22 @@ mod tests {
 
         fn leave(&mut self, list: u8) {
             self.log.push(format!("leave {list}"));
+        }
+
+        fn companion_offered(&self, index: usize) -> bool {
+            index % 2 == 0
+        }
+
+        fn join_companion(&mut self, index: u8) {
+            self.log.push(format!("join companion {index}"));
+        }
+
+        fn leave_companion(&mut self, index: u8) {
+            self.log.push(format!("leave companion {index}"));
+        }
+
+        fn set_state_byte(&mut self, at: usize, value: u8) {
+            self.log.push(format!("state {at:#x} = {value:#x}"));
         }
 
         fn start_script(&mut self, table: &'static str, index: u16) {

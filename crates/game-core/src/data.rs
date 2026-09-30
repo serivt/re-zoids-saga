@@ -224,6 +224,25 @@ impl<'rom> GameData<'rom> {
         saga_party::leave_group(self.rom, state, list)
     }
 
+    /// Whether record `index` of chapter 9's companions' table is offered
+    /// with `state`.
+    #[must_use]
+    pub fn companion_offered(&self, state: &[u8], index: usize) -> bool {
+        saga_party::companion_offered(self.rom, state, index)
+    }
+
+    /// Adds the character of the companions' record `index` to the party
+    /// in `state`; `None` when the record cannot be read.
+    pub fn join_companion(&self, state: &mut [u8], index: usize) -> Option<()> {
+        saga_party::join_companion(self.rom, state, index)
+    }
+
+    /// Takes the character of the companions' record `index` out of the
+    /// party in `state`; `None` when the record cannot be read.
+    pub fn leave_companion(&self, state: &mut [u8], index: usize) -> Option<()> {
+        saga_party::leave_companion(self.rom, state, index)
+    }
+
     /// Battle scene `index` of the table cutscenes stage.
     #[must_use]
     pub fn battle_scene(&self, index: usize) -> Option<BattleScene> {

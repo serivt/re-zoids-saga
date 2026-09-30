@@ -33,10 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   turning on Blood; the defense of the Ultrasaurus; and story battles 30 to 35 up to
   the true Death Saurer at Eve Polis, with the area's shops, labs and teachers. The
   party may cross the sea once Dr. D has shown his cannon.
+- The story of chapter 9: the Emperor wakes the Zoid core and fires on Arcadia Castle;
+  at the base Earth and Jack let the player pick two companions for the assault; Fran,
+  Gale and Opis wait in the occupied castle (story battles 36 to 38) and the Emperor at
+  its heart (39 and 40); the space-time transfer device takes everyone home, with the
+  area's shops, lab and teacher.
+- The staff credits that close chapter 9: the red Liger running over the plains while
+  the staff's names rise, with their song, as in the original.
 
 ### Changed
 
-- The demo ends at the start of chapter 9.
+- The demo ends at the start of chapter 10.
 - A story warp starts the map's song and runs the map's handler once its objects are
   placed, and its fade in runs the field's hook and the objects' animations, as in the
   original; a map a handler loads again starts its song once loaded.

@@ -826,12 +826,106 @@ staged scenes' reload (6 to 9 frames shorter in the port, as in chapters 6 and 7
 pictures differ only in the animations' phase after the continue and in the random
 cells of the barrage.
 
+## Chapter 9
+
+Source of knowledge: own reading of the area's map handlers (`0x08025468` to
+`0x080279C0`), the tasks they spawn, the objects' code and the routines named below;
+checked against a reference emulator with saves patched to each scene's flags, as the
+earlier chapters'. Implemented in `crates/game-core/src/story/chapter9.rs`, the staff
+roll in `crates/game-core/src/credits.rs`.
+
+Area 9 is maps 273 to 296: the kingdom's base (the lookout 289, the briefing room 295,
+the shops 291 to 293), the occupied Arcadia Castle (Fran's room 279, the Emperor's hall
+281, Gale's room 283 and the room past it 284, Opis's room 285, the castle's heart
+296), and the rooms the ending loads (276, 277). Several maps have a twin the scenes
+load instead (280 for 279, 282 for 281). The chapter's story:
+
+| Where | Handler | Condition | What happens | Sets |
+|---|---|---|---|---|
+| 281, 282 | `0x08025468` | not `0x12F` | The characters of group 8 are met (`0x08009A14`); the opening (task `0x080254D0`): the Emperor presses Opis at the Zoid core (`0x271`, `0x272`), Gale brings Fran (`0x273`), the core wakes (`0x274` to `0x277`) and the hall whitens; at the lookout (289) the soldiers report the energy (`0x278`, `0x279`) and the prince runs off (`0x27A`); in the briefing room (295) the cannon flashes (`0x27B`) and the Emperor's image speaks (`0x27C` to `0x27E`) | `0x12F` |
+| 295 | `0x08026304` | not `0x130` | Jack's briefing (task `0x0802636C`, which the opening also calls): the first time, what is known of the castle (`0x280`) and the companions' slots emptied; then the prince walks about until he tells Regina he is ready (object `0x0802672C`, `0x28D`) and the party leaves | `0x131`; `0x130` |
+| 295 | | not `0x130` | Earth (`0x08026764`) and Jack (`0x0802681C`) call in companions (below) | |
+| 279, 280 | `0x080268D8` | not `0x132` | Fran (task `0x08026934`, `0x28F`, `0x290`); story battle 36; won, Fran falls (`0x291`), the Emperor scorns her (282, `0x292`), Blood takes her away (`0x293`, `0x294`), the party wonders (`0x295`) | `0x132` |
+| 283 | `0x08026F2C` | not `0x133` | Reaching cell (9, 5): Gale (task `0x08026F7C`, `0x296`); story battle 37; won, Gale falls before Jack (`0x297`), the party goes through the door (284), Blood finds Gale and Fran's warp takes them (`0x298` to `0x29A`) | `0x133` |
+| 285 | `0x0802745C` | not `0x134` | Opis (task `0x080274B4`, `0x29B`); story battle 38; won, Opis sinks and seems to fall (`0x29C`, `0x29D`), the party runs from a blast (`0x29E`) to the hall (281), Opis rises and meets Blood (`0x29F` to `0x2A1`) | `0x134` |
+| 296 | `0x080279C0` | not `0x135` | The Emperor (task `0x08027AAC`, `0x2A2` to `0x2A6`); story battle 39 | `0x135` |
+| 296 | | `0x135`, not `0x136` | The finale (task `0x08027E8C`): the Emperor's Zoid burns and he calls on his son (`0x2A7`, `0x2A8`); Opis, Blood, Fran and Gale face their rivals (`0x2A9` to `0x2AF`); story battle 40; won, the space-time transfer device opens, the Emperor overloads it and flees through it (`0x2B0` to `0x2B2`), Blood, Fran, Gale and Opis follow (`0x2B3` to `0x2B7`) and it closes (`0x2B8`); at home (276, 277) the Queen and Regina welcome the prince (`0x2B9` to `0x2BE`) and he kneels at the ceremony; the staff roll (below); the companions leave, the characters of group 9 are met (`0x08009A20`) and the party is taken to map 340, chapter 10's first | `0x136` |
+
+The teacher uses `0x08012090`: deck command `0x1D` (`0x080095DC` through `0x08009430`,
+dialogues `0x3B4` and `0x3B5`). The keepers (`0x080093CC` on): item shop 18, armaments
+shop 24 and lab 17.
+
+The companions: the table at ROM `0x0832AF28` holds 29 records of a character, its Zoid
+and a condition (0 always; 1 the character's own flag, bit 0 of its record; 2 and 3 bit
+0 of characters `0x12` and `0x13`'s). Speaking to Earth or Jack (`0x08026694`) sets game
+flag `n` for each record `n` offered and flag `0x1D`, resets the text system
+(`0x0803E0B8`, a frame), takes the other caller's pick off the list (its record's flag
+cleared, with the other form of the same character: records `0x19` and `0x1B`, `0x1A`
+and `0x1C`), and offers the list (`0x288`, `0x282`); a pick is kept in the game state's
+byte `+0xCD0` (Earth's) or `+0xCD1` (Jack's) and joins the party with a unit of its
+Zoid (`0x08026614`: `0x080372D0` with the character, `0xE` and the Zoid; `0x28C`,
+`0x286`). With the slot full, the caller offers to send the pick away (`0x28A`,
+`0x284`; `0x08026634`: `0x0803738C`, then the repair of `0x08037510`). `0xFF` marks an
+empty slot.
+
+The fades to white: `0x080016A8` with 7 sets `BLDCNT` to `0x3FBF` (every layer toward
+white) and raises the fade level from 0 to 31 a step every eighth frame, holding the
+task; `0x0800196C` then turns the screen black at once (`BLDCNT` `0x3FFF`, level 31).
+
+The staff roll (`0x0800C430`, the task `0x08043BA4` in slot 4, which the caller waits
+for): the roll borrows the attack scenes' engine.
+
+- **Layer:** the view loader (`0x08043EAC` with scenery `0x11`) loads scenery image
+  `0x11 × 3 + 2`, whose loader entries put its colors at palette index 0 and its
+  tiles, 512 of them, row after row as the layer's map (ROM `0x0842B788`) lays them.
+  The layer shows 16 lines down, through a window of lines 16 to 143 (`0x08042020`),
+  black around it. The scenery's task (`0x08043FF8`) moves it 1/16 pixel a frame the
+  party's way, and the image's line routine (the table at `0x080441B8`) moves lines 110
+  to 120 1/16 pixel more a frame and lines 121 to 143 a pixel more.
+- **Liger:** shot sprite `0x7E`, animation 0 looping at (160, 144).
+- **Lines:** shot sprite `0x7F`, one animation per line. The 27 groups (the 0x1C-byte
+  records at ROM `0x6D3E58`: a count, a speed, and up to 20 lines) rise from the screen's
+  bottom edge (x 136 for the first line, 144 for the rest, 16 lines apart), each line
+  with a black shadow a pixel right and down (OBJ palette 15, cleared). A line shows
+  once it is above line 160 and goes at 0 (`0x080439E0`); a group starts two frames
+  after the last line of the one before has gone, and the last group stops once its
+  first line reaches 64.
+- **Timing, from the call's frame:** the roll's song (2) at 2; the layer and the Liger
+  start moving at 10; the fade in (the fade task `0x08004034`, kind 0) shows level 31
+  at 16 and 0 at 47; the first group at 50. From the frame the last group stops: the
+  fade out (kind 1) is spawned ten seconds later, at 601, and shows level 0 at 603 and
+  31 at 634; three seconds after the fade, at 817, song 0 stops the music, and the
+  caller goes on at 818. The caller then clears the screen's memory and resets the text
+  system: two more frames.
+
+What the chapter needed of the engine: cutscene loads that leave the song as it is
+(`Op::LoadScene`, `0x080079E8`: five frames plus one per object, where `0x080076C0`
+takes six and starts the map's song); a map's handler run within the warping task's
+own call, so what it spawns into that task's slot is lost and a load it makes holds the
+whole game (`Hold::Frozen`); the companions (`Op::OfferCompanions`,
+`Op::HideCompanion`, `Op::IfCompanion`, `Op::TakeCompanion`, `Op::DropCompanion`,
+`Op::ForgetCompanions`); an actor placed on another's cell (`Op::PlaceOnActor`); an
+animation taken to the last frame of a step (`Op::RestartStep`, a task writing the
+entity's `+0x34` with its countdown at 1) and an actor stood on the cell under its
+sprite (`Op::Settle`); every sound stopped (`Op::Silence`, `0x08001988`); fades toward
+white (`Op::FadeToWhite`); and the staff roll (`Op::Credits`).
+
+Checked against the original, scene by scene from patched saves: the opening, the
+companions' choice (the party's and units' data byte for byte the original's), the
+setting out, Fran, Gale and Opis with story battles 36 to 38, the Emperor with story
+battles 39 and 40, the device, the homecoming and the staff roll (the story battles won
+with the enemies' hit points kept at 1 in the original and the party given 9999 hit
+points in the port). Every interval that no key bounds is equal but for a Zoid map's
+load (1 or 2 frames); the staff roll's song, its end and chapter 10's song come in the
+same frames as the original's. Sampled every seventh frame, the roll's pictures match
+but for the scenery a pixel off here and there on about one frame in five: the
+original rewrites the layer's scroll table late in its busy frames, how late moving
+with the load, and the port takes line 100 as the point the rewrite reaches.
+
 ## The end of the demo (a port feature)
 
-Source of knowledge: this project's own design. The port's story stops where chapter 8
-does, in chapter 9's first map (281) once the true Death Saurer is beaten (flag
-`0x1C7`).
-When
+Source of knowledge: this project's own design. The port's story stops where chapter 9
+does, in chapter 10's first map (340) once the Emperor is beaten (flag `0x136`). When
 the player walks freely there in full light (after the scene's fade in, or after
 continuing a save made there), the game waits a second and ends the demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the
 player (`port/demo/thanks`) and waits for A with the prompt blinking; it then asks

@@ -201,6 +201,15 @@ impl<'rom> SoundEngine<'rom> {
         self.players[0].stop();
     }
 
+    /// Stops every player, the music's and the sound effects'
+    /// (`0x0805BEEC`, `0x0805C588` on each).
+    pub fn stop_all(&mut self) {
+        for player in 0..PLAYERS {
+            self.silence(player, None);
+            self.players[player].stop();
+        }
+    }
+
     /// Voices sounding now: sampled ones and programmable ones.
     #[must_use]
     pub fn voice_counts(&self) -> (usize, usize) {

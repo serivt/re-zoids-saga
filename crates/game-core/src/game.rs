@@ -35,6 +35,7 @@ use thiserror::Error;
 use crate::battle::Staged;
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::combat::{Combat, Outcome};
+use crate::credits::Credits;
 use crate::data::GameData;
 use crate::demo::{DemoEnd, DemoStep};
 use crate::event::{
@@ -265,6 +266,9 @@ struct StoryEffects {
     calm: bool,
     /// How far the field is brightened toward white (`BLDY`), 0 to 16.
     whiten: u8,
+    /// Whether the fade level brightens every layer toward white
+    /// (`BLDCNT` `0x3FBF`) instead of darkening it.
+    fade_to_white: bool,
     /// The guard that last saw the player.
     seen_guard: Option<usize>,
     /// Where warps go instead, until the next map's handler runs.
@@ -292,6 +296,8 @@ pub struct Game<'rom> {
     active_script: Option<usize>,
     last_runner: Option<usize>,
     battle: Option<Box<Staged>>,
+    /// The staff credits an event rolls, while they run.
+    credits: Option<Box<Credits>>,
     /// The shop a keeper opened, while it is open.
     shop: Option<Box<PauseMenu>>,
     /// The battle against a roaming enemy, while it runs.
@@ -337,7 +343,9 @@ pub struct Game<'rom> {
     gift: Option<Reward>,
     effects: StoryEffects,
     /// How far the frame shown is brightened toward white.
-    shown_whiten: u8,
+    /// The brightening toward white the frame shows, and whether its fade
+    /// level brightens toward white.
+    shown_white: (u8, bool),
     player_name: String,
     party: Party,
     state: Vec<u8>,
@@ -517,6 +525,7 @@ impl<'rom> Game<'rom> {
             active_script: None,
             last_runner: None,
             battle: None,
+            credits: None,
             shop: None,
             combat: None,
             encounter: None,
@@ -539,7 +548,7 @@ impl<'rom> Game<'rom> {
             chest: None,
             gift: None,
             effects: StoryEffects::default(),
-            shown_whiten: 0,
+            shown_white: (0, false),
             player_name: DEFAULT_PLAYER_NAME.to_owned(),
             party: Party::default(),
             state,
@@ -618,9 +627,12 @@ impl<'rom> Game<'rom> {
         if let Some(stage) = self.battle.as_mut() {
             stage.latch();
         }
+        if let Some(credits) = self.credits.as_mut() {
+            credits.latch();
+        }
         self.windows.latch();
         self.shown_brightness = self.events.brightness();
-        self.shown_whiten = self.effects.whiten;
+        self.shown_white = (self.effects.whiten, self.effects.fade_to_white);
     }
 
     /// Turns the port's debugging mode on or off and says whether it is on
@@ -1198,21 +1210,30 @@ impl<'rom> Game<'rom> {
     /// `0x0800BEE4`).
     fn run_map_handler(&mut self, map: usize) -> Result<(), GameError> {
         self.effects.redirect = None;
-        self.run_handler(story::map_handler(map))
+        self.run_handler(story::map_handler(map), false)
     }
 
-    /// Runs a map's handler once the map is loaded. Every handler of the
-    /// original starts with `0x0800BEE4` or `0x0800802C`, which clear the
-    /// field's state halfword (`0x02000008`), so the enemies meet the party
-    /// again on the next map.
-    fn run_handler(&mut self, handler: Option<&'static [Op]>) -> Result<(), GameError> {
+    /// Runs a map's handler once the map is loaded, `after_load` when a
+    /// task's warp loaded it (see [`Events::run_after_load`]). Every handler
+    /// of the original starts with `0x0800BEE4` or `0x0800802C`, which
+    /// clear the field's state halfword (`0x02000008`), so the enemies meet
+    /// the party again on the next map.
+    fn run_handler(
+        &mut self,
+        handler: Option<&'static [Op]>,
+        after_load: bool,
+    ) -> Result<(), GameError> {
         self.effects.calm = false;
         let Some(handler) = handler else {
             return Ok(());
         };
         let mut events = std::mem::take(&mut self.events);
         let mut host = self.host();
-        events.run_now(handler, &mut host);
+        if after_load {
+            events.run_after_load(handler, &mut host);
+        } else {
+            events.run_now(handler, &mut host);
+        }
         let result = host.finish();
         self.events = events;
         result
@@ -1228,6 +1249,7 @@ impl<'rom> Game<'rom> {
             active_script: &mut self.active_script,
             last_runner: &mut self.last_runner,
             battle: &mut self.battle,
+            credits: &mut self.credits,
             shop: &mut self.shop,
             combat: &mut self.combat,
             encounter: self.encounter,
@@ -1330,6 +1352,9 @@ impl<'rom> Game<'rom> {
     /// A frame of the battle scene an event holds the game for; its end
     /// lets the event go on.
     fn update_battle(&mut self, input: Input) -> Result<(), GameError> {
+        if self.credits.is_some() {
+            return self.update_credits();
+        }
         let done = match self.battle.as_mut() {
             Some(stage) => {
                 stage.update(&self.data, input, &mut self.windows)?;
@@ -1343,6 +1368,30 @@ impl<'rom> Game<'rom> {
         };
         if done {
             self.battle = None;
+        }
+        self.update_events(|events, host| {
+            events.update_hold(done, host);
+        })
+    }
+
+    /// A frame of the staff credits an event holds the game for; their
+    /// end lets the event go on.
+    fn update_credits(&mut self) -> Result<(), GameError> {
+        let done = match self.credits.as_mut() {
+            Some(credits) => {
+                credits.update(self.data.bytes());
+                for song in credits.take_music() {
+                    self.effects.song = Some(song);
+                    let song = usize::from(song);
+                    Self::emit(&self.extensions, &Event::SoundRequested(song));
+                    self.sound.play_if_changed(song)?;
+                }
+                credits.is_done()
+            }
+            None => true,
+        };
+        if done {
+            self.credits = None;
         }
         self.update_events(|events, host| {
             events.update_hold(done, host);
@@ -1431,7 +1480,8 @@ impl<'rom> Game<'rom> {
         if !self.events.loading()
             && let Some(map) = self.arriving.take()
         {
-            self.run_map_handler(map)?;
+            self.effects.redirect = None;
+            self.run_handler(story::map_handler(map), true)?;
         }
         if self.events.fading_in_slowly() {
             self.update_events(|events, host| events.update_watch_fading(host))?;
@@ -1499,7 +1549,7 @@ impl<'rom> Game<'rom> {
                     &mut self.last_runner,
                     (id, false),
                 )?),
-                Talk::Event(program) => self.run_handler(Some(program)),
+                Talk::Event(program) => self.run_handler(Some(program), false),
             };
         }
         if !self.dialogue.is_done() {
@@ -1576,7 +1626,7 @@ impl<'rom> Game<'rom> {
                 ..
             }) => {
                 if let Some(program) = story::talk_handler(address) {
-                    self.run_handler(Some(program))?;
+                    self.run_handler(Some(program), false)?;
                     return Ok(true);
                 }
             }
@@ -1692,7 +1742,7 @@ impl<'rom> Game<'rom> {
                 actor.pause = MEETING_PAUSE;
             }
         }
-        self.run_handler(Some(story::ENCOUNTER))
+        self.run_handler(Some(story::ENCOUNTER), false)
     }
 
     /// A frame of the battle an event holds the game for; once it hands
@@ -1894,6 +1944,11 @@ impl<'rom> Game<'rom> {
                     combat.draw(frame, &self.windows, &self.skin, &self.painter);
                 }
             }
+            Screen::Field if self.credits.is_some() => {
+                if let Some(credits) = &self.credits {
+                    credits.draw(frame);
+                }
+            }
             Screen::Field if self.battle.is_some() => {
                 if let Some(stage) = &self.battle {
                     stage.draw(frame, &self.windows, &self.skin, &self.painter);
@@ -1903,9 +1958,13 @@ impl<'rom> Game<'rom> {
                 if let Some(field) = &self.field {
                     field.draw(frame);
                 }
-                whiten(frame, self.shown_whiten);
+                whiten(frame, self.shown_white.0);
                 self.windows.draw_shown(frame, &self.skin, &self.painter);
-                darken(frame, self.shown_brightness);
+                if self.shown_white.1 {
+                    whiten(frame, self.shown_brightness);
+                } else {
+                    darken(frame, self.shown_brightness);
+                }
             }
             Screen::OpeningMenu(frames) => {
                 if let Some(field) = &self.field {
@@ -2001,6 +2060,7 @@ struct Host<'a, 'rom> {
     active_script: &'a mut Option<usize>,
     last_runner: &'a mut Option<usize>,
     battle: &'a mut Option<Box<Staged>>,
+    credits: &'a mut Option<Box<Credits>>,
     shop: &'a mut Option<Box<PauseMenu>>,
     combat: &'a mut Option<Box<Combat>>,
     encounter: Option<usize>,
@@ -2088,6 +2148,10 @@ impl EventHost for Host<'_, '_> {
             Ok(stage) => *self.battle = Some(Box::new(stage)),
             Err(missing) => self.fail(GameError::Text(format!("no battle scene {}", missing.0))),
         }
+    }
+
+    fn start_credits(&mut self) {
+        *self.credits = Some(Box::new(Credits::new(&self.data)));
     }
 
     fn start_shop(&mut self, shop: Shop) {
@@ -2307,6 +2371,36 @@ impl EventHost for Host<'_, '_> {
         }
     }
 
+    fn companion_offered(&self, index: usize) -> bool {
+        self.data.companion_offered(self.state, index)
+    }
+
+    fn join_companion(&mut self, index: u8) {
+        if self
+            .data
+            .join_companion(self.state, usize::from(index))
+            .is_none()
+        {
+            self.fail(GameError::Text(format!("no companion {index}")));
+        }
+    }
+
+    fn leave_companion(&mut self, index: u8) {
+        if self
+            .data
+            .leave_companion(self.state, usize::from(index))
+            .is_none()
+        {
+            self.fail(GameError::Text(format!("no companion {index}")));
+        }
+    }
+
+    fn set_state_byte(&mut self, at: usize, value: u8) {
+        if let Some(byte) = self.state.get_mut(at) {
+            *byte = value;
+        }
+    }
+
     fn start_script(&mut self, table: &'static str, index: u16) {
         let found = self
             .scripts
@@ -2468,6 +2562,14 @@ impl EventHost for Host<'_, '_> {
         if let Some(field) = self.field.as_mut() {
             field.set_sea_crossing(crossing);
         }
+    }
+
+    fn set_fade_to_white(&mut self, white: bool) {
+        self.effects.fade_to_white = white;
+    }
+
+    fn silence(&mut self) {
+        self.sound.stop_all();
     }
 
     fn set_whiten(&mut self, level: u8) {

@@ -495,6 +495,36 @@ impl Actor {
         self.y = y * PIXEL;
     }
 
+    /// Takes its animation back or forward to the last frame of step
+    /// `step`, as a task writing the step (`+0x34`) with its countdown
+    /// (`+0x36`) at 1 does: the next frame shows the step after it.
+    pub fn restart_at_step(&mut self, step: usize) {
+        let Some(sheet) = self.sheet.as_ref() else {
+            return;
+        };
+        let Some(steps) = sheet.animations.get(self.animation_id) else {
+            return;
+        };
+        let through: u32 = steps
+            .iter()
+            .take(step + 1)
+            .map(|before| tick_length(before.duration, self.animation_shift))
+            .sum();
+        self.animation = through.saturating_sub(1);
+        self.start_shift = None;
+        self.pose = None;
+    }
+
+    /// Stands it on the cell its sprite's position falls in, as a task
+    /// placing an entity on its own position's cell does.
+    pub fn settle(&mut self) {
+        let size = self.size.max(1);
+        let cell = |at: i32| usize::try_from(at.div_euclid(size * PIXEL)).unwrap_or(0);
+        let column = cell(self.x - (size / 2 - SPRITE_SIDE / 2) * PIXEL);
+        let row = cell(self.y);
+        self.place((column, row));
+    }
+
     /// Plays animation `id` once from the start, stopping on its last step.
     pub fn play_once(&mut self, id: usize) {
         self.once = true;
