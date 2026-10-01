@@ -19,30 +19,32 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use extraction::{Identification, IdentifyError, Title};
+use game_core::FAST_FORWARD_SPEEDS;
 use game_core::port_text::{
     LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_AUTO_TEXT, LAUNCHER_AUTOSAVE, LAUNCHER_BACK,
     LAUNCHER_BATTLE_ANIMATIONS, LAUNCHER_CHOOSE_TRANSLATION, LAUNCHER_CLASSIC,
     LAUNCHER_CLASSIC_NOTE, LAUNCHER_CONTROLS_HELP, LAUNCHER_COPY_FAILED, LAUNCHER_DAMAGE_NUMBERS,
     LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED, LAUNCHER_DOWNLOADED,
     LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS, LAUNCHER_ENHANCED, LAUNCHER_ENHANCED_NOTE,
-    LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED, LAUNCHER_FILTER, LAUNCHER_FROM_FILE,
-    LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD, LAUNCHER_HELP, LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP,
-    LAUNCHER_IMPORTED, LAUNCHER_KEYBOARD, LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT,
-    LAUNCHER_LEFT, LAUNCHER_LICENSE, LAUNCHER_LOOKING_UP, LAUNCHER_MODE, LAUNCHER_NO_GAMEPAD,
-    LAUNCHER_NO_ROM, LAUNCHER_NO_TRANSLATION, LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE,
-    LAUNCHER_ON, LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP,
-    LAUNCHER_PAGE_UNOPENED, LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_MODE, LAUNCHER_PICK_OPTIONS,
-    LAUNCHER_PICK_ROM, LAUNCHER_PICK_TOUCH_OPTIONS, LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY,
-    LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY,
-    LAUNCHER_RIGHT, LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE,
-    LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED,
-    LAUNCHER_SAVES, LAUNCHER_SAVES_HELP, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY,
-    LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP,
-    LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY,
-    LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION,
-    LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE,
-    LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME,
-    LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
+    LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED, LAUNCHER_FAST_FORWARD,
+    LAUNCHER_FILTER, LAUNCHER_FROM_FILE, LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD, LAUNCHER_HELP,
+    LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP, LAUNCHER_IMPORTED, LAUNCHER_KEYBOARD,
+    LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LEFT, LAUNCHER_LICENSE,
+    LAUNCHER_LOOKING_UP, LAUNCHER_MODE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM,
+    LAUNCHER_NO_TRANSLATION, LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON,
+    LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED,
+    LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_MODE, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM,
+    LAUNCHER_PICK_TOUCH_OPTIONS, LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY, LAUNCHER_PRESS_KEY,
+    LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT,
+    LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER,
+    LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SAVES,
+    LAUNCHER_SAVES_HELP, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY, LAUNCHER_SLOT_SAVED,
+    LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP, LAUNCHER_TOUCH_HELP,
+    LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY, LAUNCHER_TOUCH_OPTIONS_HELP,
+    LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP,
+    LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE,
+    LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW,
+    default_text,
 };
 use game_core::{Enhancement, TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -100,7 +102,7 @@ const OPTION_LINE_HEIGHT: usize = 10;
 const PAGE_ROWS: usize = 2;
 /// How far a page's address sits right of its label.
 const ADDRESS_INDENT: usize = 8;
-const KEY_LINE_HEIGHT: usize = 11;
+const KEY_LINE_HEIGHT: usize = 10;
 const CURSOR_X: usize = MARGIN + 6;
 const LABEL_X: usize = MARGIN + 14;
 const VALUE_GAP: usize = 8;
@@ -219,18 +221,24 @@ const SETTINGS: &[Setting] = if cfg!(target_os = "android") {
 enum ModeLine {
     Mode,
     Enhancement(Enhancement),
+    /// The fast forward's speed, 2x to 4x.
+    FastForward,
     Back,
 }
 
-const MODE_LINES: [ModeLine; 7] = [
+const MODE_LINES: [ModeLine; 8] = [
     ModeLine::Mode,
     ModeLine::Enhancement(Enhancement::BattleAnimations),
     ModeLine::Enhancement(Enhancement::DamageNumbers),
     ModeLine::Enhancement(Enhancement::AutoText),
     ModeLine::Enhancement(Enhancement::Autosave),
     ModeLine::Enhancement(Enhancement::WeaponReach),
+    ModeLine::FastForward,
     ModeLine::Back,
 ];
+/// The game mode's screen spaces its lines a pixel closer than the options'
+/// so all eight fit the panel.
+const MODE_LINE_HEIGHT: usize = 9;
 
 /// How much a step of the pad's size or opacity changes it, in percent.
 const TOUCH_STEP: u8 = 10;
@@ -242,9 +250,12 @@ enum Device {
     Gamepad,
 }
 
-/// A binding screen's entries: the buttons in two columns of five, then a
-/// row with the defaults and the way back.
-const BUTTON_ROWS: usize = 5;
+/// The fast forward's button on the binding screens, as the on-screen pad
+/// marks it.
+const FAST_FORWARD_MARK: &str = ">>";
+/// A binding screen's entries: the buttons in two columns of six (the
+/// second one short), then a row with the defaults and the way back.
+const BUTTON_ROWS: usize = 6;
 const DEFAULTS_ENTRY: usize = Button::ALL.len();
 const BACK_ENTRY: usize = DEFAULTS_ENTRY + 1;
 
@@ -714,12 +725,9 @@ impl Front {
                 }
             }
             Screen::Mode(_) => {
-                let Some(line) = row_at(
-                    y,
-                    OPTIONS_FIRST_LINE_Y,
-                    OPTION_LINE_HEIGHT,
-                    MODE_LINES.len(),
-                ) else {
+                let Some(line) =
+                    row_at(y, OPTIONS_FIRST_LINE_Y, MODE_LINE_HEIGHT, MODE_LINES.len())
+                else {
                     return Input::default();
                 };
                 self.screen = Screen::Mode(line);
@@ -1087,6 +1095,21 @@ impl Front {
             ModeLine::Enhancement(enhancement) if switched && self.mode.enhanced => {
                 self.mode.enhancements.toggle(enhancement);
             }
+            ModeLine::FastForward if switched && self.mode.enhanced => {
+                let speeds = FAST_FORWARD_SPEEDS;
+                let speed = self.mode.enhancements.fast_forward;
+                self.mode.enhancements.fast_forward = if pressed.is_held(Button::Left) {
+                    if speed > *speeds.start() {
+                        speed - 1
+                    } else {
+                        *speeds.end()
+                    }
+                } else if speed < *speeds.end() {
+                    speed + 1
+                } else {
+                    *speeds.start()
+                };
+            }
             ModeLine::Back if pressed.is_held(Button::A) => self.screen = Screen::Main,
             _ => {}
         }
@@ -1142,7 +1165,9 @@ impl Front {
         if pressed.is_held(Button::Down) {
             entry = match entry {
                 DEFAULTS_ENTRY | BACK_ENTRY => entry,
-                entry if entry % BUTTON_ROWS + 1 < BUTTON_ROWS => entry + 1,
+                entry if entry % BUTTON_ROWS + 1 < BUTTON_ROWS && entry + 1 < DEFAULTS_ENTRY => {
+                    entry + 1
+                }
                 entry if entry < BUTTON_ROWS => DEFAULTS_ENTRY,
                 _ => BACK_ENTRY,
             };
@@ -1151,7 +1176,8 @@ impl Front {
             entry = match entry {
                 DEFAULTS_ENTRY => BACK_ENTRY,
                 BACK_ENTRY => DEFAULTS_ENTRY,
-                entry => (entry + BUTTON_ROWS) % DEFAULTS_ENTRY,
+                entry if entry < BUTTON_ROWS => (entry + BUTTON_ROWS).min(DEFAULTS_ENTRY - 1),
+                entry => entry - BUTTON_ROWS,
             };
         }
         let chosen = pressed.is_held(Button::A);
@@ -1374,10 +1400,12 @@ impl Front {
             .collect();
         let value_x = self.value_column(&labels);
         for (index, line) in MODE_LINES.iter().enumerate() {
-            let y = OPTIONS_FIRST_LINE_Y + index * OPTION_LINE_HEIGHT;
+            let y = OPTIONS_FIRST_LINE_Y + index * MODE_LINE_HEIGHT;
             let is_selected = index == selected;
             let color = match line {
-                ModeLine::Enhancement(_) if !self.mode.enhanced => UNAVAILABLE,
+                ModeLine::Enhancement(_) | ModeLine::FastForward if !self.mode.enhanced => {
+                    UNAVAILABLE
+                }
                 _ if is_selected => TEXT,
                 _ => DIM,
             };
@@ -1395,6 +1423,17 @@ impl Front {
                         UNAVAILABLE
                     };
                     Some((self.text(key), value_color))
+                }
+                ModeLine::FastForward => {
+                    let value_color = if self.mode.enhanced {
+                        TEXT
+                    } else {
+                        UNAVAILABLE
+                    };
+                    Some((
+                        format!("{}x", self.mode.enhancements.fast_forward),
+                        value_color,
+                    ))
                 }
                 ModeLine::Back => None,
             }
@@ -1664,7 +1703,8 @@ impl Front {
     }
 
     /// A button's name on the binding screens: the pad's directions in the
-    /// screen's language, the others as the console marks them.
+    /// screen's language, the others as the console marks them, and the
+    /// fast forward as the on-screen pad does.
     fn button_label(&self, button: Button) -> String {
         match button {
             Button::Up => self.text(LAUNCHER_UP),
@@ -1677,6 +1717,7 @@ impl Front {
             Button::R => "R".to_owned(),
             Button::Start => "START".to_owned(),
             Button::Select => "SELECT".to_owned(),
+            Button::FastForward => FAST_FORWARD_MARK.to_owned(),
         }
     }
 
@@ -1807,6 +1848,7 @@ impl ModeLine {
             Self::Enhancement(Enhancement::AutoText) => LAUNCHER_AUTO_TEXT,
             Self::Enhancement(Enhancement::Autosave) => LAUNCHER_AUTOSAVE,
             Self::Enhancement(Enhancement::WeaponReach) => LAUNCHER_WEAPON_REACH,
+            Self::FastForward => LAUNCHER_FAST_FORWARD,
             Self::Back => LAUNCHER_BACK,
         }
     }
@@ -2306,7 +2348,7 @@ mod tests {
             ),
             (b, a)
         );
-        front.bind(Device::Keyboard, Button::Start, "Space");
+        front.bind(Device::Keyboard, Button::Start, "Q");
         front.bind(Device::Gamepad, Button::Select, "y");
         let settings = front.settings();
         assert_eq!(settings.keys.len(), 3);

@@ -116,6 +116,9 @@ translated message wider than its note allows.
 | `port/options/autosave-help` | マップ移動時に専用のスロットへ記録 | Its help line, 224 pixels |
 | `port/options/weapon-reach` | 射程表示 | The weapons' reach's line, 96 pixels |
 | `port/options/weapon-reach-help` | 武器の射程をマスで表示　ＳＥＬＥＣＴで列を切替 | Its help line, 224 pixels |
+| `port/options/fast-forward` | 早送り | The fast forward's speed's line, 96 pixels |
+| `port/options/fast-forward-help` | 早送りボタンを押している間の速さ | Its help line, 224 pixels |
+| `port/options/fast-forward-value` | {count}倍 | Its value, {count} from 2 to 4, 48 pixels |
 | `port/options/on`, `port/options/off` | ＯＮ, ＯＦＦ | A setting's value, 48 pixels |
 | `port/options/keys` | 左右：変更　Ｂ：もどる | The help's second line, 224 pixels |
 | `port/reach/front`, `port/reach/back` | FRONT, BACK | The row over the grid of a weapon's reach, in the small capitals alone; the plate widens past 27 pixels, up to 36 |

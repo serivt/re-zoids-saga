@@ -7,7 +7,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use game_core::{Enhancements, PlayMode};
+use game_core::{Enhancements, FAST_FORWARD_SPEEDS, PlayMode};
 use platform::Button;
 use platform_sdl3::Filter;
 
@@ -37,6 +37,8 @@ const AUTO_TEXT_KEY: &str = "auto-text";
 const AUTOSAVE_KEY: &str = "autosave";
 /// The enhanced mode's weapons' reach, `1` shown or `0` not.
 const WEAPON_REACH_KEY: &str = "weapon-reach";
+/// The enhanced mode's fast forward's speed, 2 to 4.
+const FAST_FORWARD_KEY: &str = "fast-forward";
 const SHARP: &str = "sharp";
 const SMOOTH: &str = "smooth";
 /// The window's size in multiples of the screen, its default and the
@@ -94,7 +96,8 @@ pub struct Settings {
 pub struct GameMode {
     /// Whether the game plays in the enhanced mode.
     pub enhanced: bool,
-    /// The enhancements the enhanced mode turns on.
+    /// The enhancements the enhanced mode turns on, and its fast forward's
+    /// speed.
     pub enhancements: Enhancements,
 }
 
@@ -194,6 +197,15 @@ impl Settings {
                 AUTO_TEXT_KEY => settings.mode.enhancements.auto_text = value == "1",
                 AUTOSAVE_KEY => settings.mode.enhancements.autosave = value != "0",
                 WEAPON_REACH_KEY => settings.mode.enhancements.weapon_reach = value != "0",
+                FAST_FORWARD_KEY => {
+                    if let Some(speed) = value
+                        .parse()
+                        .ok()
+                        .filter(|speed| FAST_FORWARD_SPEEDS.contains(speed))
+                    {
+                        settings.mode.enhancements.fast_forward = speed;
+                    }
+                }
                 _ => {}
             }
         }
@@ -237,12 +249,13 @@ impl Settings {
         };
         let _ = writeln!(
             text,
-            "{MODE_KEY}={mode}\n{BATTLE_ANIMATIONS_KEY}={}\n{DAMAGE_NUMBERS_KEY}={}\n{AUTO_TEXT_KEY}={}\n{AUTOSAVE_KEY}={}\n{WEAPON_REACH_KEY}={}",
+            "{MODE_KEY}={mode}\n{BATTLE_ANIMATIONS_KEY}={}\n{DAMAGE_NUMBERS_KEY}={}\n{AUTO_TEXT_KEY}={}\n{AUTOSAVE_KEY}={}\n{WEAPON_REACH_KEY}={}\n{FAST_FORWARD_KEY}={}",
             u8::from(self.mode.enhancements.battle_animations),
             u8::from(self.mode.enhancements.damage_numbers),
             u8::from(self.mode.enhancements.auto_text),
             u8::from(self.mode.enhancements.autosave),
-            u8::from(self.mode.enhancements.weapon_reach)
+            u8::from(self.mode.enhancements.weapon_reach),
+            self.mode.enhancements.fast_forward
         );
         for (button, key) in &self.keys {
             let _ = writeln!(text, "{BUTTON_PREFIX}{}={key}", button.name());
@@ -299,6 +312,7 @@ mod tests {
                     auto_text: true,
                     autosave: false,
                     weapon_reach: false,
+                    fast_forward: 4,
                 },
             },
         };
@@ -324,6 +338,9 @@ mod tests {
 
     #[test]
     fn the_game_mode_is_classic_until_the_enhanced_one_is_chosen() {
+        let speed = |text: &str| Settings::parse(text).mode.enhancements.fast_forward;
+        assert_eq!(speed("fast-forward=9\n"), 2);
+        assert_eq!(speed("fast-forward=3\n"), 3);
         assert_eq!(Settings::default().mode.play_mode(), PlayMode::Classic);
         let odd = Settings::parse("mode=turbo\nbattle-animations=0\n");
         assert_eq!(odd.mode.play_mode(), PlayMode::Classic);
@@ -342,6 +359,7 @@ mod tests {
                 auto_text: true,
                 autosave: false,
                 weapon_reach: true,
+                fast_forward: 2,
             })
         );
     }

@@ -33,7 +33,7 @@ const AUDIO_CHANNELS: i32 = 2;
 const BYTES_PER_PAIR: usize = 4;
 const BYTES_PER_PIXEL: usize = 3;
 /// The keys the buttons have unless the player chose others.
-const DEFAULT_KEYS: [(Scancode, Button); 10] = [
+const DEFAULT_KEYS: [(Scancode, Button); 11] = [
     (Scancode::Up, Button::Up),
     (Scancode::Down, Button::Down),
     (Scancode::Left, Button::Left),
@@ -44,6 +44,7 @@ const DEFAULT_KEYS: [(Scancode, Button); 10] = [
     (Scancode::Backspace, Button::Select),
     (Scancode::A, Button::L),
     (Scancode::S, Button::R),
+    (Scancode::Space, Button::FastForward),
 ];
 
 /// How a frame is scaled up to the window.
@@ -67,6 +68,8 @@ pub struct Sdl3Display {
     touch: Option<touch::TouchPad>,
     /// The on-screen pad's size and opacity, against their usual ones.
     touch_style: (f32, f32),
+    /// Whether the on-screen pad shows the fast forward.
+    touch_fast_forward: bool,
     filter: Filter,
     canvas: WindowCanvas,
     texture_creator: TextureCreator<WindowContext>,
@@ -117,6 +120,7 @@ impl Sdl3Display {
             pads,
             touch: None,
             touch_style: (1.0, 1.0),
+            touch_fast_forward: false,
             filter: Filter::Sharp,
             canvas,
             texture_creator,
@@ -450,6 +454,7 @@ impl Sdl3Display {
         self.touch = on.then(|| {
             let mut pad = touch::TouchPad::new((self.frame_width, self.frame_height));
             pad.set_style(self.touch_style.0, self.touch_style.1);
+            pad.set_fast_forward(self.touch_fast_forward);
             pad
         });
         self.canvas.set_blend_mode(if on {
@@ -472,6 +477,15 @@ impl Sdl3Display {
         self.touch_style = (f32::from(size) / 100.0, f32::from(opacity) / 100.0);
         if let Some(touch) = self.touch.as_mut() {
             touch.set_style(self.touch_style.0, self.touch_style.1);
+        }
+    }
+
+    /// Shows the fast forward on the on-screen pad, or leaves it out: the
+    /// enhanced mode's alone.
+    pub fn set_touch_fast_forward(&mut self, on: bool) {
+        self.touch_fast_forward = on;
+        if let Some(touch) = self.touch.as_mut() {
+            touch.set_fast_forward(on);
         }
     }
 

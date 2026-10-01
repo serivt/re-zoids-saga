@@ -47,6 +47,15 @@ Game mode chooses how the game plays, on a screen of its own:
     weapons and equipment screens, the cells of the battle's grid the weapon under the
     cursor reaches, from the front row or the back, SELECT turning from one to the other
     (see [menu.md](menu.md), Weapons' reach).
+  - *Fast forward* (2x by default, 3x or 4x, also in the pause menu's コンフィグ): the
+    speed the game plays at while the fast forward's button (Space, the gamepad's right
+    stick click or the on-screen pad's `>>`) is held: that many frames for each one
+    shown, with `>>2X` (or 3X, 4X) at the frame's top right in the port's small
+    capitals; letting go plays it at its pace again. The button is the launcher's alone:
+    the game never sees it, and it does nothing in the classic mode or while the
+    question to quit shows. The sound of the
+    frames the audio queue has no room for is dropped, so it keeps its pitch and skips
+    ahead (`apps/launcher/src/fast.rs`).
 
 The mode is set before the game starts (`Game::set_play_mode`, see
 `crates/game-core/src/play_mode.rs`) and does not change while it plays; saves are the
@@ -102,6 +111,10 @@ pad and the saves' export and import in place of the window's and the keyboard's
 | START (opens the pause menu) | Return | Start |
 | SELECT | Backspace | Back |
 | L, R | A, S | Shoulders |
+| Fast forward (`>>`, enhanced mode) | Space | Right stick click |
+
+The binding screens list the fast forward as `>>` after the console's buttons, in two
+columns of six.
 
 In a build with the `debug-mode` feature (`cargo run -p launcher --features debug-mode`),
 F10 turns a debugging mode on and off: the roaming enemies are intangible, so the player

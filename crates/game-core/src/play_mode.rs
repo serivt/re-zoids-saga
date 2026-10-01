@@ -41,7 +41,14 @@ pub struct Enhancements {
     /// the weapon under the cursor reaches on the battle's grid, from the
     /// front row or the back, SELECT turning from one to the other.
     pub weapon_reach: bool,
+    /// How many frames the fast forward plays for each one shown while its
+    /// button is held, from [`FAST_FORWARD_SPEEDS`]; the launcher plays
+    /// them, the game only keeps the choice.
+    pub fast_forward: u8,
 }
+
+/// The speeds the fast forward can take, in frames per frame shown.
+pub const FAST_FORWARD_SPEEDS: std::ops::RangeInclusive<u8> = 2..=4;
 
 impl Default for Enhancements {
     fn default() -> Self {
@@ -51,6 +58,7 @@ impl Default for Enhancements {
             auto_text: false,
             autosave: true,
             weapon_reach: true,
+            fast_forward: *FAST_FORWARD_SPEEDS.start(),
         }
     }
 }
@@ -135,6 +143,7 @@ mod tests {
             auto_text: true,
             autosave: true,
             weapon_reach: true,
+            fast_forward: 3,
         };
         assert!(PlayMode::Classic.enhancements().battle_animations);
         assert!(!PlayMode::Classic.enhancements().damage_numbers);

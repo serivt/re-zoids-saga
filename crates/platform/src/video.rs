@@ -103,11 +103,14 @@ pub enum Button {
     L,
     /// Right shoulder.
     R,
+    /// Not the console's: the enhanced mode's fast forward, which the
+    /// launcher turns on and off and the game never sees.
+    FastForward,
 }
 
 impl Button {
     /// Every button, in the order the settings list them.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::Up,
         Self::Down,
         Self::Left,
@@ -118,6 +121,7 @@ impl Button {
         Self::R,
         Self::Start,
         Self::Select,
+        Self::FastForward,
     ];
 
     const fn bit(self) -> u16 {
@@ -138,6 +142,7 @@ impl Button {
             Self::Select => "select",
             Self::L => "l",
             Self::R => "r",
+            Self::FastForward => "fast-forward",
         }
     }
 
@@ -166,6 +171,14 @@ impl Input {
     pub const fn with(self, button: Button) -> Self {
         Self {
             held: self.held | button.bit(),
+        }
+    }
+
+    /// This input with `button` let go.
+    #[must_use]
+    pub const fn without(self, button: Button) -> Self {
+        Self {
+            held: self.held & !button.bit(),
         }
     }
 

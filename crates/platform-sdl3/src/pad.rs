@@ -14,7 +14,7 @@ const STICK_DEADZONE: i16 = 16_000;
 /// The gamepad buttons the pad's buttons have unless the player chose
 /// others: the D-pad, A on the right face button and B on the bottom one,
 /// as the console's are placed.
-const DEFAULT_PAD_BUTTONS: [(PadButton, Button); 10] = [
+const DEFAULT_PAD_BUTTONS: [(PadButton, Button); 11] = [
     (PadButton::DPadUp, Button::Up),
     (PadButton::DPadDown, Button::Down),
     (PadButton::DPadLeft, Button::Left),
@@ -25,6 +25,7 @@ const DEFAULT_PAD_BUTTONS: [(PadButton, Button); 10] = [
     (PadButton::RightShoulder, Button::R),
     (PadButton::Start, Button::Start),
     (PadButton::Back, Button::Select),
+    (PadButton::RightStick, Button::FastForward),
 ];
 
 /// The gamepads connected and the map of their buttons.

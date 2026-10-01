@@ -5,8 +5,10 @@
 //!
 //! In landscape the screen fills the window's height in the middle, the
 //! cross and Select on the left, A, B and Start on the right, L and R in
-//! the top corners. In portrait the screen fills the width at the top and
-//! the controls sit below it, in the same places.
+//! the top corners and the fast forward at the top in the middle, over the
+//! screen's edge. In portrait the screen fills the width at the top and
+//! the controls sit below it, in the same places, the fast forward between
+//! L and R.
 //!
 //! Source of knowledge: this project's own design.
 
@@ -152,6 +154,12 @@ impl TouchLayout {
             ),
             centered_pill(Button::Select, left, height - unit * 0.08, unit),
             centered_pill(Button::Start, right, height - unit * 0.08, unit),
+            centered_pill(
+                Button::FastForward,
+                width * 0.5,
+                unit * (0.03 + MENU_SIZE.1 / 2.0),
+                unit,
+            ),
         ];
         Self { screen, controls }
     }
@@ -210,6 +218,12 @@ impl TouchLayout {
                 Button::Start,
                 width * 0.5 + unit * 0.1,
                 height - unit * 0.08,
+                unit,
+            ),
+            centered_pill(
+                Button::FastForward,
+                width * 0.5,
+                top + unit * (0.04 + SHOULDER_SIZE.1 / 2.0),
                 unit,
             ),
         ];

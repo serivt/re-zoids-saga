@@ -48,7 +48,8 @@ start of chapter 10, where the game thanks the player and offers to save.
    opens a `.po` file you already have. Then Play. Saves are kept next to the ROM, in the original's `.sav` format.
 
 Default keys: arrows move, X = A, Z = B, Return = START, Backspace = SELECT, A = L,
-S = R, Esc (or Android's back button) asks whether to quit. Gamepads work too; keys and buttons can be changed in
+S = R, holding Space fast-forwards in the enhanced mode, Esc (or Android's back
+button) asks whether to quit. Gamepads work too; keys and buttons can be changed in
 Options.
 
 ## Build and run

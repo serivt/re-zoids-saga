@@ -37,7 +37,7 @@ pub use field::{
 };
 pub use game::{Game, GameError, Stage};
 pub use menu::{Member, MenuStep, Party, PauseMenu, Roster};
-pub use play_mode::{Enhancement, Enhancements, PlayMode};
+pub use play_mode::{Enhancement, Enhancements, FAST_FORWARD_SPEEDS, PlayMode};
 pub use rng::Rng;
 pub use save::{Found, SaveError, SaveFile, SavedGame};
 pub use script::{ScriptError, ScriptHost, ScriptRunner};

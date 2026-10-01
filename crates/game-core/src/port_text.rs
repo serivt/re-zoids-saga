@@ -76,6 +76,12 @@ pub const OPTIONS_AUTOSAVE_HELP: &str = "port/options/autosave-help";
 pub const OPTIONS_WEAPON_REACH: &str = "port/options/weapon-reach";
 /// See [`OPTIONS_WEAPON_REACH`].
 pub const OPTIONS_WEAPON_REACH_HELP: &str = "port/options/weapon-reach-help";
+/// The fast forward's speed: its line, its help and its value.
+pub const OPTIONS_FAST_FORWARD: &str = "port/options/fast-forward";
+/// See [`OPTIONS_FAST_FORWARD`].
+pub const OPTIONS_FAST_FORWARD_HELP: &str = "port/options/fast-forward-help";
+/// See [`OPTIONS_FAST_FORWARD`].
+pub const OPTIONS_FAST_FORWARD_VALUE: &str = "port/options/fast-forward-value";
 /// A setting that is on, and off.
 pub const OPTIONS_ON: &str = "port/options/on";
 /// See [`OPTIONS_ON`].
@@ -267,6 +273,8 @@ pub const LAUNCHER_AUTO_TEXT: &str = "port/launcher/auto-text";
 pub const LAUNCHER_AUTOSAVE: &str = "port/launcher/autosave";
 /// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_WEAPON_REACH: &str = "port/launcher/weapon-reach";
+/// The game mode's line of the fast forward's speed.
+pub const LAUNCHER_FAST_FORWARD: &str = "port/launcher/fast-forward";
 /// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_PICK_MODE: &str = "port/launcher/pick-mode";
 /// See [`LAUNCHER_MODE`].
@@ -389,6 +397,11 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         LAUNCHER_AUTOSAVE,
         "Autosave",
         "The enhanced mode's line that saves the game on each change of map, into a slot of its own listed first when continuing",
+    ),
+    launcher(
+        LAUNCHER_FAST_FORWARD,
+        "Fast forward",
+        "The enhanced mode's line of the fast forward's speed (2x to 4x), at which the game plays while its button (Space by default) is held",
     ),
     launcher(
         LAUNCHER_WEAPON_REACH,
@@ -891,6 +904,24 @@ pub const PORT_TEXTS: &[PortText] = &[
         pixels: 224,
     },
     PortText {
+        key: OPTIONS_FAST_FORWARD,
+        text: "早送り",
+        note: "The pause menu's settings, enhanced mode: the fast forward's speed's line, before its value at cell 13 (96 pixels)",
+        pixels: 96,
+    },
+    PortText {
+        key: OPTIONS_FAST_FORWARD_HELP,
+        text: "早送りボタンを押している間の速さ",
+        note: "The help line for the fast forward: how fast the game plays while its button (Space, or the on-screen pad's >>) is held; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: OPTIONS_FAST_FORWARD_VALUE,
+        text: "{count}倍",
+        note: "The fast forward's speed as its line shows it, {count} from 2 to 4; 48 pixels",
+        pixels: 48,
+    },
+    PortText {
         key: OPTIONS_ON,
         text: "ＯＮ",
         note: "A setting that is on, in the pause menu's settings; 48 pixels",
@@ -950,11 +981,12 @@ pub const PORT_TEXTS: &[PortText] = &[
 const SMALL_TEXTS: [&str; 3] = [REACH_FRONT, REACH_BACK, AUTOSAVE_NOTICE];
 
 /// The widest value of each marker, to check a message's lines.
-const WIDEST_VALUES: [(&str, u32); 4] = [
+const WIDEST_VALUES: [(&str, u32); 5] = [
     ("level", 99),
     ("area", 10),
     ("money", 9_999_999),
     ("slot", 9),
+    ("count", 4),
 ];
 
 /// The default text of the message `key`, if the port has one.

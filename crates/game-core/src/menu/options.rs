@@ -13,12 +13,13 @@ use super::{HELP_WINDOW, LEAVE_SOUND, MENU_MOVE_SOUND, MENU_WINDOW, MenuState, P
 use crate::ScriptHost;
 use crate::guide::GuideError;
 use crate::menu::MenuStep;
-use crate::play_mode::{Enhancement, Enhancements};
+use crate::play_mode::{Enhancement, Enhancements, FAST_FORWARD_SPEEDS};
 use crate::port_text::{
     OPTIONS_ANIMATIONS, OPTIONS_ANIMATIONS_HELP, OPTIONS_AUTO_TEXT, OPTIONS_AUTO_TEXT_HELP,
     OPTIONS_AUTOSAVE, OPTIONS_AUTOSAVE_HELP, OPTIONS_DAMAGE_NUMBERS, OPTIONS_DAMAGE_NUMBERS_HELP,
-    OPTIONS_KEYS, OPTIONS_OFF, OPTIONS_ON, OPTIONS_SPEED, OPTIONS_SPEED_HELP, OPTIONS_WEAPON_REACH,
-    OPTIONS_WEAPON_REACH_HELP, full_width, port_text,
+    OPTIONS_FAST_FORWARD, OPTIONS_FAST_FORWARD_HELP, OPTIONS_FAST_FORWARD_VALUE, OPTIONS_KEYS,
+    OPTIONS_OFF, OPTIONS_ON, OPTIONS_SPEED, OPTIONS_SPEED_HELP, OPTIONS_WEAPON_REACH,
+    OPTIONS_WEAPON_REACH_HELP, fill, full_width, port_text,
 };
 use crate::script::{MOVED_DOWN, MOVED_LEFT, MOVED_RIGHT, MOVED_UP, ScriptRunner};
 use crate::text::CELL_WIDTH;
@@ -35,8 +36,10 @@ const SCREEN_COLUMNS: u8 = 30;
 /// Rows a line of the list takes, and the list's frame.
 const ROWS_PER_LINE: u8 = 2;
 const FRAME_ROWS: u8 = 2;
-/// The fewest rows the list takes: the status panel's, which it covers.
+/// The fewest rows the list takes: the status panel's, which it covers;
+/// and the most, down to the help line, past which the list scrolls.
 const PANEL_ROWS: u8 = 8;
+const MOST_ROWS: u8 = 14;
 /// The cell where the values start.
 const VALUE_CELL: usize = 13;
 /// The cells of a line's window that hold no text: the frame and the
@@ -49,20 +52,23 @@ const CONFIRMED: u16 = 1;
 /// The message speeds, fastest first.
 const SPEEDS: std::ops::RangeInclusive<u16> = 1..=5;
 
-/// A line of the list: the message speed, or an enhancement on or off.
+/// A line of the list: the message speed, an enhancement on or off, or the
+/// fast forward's speed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Setting {
     MessageSpeed,
     Enhancement(Enhancement),
+    FastForward,
 }
 
-const SETTINGS: [Setting; 6] = [
+const SETTINGS: [Setting; 7] = [
     Setting::MessageSpeed,
     Setting::Enhancement(Enhancement::BattleAnimations),
     Setting::Enhancement(Enhancement::DamageNumbers),
     Setting::Enhancement(Enhancement::AutoText),
     Setting::Enhancement(Enhancement::Autosave),
     Setting::Enhancement(Enhancement::WeaponReach),
+    Setting::FastForward,
 ];
 
 impl Setting {
@@ -81,6 +87,7 @@ impl Setting {
             Self::Enhancement(Enhancement::WeaponReach) => {
                 (OPTIONS_WEAPON_REACH, OPTIONS_WEAPON_REACH_HELP)
             }
+            Self::FastForward => (OPTIONS_FAST_FORWARD, OPTIONS_FAST_FORWARD_HELP),
         }
     }
 }
@@ -124,7 +131,7 @@ impl PauseMenu {
             .map_or(usize::from(MAIN_LIST_END), |main| main.x + main.width);
         let left = u8::try_from(left).unwrap_or(MAIN_LIST_END);
         let rows = (u8::try_from(SETTINGS.len()).unwrap_or(u8::MAX) * ROWS_PER_LINE + FRAME_ROWS)
-            .max(PANEL_ROWS);
+            .clamp(PANEL_ROWS, MOST_ROWS);
         let rect = (left, 0, SCREEN_COLUMNS.saturating_sub(left), rows);
         windows.open_window(LIST_WINDOW, LIST_KIND, rect, STYLE);
         self.options.line = 0;
@@ -203,6 +210,20 @@ impl PauseMenu {
                 enhancements.toggle(enhancement);
                 true
             }
+            Setting::FastForward => {
+                let Some(enhancements) = self.options.enhancements.as_mut() else {
+                    return false;
+                };
+                let speed = enhancements.fast_forward;
+                let next = if more {
+                    speed + 1
+                } else {
+                    speed.saturating_sub(1)
+                };
+                let next = next.clamp(*FAST_FORWARD_SPEEDS.start(), *FAST_FORWARD_SPEEDS.end());
+                enhancements.fast_forward = next;
+                next != speed
+            }
         }
     }
 
@@ -226,6 +247,10 @@ impl PauseMenu {
                         .unwrap_or_default()
                         .is_on(enhancement);
                     port_text(&extensions, if on { OPTIONS_ON } else { OPTIONS_OFF })
+                }
+                Setting::FastForward => {
+                    let speed = self.options.enhancements.unwrap_or_default().fast_forward;
+                    fast_forward_value(&extensions, speed)
                 }
             };
             put_text(windows, &port_text(&extensions, label));
@@ -254,6 +279,14 @@ impl PauseMenu {
     }
 }
 
+/// The fast forward's `speed` as the list shows it.
+fn fast_forward_value(extensions: &crate::extension::SharedExtensions, speed: u8) -> String {
+    fill(
+        &port_text(extensions, OPTIONS_FAST_FORWARD_VALUE),
+        &[("count", u32::from(speed))],
+    )
+}
+
 /// The cell where the values start: [`VALUE_CELL`], or further left when
 /// the widest value, on or off or a speed, would not fit before the
 /// cursor's right mark (a translation's list starts further right).
@@ -264,6 +297,7 @@ fn value_cell(windows: &ScriptWindows<'_>) -> usize {
         port_text(&extensions, OPTIONS_ON),
         port_text(&extensions, OPTIONS_OFF),
         full_width(u32::from(*SPEEDS.end())),
+        fast_forward_value(&extensions, *FAST_FORWARD_SPEEDS.end()),
     ]
     .iter()
     .map(|value| metrics.width(value).div_ceil(CELL_WIDTH))

@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the weapon under the cursor reaches and those one shot takes, from the front row or the
   back; SELECT turns from one to the other. It is on by default and turned off like the
   other conveniences.
+- **Fast forward.** In the enhanced mode, holding Space (the gamepad's right stick click,
+  or the on-screen pad's new `>>` button at the top on Android) plays the game at 2x, or
+  3x or 4x as chosen on the game mode's screen or in the pause menu's Config, with a
+  small `>>2X` mark at the top right. The key can be changed on the keyboard's and
+  gamepad's screens.
 
 ### Fixed
 

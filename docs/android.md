@@ -39,7 +39,9 @@ it), and a tap on Yes or No answers the question to quit.
 
 While playing, the on-screen pad surrounds the game's screen: the cross and B, A on the
 sides and L, R, SELECT and START in the corners when the phone is held sideways; under
-the screen when it is upright. The cross takes the eight directions and several fingers
+the screen when it is upright. In the enhanced mode a `>>` button plays the game fast
+while it is held (see [launcher.md](launcher.md)): at the top in the middle, over the game
+screen's edge, when the phone is sideways, and between L and R when it is upright. The cross takes the eight directions and several fingers
 press at once. It hides while a gamepad is connected (Bluetooth or USB), which then
 plays as on the desktop.
 

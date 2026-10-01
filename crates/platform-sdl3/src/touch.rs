@@ -52,6 +52,8 @@ pub(crate) struct TouchPad {
     /// 0 to 1 of their usual one.
     size: f32,
     opacity: f32,
+    /// Whether the fast forward is laid out: the enhanced mode's alone.
+    fast_forward: bool,
 }
 
 impl TouchPad {
@@ -68,7 +70,14 @@ impl TouchPad {
             frame,
             size: 1.0,
             opacity: 1.0,
+            fast_forward: false,
         }
+    }
+
+    /// Lays the fast forward out, or leaves it out of the controls.
+    pub(crate) fn set_fast_forward(&mut self, on: bool) {
+        self.fast_forward = on;
+        self.window = (0, 0);
     }
 
     /// Makes the controls `size` times their usual size and `opacity`
@@ -85,6 +94,11 @@ impl TouchPad {
             self.window = window;
             let window = (to_f32_u32(window.0), to_f32_u32(window.1));
             self.layout = TouchLayout::sized(window, self.frame, self.size);
+            if !self.fast_forward {
+                self.layout
+                    .controls
+                    .retain(|placed| placed.control != Control::Button(Button::FastForward));
+            }
         }
     }
 
@@ -340,6 +354,7 @@ fn label(button: Button) -> &'static str {
         Button::R => "R",
         Button::Start => "START",
         Button::Select => "SELECT",
+        Button::FastForward => ">>",
         Button::Up | Button::Down | Button::Left | Button::Right => "",
     }
 }
@@ -355,6 +370,7 @@ fn glyph(ch: char) -> [&'static str; GLYPH_ROWS] {
         'R' => ["##.", "#.#", "##.", "#.#", "#.#"],
         'S' => [".##", "#..", ".#.", "..#", "##."],
         'T' => ["###", ".#.", ".#.", ".#.", ".#."],
+        '>' => ["#..", ".#.", "..#", ".#.", "#.."],
         _ => ["...", "...", "...", "...", "..."],
     }
 }
