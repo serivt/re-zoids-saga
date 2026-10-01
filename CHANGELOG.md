@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the weapon under the cursor reaches and those one shot takes, from the front row or the
   back; SELECT turns from one to the other. It is on by default and turned off like the
   other conveniences.
+- **The title's attract demo.** Ten seconds on the title without START play one of the
+  original's two demos: four battle scenes of the anime's pilots and Zoids, one after
+  another, as in the original; START stops it, and the title comes back with its song.
 - **Update check.** When its screen opens, the launcher asks the project's repository for
   its release tags (`vX.Y.Z`); when one is newer than the port, an *Update available* line
   with the new version shows at the bottom, and choosing it opens the releases page in

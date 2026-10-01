@@ -41,6 +41,38 @@ at (10, 10) 9×8 tiles, the three choices, a menu, then a switch on var1 (0 new 
 system, which clears them, so the game reads the choice from the stored copy. The
 second menu's options and the guides they open are described in [guide.md](guide.md).
 
+### The title's intro (not modeled yet)
+
+In the original the title does not simply fade in: from the loader (frame 409) its tasks
+(`0x08002E49`, `0x08002A31`, `0x080027AD`) show an emblem on black that opens, the sky
+brightening behind it, then "ZOIDS SAGA" with a shimmer, the subtitle and the
+copyright lines, and from frame 707 (`0x08002BF8` sets bit 8 of `0x0200E8A8`) PRESS
+START blinks (tasks `0x0800338D` and `0x0800331D`). The port fades the whole title in
+over 166 frames instead.
+
+### Attract demo
+
+Source of knowledge: own reading of the title controller (`0x080020E0`) and the demo task
+(`0x080034AC`), checked frame by frame in a reference emulator. In its state 200 the
+controller counts the frames the title waits without START once its intro is over (bit
+8 of `0x0200E8A8` set and bit 2, START opening the menu, clear); past `0x257`, 600
+frames, it sets bit 4, which stops the loader and the blinking (frame 1307 from power-on).
+It then darkens the title with the fade task (`0x08004034`, slot 10; states 2000 and
+`0x834`) and starts the demo task (state `0x898`). The demo runs the battle module
+(`0x0803DC54`, slot 4) on four records in a row, `0x66413C + demo × 0xB0 + scene × 0x2C`
+(the eight records before the staged scenes' table, read as those, see
+[battle.md](battle.md)), with the record's `+0xC` and `+0x10` set: START then blacks the
+screen at once (`0x0800196C`) and ends the scene with 2, which ends the demo. The title's
+song goes on through it. When the demo ends (state `0x8FC`) the controller turns to the
+other demo and loads the title again from state 0 with its song, 7 frames after the last
+scene's end or 6 after START. From power-on the first demo's scenes start at frames 1345,
+2000, 2651 and 3459, the title loads again at 4080 and the second demo starts at 5018.
+
+In the port (`crates/game-core/src/attract.rs`) the title shows 26 frames after its
+loader, as at the boot, so the count starts 272 frames after it shows; the stretches of
+black and of scene then start and end on the original's frames, the scenes' own steps
+within a frame or two, and the pictures match.
+
 ## Name entry
 
 Windows as the original's records show (see [formats/window.md](formats/window.md)):

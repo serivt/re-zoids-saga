@@ -32,6 +32,14 @@ const LOGO_TAIL_FRAMES: u32 = 30;
 const TITLE_FADE_IN_FRAMES: u32 = 166;
 /// Frames between START and the first operation of the menu script.
 const TITLE_MENU_DELAY: u32 = 4;
+/// Frames from the title's showing to the end of its intro, when the title
+/// controller (`0x080020E0`, state 200) starts counting the frames without
+/// START (bit 8 of `0x0200E8A8`, set by `0x08002BF8`): 298 from the title's
+/// loader, which starts 26 frames before the logo is gone and the title
+/// shows; and the frames it counts before the attract demo (more than
+/// `0x257`).
+const TITLE_READY_FRAMES: u32 = 272;
+const TITLE_IDLE_FRAMES: u32 = 600;
 const SCREEN_TILES: usize = 32;
 const TILE_PIXELS_I32: i32 = 8;
 const TITLE_TILE_BASE: usize = 0x102;
@@ -289,6 +297,11 @@ pub struct TitleScreen {
     state: TitleState,
     runner: ScriptRunner,
     previous: Input,
+    /// Frames the title has waited without START since its intro ended.
+    idle: u32,
+    /// Whether START opened the menu, which stops the count for good
+    /// (bit 2 of `0x0200E8A8`).
+    started: bool,
 }
 
 impl TitleScreen {
@@ -318,7 +331,16 @@ impl TitleScreen {
                     .unwrap_or_default(),
             ),
             previous: Input::default(),
+            idle: 0,
+            started: false,
         })
+    }
+
+    /// Whether the title has waited long enough without START for the
+    /// attract demo (see [`crate::attract`]).
+    #[must_use]
+    pub fn wants_demo(&self) -> bool {
+        self.idle >= TITLE_IDLE_FRAMES
     }
 
     /// Advances one frame; the menu runs on `windows` once START was
@@ -345,7 +367,10 @@ impl TitleScreen {
             }
             TitleState::Waiting => {
                 if start {
+                    self.started = true;
                     self.state = TitleState::Starting(0);
+                } else if !self.started && self.frame >= TITLE_READY_FRAMES {
+                    self.idle += 1;
                 }
             }
             TitleState::Starting(frames) if frames + 1 >= TITLE_MENU_DELAY => {

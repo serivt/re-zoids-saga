@@ -206,6 +206,8 @@ const HORN_SHOTS: [Spawn; 20] = [
 
 /// Frames the game spends reloading the map after a scene.
 const RELOAD_FRAMES: u32 = 9;
+/// Frames between a demo scene's end and the next's start.
+const DEMO_AFTER_FRAMES: u32 = 5;
 
 const TIMELINES: [Timeline; 2] = [
     Timeline {
@@ -728,6 +730,9 @@ pub struct StagedAttack {
     scene: AttackScene,
     targets: usize,
     reload: Option<u32>,
+    /// The black frames after the scene: the map's reload after a
+    /// story's, none after the title's demo's.
+    reload_frames: u32,
 }
 
 impl StagedAttack {
@@ -739,14 +744,35 @@ impl StagedAttack {
     /// attacking side fires nothing.
     pub fn new(data: &GameData<'_>, index: u8) -> Result<Self, MissingScene> {
         let missing = MissingScene(index);
+        let record = saga_battle::staged_attack(data.bytes(), usize::from(index)).ok_or(missing)?;
+        Self::from_record(data, &record, RELOAD_FRAMES).ok_or(missing)
+    }
+
+    /// Scene `scene` of the title's attract demo `demo` (`0x080034AC`),
+    /// which no map's reload follows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MissingScene`] when the ROM has no such scene or its
+    /// attacking side fires nothing.
+    pub fn demo(data: &GameData<'_>, demo: usize, scene: usize) -> Result<Self, MissingScene> {
+        let missing = MissingScene(u8::try_from(scene).unwrap_or(u8::MAX));
+        let record = saga_battle::demo_scene(data.bytes(), demo, scene).ok_or(missing)?;
+        Self::from_record(data, &record, DEMO_AFTER_FRAMES).ok_or(missing)
+    }
+
+    fn from_record(
+        data: &GameData<'_>,
+        record: &saga_battle::StagedAttack,
+        reload_frames: u32,
+    ) -> Option<Self> {
         let rom = data.bytes();
-        let record = saga_battle::staged_attack(rom, usize::from(index)).ok_or(missing)?;
         let (attacker, other, enemy) = if record.enemy.weapon.is_some() {
             (record.enemy, record.party, true)
         } else {
             (record.party, record.enemy, false)
         };
-        let weapon = attacker.weapon.ok_or(missing)?;
+        let weapon = attacker.weapon?;
         let targets: Vec<SceneUnit> = if record.target_stands && other.zoid != 0 {
             vec![SceneUnit::staged(rom, &other, !enemy, STAGED_SLOT)]
         } else {
@@ -767,10 +793,11 @@ impl StagedAttack {
                 aim_only: false,
             },
         );
-        Ok(Self {
+        Some(Self {
             scene,
             targets: count,
             reload: None,
+            reload_frames,
         })
     }
 
@@ -801,7 +828,7 @@ impl StagedAttack {
                     };
                     self.targets
                 ]),
-                SceneEvent::Done => self.reload = Some(RELOAD_FRAMES),
+                SceneEvent::Done => self.reload = Some(self.reload_frames),
                 _ => {}
             }
         }

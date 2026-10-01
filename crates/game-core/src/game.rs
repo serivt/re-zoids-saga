@@ -32,6 +32,7 @@ use gba_runtime::ppu::{FADE_STEPS, SCREEN_HEIGHT, SCREEN_WIDTH, darken};
 use platform::{Button, Frame, Input, Rgb, SaveStorage, StorageError};
 use thiserror::Error;
 
+use crate::attract::{Attract, AttractStep};
 use crate::autosave::{Autosaver, Notice};
 use crate::battle::Staged;
 use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
@@ -214,6 +215,8 @@ pub enum GameError {
 enum Screen {
     Logo(LogoScreen),
     Title(TitleScreen),
+    /// The title's attract demo, after ten seconds without START.
+    Attract(Box<Attract>),
     NameEntry(NameEntry),
     Loading,
     LeavingNameEntry(Box<NameEntry>, u32),
@@ -380,6 +383,8 @@ pub struct Game<'rom> {
     /// The title's list of slots, while the player chooses one to
     /// continue, and the save each line stands for.
     slot_picker: Option<(SlotPicker, Vec<SaveTarget>)>,
+    /// The attract demo the title plays next, 0 or 1.
+    attract_demo: usize,
     found: Option<Found>,
     previous: Input,
     latched: Input,
@@ -593,6 +598,7 @@ impl<'rom> Game<'rom> {
             autosave_map: None,
             autosave_notice: None,
             slot_picker: None,
+            attract_demo: 0,
             found: None,
             previous: Input::default(),
             latched: Input::default(),
@@ -605,7 +611,7 @@ impl<'rom> Game<'rom> {
     pub fn stage(&self) -> Stage {
         match self.screen {
             Screen::Logo(_) => Stage::Logo,
-            Screen::Title(_) => Stage::Title,
+            Screen::Title(_) | Screen::Attract(_) => Stage::Title,
             Screen::NameEntry(_) => Stage::NameEntry,
             Screen::Loading | Screen::LeavingNameEntry(..) => Stage::Loading,
             Screen::Field | Screen::OpeningMenu(_) | Screen::DemoEnd(_) => Stage::Field,
@@ -665,6 +671,9 @@ impl<'rom> Game<'rom> {
         }
         if let Some(credits) = self.credits.as_mut() {
             credits.latch();
+        }
+        if let Screen::Attract(attract) = &mut self.screen {
+            attract.latch();
         }
         self.windows.latch();
         self.shown_brightness = self.events.brightness();
@@ -737,6 +746,7 @@ impl<'rom> Game<'rom> {
                 }
             }
             Screen::Title(_) => self.update_title(input, start)?,
+            Screen::Attract(_) => self.update_attract(input)?,
             Screen::NameEntry(_) | Screen::LeavingNameEntry(..) => self.update_name_entry(input)?,
             Screen::Loading => {}
             Screen::Field => self.update_field_screen(input, start)?,
@@ -906,6 +916,40 @@ impl<'rom> Game<'rom> {
             Some(TitleChoice::ZoidGuide) => self.open_guide(GuideKind::Zoids)?,
             Some(TitleChoice::CharacterGuide) => self.open_guide(GuideKind::Characters)?,
             _ => {}
+        }
+        let idle = matches!(&self.screen, Screen::Title(title) if title.wants_demo());
+        if idle {
+            let screen = std::mem::replace(&mut self.screen, Screen::Loading);
+            if let Screen::Title(title) = screen {
+                self.screen =
+                    Screen::Attract(Box::new(Attract::new(self.attract_demo, title, input)));
+            }
+        }
+        Ok(())
+    }
+
+    /// A frame of the title's attract demo; once it ends, or START stops
+    /// it, the title loads again with its song and the next demo waits.
+    fn update_attract(&mut self, input: Input) -> Result<(), GameError> {
+        let Screen::Attract(attract) = &mut self.screen else {
+            return Ok(());
+        };
+        let step = attract.update(&self.data, input, &mut self.windows)?;
+        for sound in attract.take_sounds() {
+            Self::emit(&self.extensions, &Event::SoundRequested(usize::from(sound)));
+            self.sound.play(usize::from(sound))?;
+        }
+        if step == AttractStep::Title {
+            self.attract_demo = Attract::next(self.attract_demo);
+            self.windows.close_window(None);
+            self.screen = Screen::Title(TitleScreen::new(&self.data)?);
+            Self::emit(&self.extensions, &Event::TitleShown);
+            Self::play(
+                &mut self.sound,
+                &self.data,
+                &self.extensions,
+                GameSound::TitleMusic,
+            )?;
         }
         Ok(())
     }
@@ -2080,6 +2124,9 @@ impl<'rom> Game<'rom> {
             Screen::Title(title) => {
                 title.draw(frame);
                 self.windows.draw(frame, &self.skin, &self.painter);
+            }
+            Screen::Attract(attract) => {
+                attract.draw(frame, &self.windows, &self.skin, &self.painter);
             }
             Screen::NameEntry(entry) => entry.draw(frame, &self.windows, &self.skin, &self.painter),
             Screen::Loading => {

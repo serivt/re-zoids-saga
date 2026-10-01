@@ -41,6 +41,13 @@ use crate::saga::{AnimationStep, read_steps, rom_offset};
 
 const SCENES: usize = 0x0066_429C;
 const SCENE_LEN: usize = 44;
+/// The title's attract demos (`0x080034AC`): two of four scenes each, the
+/// 44-byte records at ROM `0x66413C`, just before the staged scenes'.
+const DEMO_SCENES: usize = 0x0066_413C;
+/// Demos there are, and the scenes each plays.
+pub const DEMOS: usize = 2;
+/// See [`DEMOS`].
+pub const DEMO_SCENE_COUNT: usize = 4;
 const SCENERY_FIELD: usize = 0x11;
 const ENEMY_FIELD: usize = 0x14;
 const SCENERY_TILES: usize = 0x006F_6934;
@@ -506,7 +513,23 @@ fn staged_side(bytes: &[u8]) -> StagedSide {
 /// Staged scene `index` read as an attack (`0x0803DD54`).
 #[must_use]
 pub fn staged_attack(rom: &[u8], index: usize) -> Option<StagedAttack> {
-    let at = SCENES + index * SCENE_LEN;
+    staged_attack_at(rom, SCENES + index * SCENE_LEN)
+}
+
+/// Scene `scene` of the title's attract demo `demo`, read as an attack:
+/// the record at `0x66413C + demo × 0xB0 + scene × 0x2C` (`0x080034AC`).
+#[must_use]
+pub fn demo_scene(rom: &[u8], demo: usize, scene: usize) -> Option<StagedAttack> {
+    if demo >= DEMOS || scene >= DEMO_SCENE_COUNT {
+        return None;
+    }
+    staged_attack_at(
+        rom,
+        DEMO_SCENES + (demo * DEMO_SCENE_COUNT + scene) * SCENE_LEN,
+    )
+}
+
+fn staged_attack_at(rom: &[u8], at: usize) -> Option<StagedAttack> {
     let record = rom.get(at..at + SCENE_LEN)?;
     Some(StagedAttack {
         party: staged_side(&record[..STAGED_SIDE_LEN]),
@@ -816,6 +839,26 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
+
+    #[test]
+    fn the_demos_scenes_are_the_records_before_the_staged_ones() {
+        let mut rom = vec![0; SCENES];
+        for record in 0..DEMOS * DEMO_SCENE_COUNT {
+            let at = DEMO_SCENES + record * SCENE_LEN;
+            rom[at] = u8::try_from(record + 1).unwrap_or(0);
+            rom[at + 0x10] = 4;
+            rom[at + 0x24] = NONE;
+        }
+        let first = demo_scene(&rom, 0, 0).map(|scene| scene.party.zoid);
+        let last = demo_scene(&rom, 1, 3).map(|scene| scene.party.zoid);
+        assert_eq!((first, last), (Some(1), Some(8)));
+        assert_eq!(
+            demo_scene(&rom, 1, 1).map(|scene| scene.party.weapon),
+            Some(Some(4))
+        );
+        assert!(demo_scene(&rom, 2, 0).is_none());
+        assert!(demo_scene(&rom, 0, 4).is_none());
+    }
 
     #[test]
     fn a_rack_without_its_own_mount_takes_the_default() {

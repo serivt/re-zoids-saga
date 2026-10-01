@@ -231,6 +231,13 @@ port's 9, a load time like the others.
 The effects' frames can have more pieces than the opening's: up to 42 in the effects of
 this ROM, all of which the drawer reads until the end marker.
 
+## The title's demo
+
+The title's attract demo (see [boot.md](boot.md)) plays the eight records before the
+table, at ROM `0x66413C`, as scenes played as attacks: two demos of four, the party's side
+firing in some and the enemy's in others. No map reload follows a demo's scene; the next
+starts 28 frames after its end.
+
 ## Not modeled yet
 
 - The rewrite line of the scroll table under CPU load.
