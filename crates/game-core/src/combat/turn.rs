@@ -22,7 +22,7 @@ use super::ai::{self, Choice, ENEMY, PARTY};
 use super::aim::{AimMemory, AimSetup, AimUnit, AimWeapon, UNKNOWN_HP};
 use super::attack::{self, Blow, DESTROYED, ROLLS};
 use super::scene::{Attack, AttackScene, Hit, SceneEvent, SceneUnit};
-use super::units::OUT;
+use super::units::{OUT, WRECKED};
 use super::{Act, Call, Combat, Controller, Fade, Outcome};
 use crate::data::GameData;
 use crate::script::ScriptError;
@@ -1026,8 +1026,9 @@ impl Combat {
     }
 
     /// Ends the actor's turn (`0x1770`): the beaten units leave the
-    /// battle, then the next actor, or the next round once all have
-    /// acted, or the end.
+    /// battle, wrecked (`0x2000` and `0x800` beside the beaten `0x400`),
+    /// then the next actor, or the next round once all have acted, or the
+    /// end.
     fn end_actor(&mut self) -> Stage {
         if let Some((PARTY, slot)) = self.actor() {
             self.refresh_panel(slot);
@@ -1035,7 +1036,7 @@ impl Combat {
         }
         for unit in self.sides.iter_mut().flatten().flatten() {
             if unit.traits & DESTROYED != 0 {
-                unit.traits |= OUT;
+                unit.traits |= OUT | WRECKED;
             }
         }
         if self.battle_over() {

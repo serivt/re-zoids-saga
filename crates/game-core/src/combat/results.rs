@@ -21,7 +21,7 @@ use extraction::saga_party;
 
 use super::ai::PARTY;
 use super::turn::{number, number_in};
-use super::{Act, Call, Combat, Outcome};
+use super::{Act, Call, Combat, Outcome, units};
 
 // Sounds.
 const WIN_SOUND: u16 = 0x33;
@@ -579,10 +579,11 @@ impl Combat {
     }
 
     /// The units' hit and energy points back into the game state
-    /// (`0x080364DC`): a formation slot whose pilot's unit did not fight is
-    /// left wrecked and taken out. After a won battle (result 1) each unit
-    /// that fought gains a training level, up to 100, and its statistics
-    /// are computed again (`0x08036CB0`).
+    /// (`0x080364DC`): a formation slot whose pilot's unit did not fight,
+    /// or was beaten (its battle unit wrecked, `0x800`), is left broken
+    /// with no hit or energy points and taken out. After a won battle
+    /// (result 1) each unit that fought gains a training level, up to 100,
+    /// and its statistics are computed again (`0x08036CB0`).
     fn write_back(&mut self, rom: &[u8]) {
         let won = self.outcome == Some(Outcome::Won);
         for (slot, entry) in saga_party::formation(&self.state).iter().enumerate() {
@@ -595,7 +596,8 @@ impl Combat {
             let fighter = self.sides[PARTY]
                 .iter()
                 .flatten()
-                .find(|fighter| fighter.character == character);
+                .find(|fighter| fighter.character == character)
+                .filter(|fighter| fighter.traits & units::WRECKED == 0);
             if let Some(fighter) = fighter {
                 let (hp, ep) = (fighter.hp.max(0), fighter.ep.max(0));
                 set_word(
@@ -769,6 +771,60 @@ mod tests {
         assert_eq!(texts(&number_in(905, 7, 1)), vec![103, 94, 99]);
         assert_eq!(texts(&number_in(7, 3, 2)), vec![94, 94, 101]);
         assert_eq!(texts(&number_in(-3, 2, 1)), vec![105, 97]);
+    }
+
+    fn fighter(character: u8, traits: u16) -> units::BattleUnit {
+        units::BattleUnit {
+            zoid: 0,
+            traits,
+            status: 0,
+            hp: if traits & units::WRECKED == 0 { 40 } else { 0 },
+            ep: 10,
+            max_hp: 100,
+            max_ep: 30,
+            sp: 50,
+            df: 10,
+            beam_df: 10,
+            evasion_bonus: 0,
+            pilot: [0; saga_party::PILOT_VALUES],
+            weapons: [None; SLOTS],
+            ai: 0,
+            experience: 0,
+            money: 0,
+            effects: Vec::new(),
+            parts: [0xFFFF; SLOTS],
+            size: 1,
+            face: 0,
+            character,
+        }
+    }
+
+    #[test]
+    fn a_beaten_unit_comes_back_broken_and_out_of_the_formation() {
+        let rom = Vec::new();
+        let data = crate::data::GameData::new(&rom);
+        let mut state = vec![0; 0x3F10];
+        let mut combat = Combat::new(&data, &mut state, &[0xFF; 36], (0, 0));
+        combat.state[FORMATION..FORMATION + 24].fill(NO_SPOIL);
+        for (slot, member) in [0u8, 1].into_iter().enumerate() {
+            combat.state[FORMATION + slot * 4] = member;
+            combat.state[FORMATION + slot * 4 + 1] = member;
+        }
+        combat.sides[PARTY] = Default::default();
+        combat.sides[PARTY][0] = Some(fighter(0, 0));
+        combat.sides[PARTY][1] = Some(fighter(
+            1,
+            crate::combat::attack::DESTROYED | units::OUT | units::WRECKED,
+        ));
+        combat.outcome = Some(Outcome::Lost);
+        combat.write_back(&rom);
+        let unit = |index: usize| UNITS + index * UNIT_LEN;
+        assert_eq!(word(&combat.state, unit(0) + UNIT_HP), 40);
+        assert_eq!(half(&combat.state, unit(0)) & WRECKED, 0);
+        assert_eq!(word(&combat.state, unit(1) + UNIT_HP), 0);
+        assert_eq!(half(&combat.state, unit(1)) & WRECKED, WRECKED);
+        assert_eq!(combat.state[FORMATION], 0);
+        assert_eq!(combat.state[FORMATION + 4], NO_SPOIL);
     }
 
     #[test]

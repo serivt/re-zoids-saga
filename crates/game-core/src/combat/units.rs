@@ -58,6 +58,9 @@ const NO_PILOT: u16 = 0x10;
 const NO_PILOT_EFFECT: u16 = 0x2000;
 /// The unit has left the battle: beaten, or retreated.
 pub const OUT: u16 = 0x2000;
+/// The unit left the battle beaten: the write-back takes its Zoid for
+/// broken (`0x080364DC`).
+pub const WRECKED: u16 = 0x800;
 const HARMLESS: u16 = 0x20;
 const WATER: u8 = 6;
 const TRAIT_EVASION: i16 = 20;

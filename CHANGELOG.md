@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   they are written. It is on by default and turned off on the game mode's screen or in the
   pause menu's Config; the classic mode never autosaves.
 
+### Fixed
+
+- **Destroyed Zoids.** A party Zoid destroyed in a battle the party goes on to win comes
+  back broken and out of the formation, as in the original, to be revived at a lab; it
+  stayed in the formation with no hit points and fought again in the next battle.
+
 ## [0.3.0] - 2026-09-30
 
 ### Added

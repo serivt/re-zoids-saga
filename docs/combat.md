@@ -481,9 +481,14 @@ each bonus as it was and as it is (`0x08036270`); the menu (0x17, window 2, run 
 200, 能力の割り振りを終了します (0x31) and a key end it.
 
 **The write-back** (`0x080364DC`). Each formation slot's unit takes its battle unit's
-hit and energy points, the battle unit found by the slot's pilot (`0x080365C8`); a
-slot whose pilot has no battle unit is left with none, marked `0x800` and taken out of
-the formation (`0x08037B1C`). After a won battle (result 1) each unit that fought
+hit and energy points, the battle unit found by the slot's pilot (`0x080365C8`, which
+skips slots whose unit has `0x800`); a slot whose pilot has no battle unit, or whose
+unit was beaten (`0x800`), is left with none, marked `0x800` (broken, 壊, for the lab's
+ゾイドの復活) and taken out of the formation (`0x08037B1C`). Checked in the reference
+emulator: in story battle 36 won with one party Zoid beaten, its unit's flags went from
+`0x0020` to `0x0420` when destroyed and `0x2C20` at the turn's end, and after the
+write-back the game state held it broken with no hit points and its formation slot
+empty. After a won battle (result 1) each unit that fought
 gains a training level (`+0x34`, at most 100) and its statistics are computed again
 (`0x08036CB0`); half the level is added in percent, so the first level changes
 nothing. Nothing else goes back: a part used up in the battle empties only its battle
@@ -612,7 +617,8 @@ The defense is the beam defense against beams (`0x30`), capped at 65:
    enemies' choice; the port takes it from the attack's own targets, which gives the
    same value unless a target's own chance stays under 100.
 4. A target left without hit points is beaten (`0x400`); it leaves the battle when the
-   actor's turn ends, and its experience and money go to the party's reward.
+   actor's turn ends, its flags (`+8`) taking `0x2000` and `0x800` besides, and its
+   experience and money go to the party's reward.
 5. A weapon for its own side (bit 0 clear) always lands and does what its flags say
    (below). A weapon for the other side that always lands (`0x800`) lowers the
    target's accuracy instead of hurting it: effect `0x22` by its power.
