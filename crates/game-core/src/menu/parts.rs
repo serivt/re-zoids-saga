@@ -27,7 +27,11 @@ use super::{
 };
 use crate::ScriptHost;
 use crate::script::ScriptError;
+use crate::text::CELL_WIDTH;
 use crate::windows::ScriptWindows;
+
+/// The mark a translated part name cut short ends with.
+const NAME_CUT: char = '.';
 
 impl PauseMenu {
     /// Page `page` of the parts of the Zoid the member under the cursor
@@ -412,10 +416,7 @@ impl PauseMenu {
             self.run_now(rom, SCRIPT_CLEAR_STOCK, windows)?;
             for (index, id) in page.iter().enumerate() {
                 self.print_part_name(rom, STOCK_LIST_WINDOW, *id, windows)?;
-                let name = self.parts.string_offset(usize::from(*id)).unwrap_or(0);
-                for _ in label_len(rom, name)..STOCK_NAME_CELLS {
-                    self.run_in(rom, STOCK_LIST_WINDOW, SCRIPT_SPACE, windows)?;
-                }
+                self.pad_part_name(rom, STOCK_LIST_WINDOW, *id, windows)?;
                 self.run_in(rom, STOCK_LIST_WINDOW, SCRIPT_TIMES, windows)?;
                 let count = saga_party::stock(&self.game_state, *id);
                 put_value(windows, STOCK_LIST_WINDOW, i32::from(count), 1, ZERO_PADDED);
@@ -544,6 +545,38 @@ impl PauseMenu {
     }
 
     /// Prints part `id`'s name in `window`.
+    /// Pads a list line after part `id`'s name to cell 8, as the lists
+    /// do: a full-width space per cell the ROM's name leaves short. A
+    /// translated name, whose letters need not take a cell each, is padded
+    /// to the column instead, and one wider than the column is cut short
+    /// with a full stop, so the count after it neither strays nor wraps to
+    /// the next line.
+    pub(super) fn pad_part_name(
+        &mut self,
+        rom: &[u8],
+        window: u8,
+        id: u16,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        let name = self.parts.string_offset(usize::from(id)).unwrap_or(0);
+        let length = label_len(rom, name);
+        let used = windows
+            .windows()
+            .get(usize::from(window))
+            .and_then(Option::as_ref)
+            .and_then(|shown| shown.widths.last().copied())
+            .unwrap_or(0);
+        if used == length * CELL_WIDTH {
+            for _ in length..STOCK_NAME_CELLS {
+                self.run_in(rom, window, SCRIPT_SPACE, windows)?;
+            }
+        } else {
+            windows.clip_line(window, STOCK_NAME_CELLS * CELL_WIDTH, NAME_CUT);
+            windows.pad_to(window, STOCK_NAME_CELLS);
+        }
+        Ok(())
+    }
+
     pub(super) fn print_part_name(
         &mut self,
         rom: &[u8],

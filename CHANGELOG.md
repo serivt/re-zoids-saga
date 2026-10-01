@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- With a translation, a part name too long for the weapons list or the equipment screen's
+  list no longer pushes its count onto the next line and the cursor out of step: the
+  name is cut short with a full stop where the count's column starts.
 - **Destroyed Zoids.** A party Zoid destroyed in a battle the party goes on to win comes
   back broken and out of the formation, as in the original, to be revived at a lab; it
   stayed in the formation with no hit points and fought again in the next battle.

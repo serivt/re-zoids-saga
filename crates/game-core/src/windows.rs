@@ -425,6 +425,37 @@ impl<'rom> ScriptWindows<'rom> {
         }
     }
 
+    /// Cuts window `id`'s current line back until `mark` fits after it
+    /// within `pixels`, then puts `mark`: a translated name longer than the
+    /// column the game's code leaves it, so what follows on the line stays
+    /// on it, without a space or a `mark` of its own before `mark`. A line
+    /// that fits is left alone.
+    pub fn clip_line(&mut self, id: u8, pixels: usize, mark: char) {
+        let metrics = self.metrics.clone();
+        let Some(window) = self.window_mut(id) else {
+            return;
+        };
+        let (Some(line), Some(width)) = (window.lines.last_mut(), window.widths.last_mut()) else {
+            return;
+        };
+        if *width <= pixels {
+            return;
+        }
+        let room = pixels.saturating_sub(metrics.advance(mark));
+        while *width > room || line.ends_with([' ', mark]) {
+            let Some(ch) = line.pop() else {
+                break;
+            };
+            *width = if line.is_empty() {
+                0
+            } else {
+                width.saturating_sub(metrics.advance(ch))
+            };
+        }
+        line.push(mark);
+        *width += metrics.advance(mark);
+    }
+
     /// Sets the page marks of window `id`, on its left and right borders:
     /// whether pages lie before and after the shown one, as the game's code
     /// does for a list it pages through with L and R (the window's byte
@@ -1210,6 +1241,30 @@ mod tests {
             host.windows()[1].as_ref().unwrap().frame_style(),
             FrameStyle::None
         );
+    }
+
+    #[test]
+    fn a_line_too_long_for_its_column_is_cut_with_a_mark() {
+        let mut host = windows();
+        host.set_metrics(TextMetrics::standard());
+        host.open_window(1, 0x21, (0, 0, 20, 4), 0);
+        for ch in "Aslt. Beam C.".chars() {
+            host.put_char(1, ch);
+        }
+        let full = host.windows()[1].as_ref().unwrap().widths[0];
+        let spaced = full - TextMetrics::standard().advance('C');
+        host.clip_line(1, spaced, '.');
+        let window = host.windows()[1].as_ref().unwrap();
+        assert_eq!(window.lines.last().map(String::as_str), Some("Aslt. Beam."));
+        assert!(window.widths.last().is_some_and(|width| *width <= spaced));
+        for ch in "Short".chars() {
+            host.put_char(1, ch);
+        }
+        host.line_break(1);
+        host.put_char(1, 'A');
+        host.clip_line(1, 48, '.');
+        let window = host.windows()[1].as_ref().unwrap();
+        assert_eq!(window.lines.last().map(String::as_str), Some("A"));
     }
 
     #[test]

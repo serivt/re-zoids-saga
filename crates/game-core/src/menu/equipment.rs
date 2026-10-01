@@ -17,8 +17,7 @@ use super::{
     Return, SCRIPT_CLEAR_CHARACTER, SCRIPT_CLEAR_HELP, SCRIPT_CLEAR_MEMBERS, SCRIPT_CLOSE,
     SCRIPT_COLON, SCRIPT_DRAW_CHARACTER, SCRIPT_DRAW_HELP, SCRIPT_DRAW_MEMBERS, SCRIPT_DRAW_STOCK,
     SCRIPT_MEMBER_MENU, SCRIPT_NO_PART, SCRIPT_NO_RACK, SCRIPT_PRESENT, SCRIPT_PRESENT_ALL,
-    SCRIPT_RACK_KINDS, SCRIPT_SPACE, SCRIPT_TIMES, SCRIPT_WAIT_KEY, STOCK_NAME_CELLS, WEAPON,
-    ZERO_PADDED, label_len,
+    SCRIPT_RACK_KINDS, SCRIPT_TIMES, SCRIPT_WAIT_KEY, WEAPON, ZERO_PADDED,
 };
 use crate::ScriptHost;
 use crate::script::ScriptError;
@@ -561,10 +560,7 @@ impl PauseMenu {
             return Ok(());
         };
         self.print_part_name(rom, LIST_WINDOW, id, windows)?;
-        let name = self.parts.string_offset(usize::from(id)).unwrap_or(0);
-        for _ in label_len(rom, name)..STOCK_NAME_CELLS {
-            self.run_in(rom, LIST_WINDOW, SCRIPT_SPACE, windows)?;
-        }
+        self.pad_part_name(rom, LIST_WINDOW, id, windows)?;
         self.run_in(rom, LIST_WINDOW, SCRIPT_TIMES, windows)?;
         let count = saga_party::stock(&self.game_state, id);
         put_value(windows, LIST_WINDOW, i32::from(count), 1, ZERO_PADDED);

@@ -186,7 +186,10 @@ the Japanese label takes (a stat label ends at cell 11; the level window leaves 
 cells for the experience value). A value or a mark the code places in a column after
 a translated name still lands on its cell: where the name's letters leave the text
 between cells, the port moves it to the cell instead of padding with spaces (the
-formation list's sizes start at cell 10). Item, weapon and Zi-data descriptions are printed by
+formation list's sizes start at cell 10). The weapons list's and the equipment screen's
+lists leave a part's name eight cells (64 pixels) before its × and count: a translated
+name wider than that is cut short there with a full stop (`Láser AA cu.`), so the count
+stays on its line; the detail window and the shops show the whole name. Item, weapon and Zi-data descriptions are printed by
 code into windows the walker cannot see: keep weapon descriptions to one line of
 176 pixels, the two-line Zi-data texts to 216 pixels per line and the narrow
 variants to five lines of 104 pixels.
