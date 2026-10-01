@@ -34,6 +34,7 @@ pub(crate) mod formation;
 mod items;
 mod options;
 mod parts;
+mod reach;
 mod save_slots;
 mod shop;
 mod zi_data;
@@ -434,6 +435,10 @@ pub struct PauseMenu {
     save: save_slots::SaveSlots,
     /// コンフィグ's settings in the enhanced mode.
     options: options::Options,
+    /// The weapons' reach the enhanced mode draws, and whether SELECT
+    /// turned it to the other row.
+    reach: Option<reach::ReachPanel>,
+    reach_back: bool,
     equipment: equipment::Equipment,
     equip_image: Option<(u16, BattleImage)>,
     weapon_sprites: Vec<((u16, usize), Option<EffectSprite>)>,
@@ -528,6 +533,8 @@ impl PauseMenu {
             item_menu: items::ItemMenu::default(),
             save: save_slots::SaveSlots::default(),
             options: options::Options::default(),
+            reach: None,
+            reach_back: false,
             equipment: equipment::Equipment::default(),
             equip_image: None,
             weapon_sprites: Vec::new(),
@@ -694,13 +701,25 @@ impl PauseMenu {
         self.runner.string_offset(script).unwrap_or(0)
     }
 
-    /// Advances one frame.
+    /// Advances one frame, then works out the weapons' reach the frame
+    /// shows.
     ///
     /// # Errors
     ///
     /// Returns [`GuideError`] when a script, or the guide 図鑑 opens,
     /// cannot run.
     pub fn update(
+        &mut self,
+        rom: &[u8],
+        input: Input,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<MenuStep, GuideError> {
+        let step = self.advance(rom, input, windows);
+        self.refresh_reach(rom);
+        step
+    }
+
+    fn advance(
         &mut self,
         rom: &[u8],
         input: Input,
@@ -719,6 +738,7 @@ impl PauseMenu {
             return Ok(MenuStep::Open);
         }
         self.scroll += 1;
+        self.turn_reach_row(input, windows);
         self.held = input;
         if self.state == MenuState::Shop(shop::ShopStep::Quantity) {
             self.shop_frame(rom, input, windows)?;
@@ -1606,6 +1626,7 @@ impl PauseMenu {
             composite(frame, &layers.front);
         }
         windows.draw(frame, skin, painter);
+        self.draw_reach(frame, windows, skin, painter);
         let sheet = self
             .shown_zoid
             .and_then(|zoid| self.zoid_sprites.iter().find(|(known, _)| *known == zoid));

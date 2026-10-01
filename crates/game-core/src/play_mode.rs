@@ -16,8 +16,8 @@ pub enum PlayMode {
 }
 
 /// The conveniences the enhanced mode can turn on or off, each as the
-/// original plays by default but the autosave, which is on: it keeps its
-/// game apart from the slots and changes nothing of the play. Each is a
+/// original plays by default but the autosave and the weapons' reach,
+/// which are on: they change nothing of the play. Each is a
 /// switch of its own, on or off whatever the others are.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
@@ -37,6 +37,10 @@ pub struct Enhancements {
     /// walks freely on the new one, into a slot of its own that
     /// continuing lists first and saving never offers.
     pub autosave: bool,
+    /// Whether the armaments shops and the pause menu's weapons draw what
+    /// the weapon under the cursor reaches on the battle's grid, from the
+    /// front row or the back, SELECT turning from one to the other.
+    pub weapon_reach: bool,
 }
 
 impl Default for Enhancements {
@@ -46,6 +50,7 @@ impl Default for Enhancements {
             damage_numbers: false,
             auto_text: false,
             autosave: true,
+            weapon_reach: true,
         }
     }
 }
@@ -61,15 +66,18 @@ pub enum Enhancement {
     AutoText,
     /// See [`Enhancements::autosave`].
     Autosave,
+    /// See [`Enhancements::weapon_reach`].
+    WeaponReach,
 }
 
 impl Enhancement {
     /// Every enhancement, in the order the lists show them.
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::BattleAnimations,
         Self::DamageNumbers,
         Self::AutoText,
         Self::Autosave,
+        Self::WeaponReach,
     ];
 }
 
@@ -82,6 +90,7 @@ impl Enhancements {
             Enhancement::DamageNumbers => self.damage_numbers,
             Enhancement::AutoText => self.auto_text,
             Enhancement::Autosave => self.autosave,
+            Enhancement::WeaponReach => self.weapon_reach,
         }
     }
 
@@ -92,6 +101,7 @@ impl Enhancements {
             Enhancement::DamageNumbers => &mut self.damage_numbers,
             Enhancement::AutoText => &mut self.auto_text,
             Enhancement::Autosave => &mut self.autosave,
+            Enhancement::WeaponReach => &mut self.weapon_reach,
         };
         *flag = !*flag;
     }
@@ -99,12 +109,13 @@ impl Enhancements {
 
 impl PlayMode {
     /// The enhancements that apply: the original's behavior in the classic
-    /// mode, which does not autosave either.
+    /// mode, which neither autosaves nor draws the weapons' reach.
     #[must_use]
     pub fn enhancements(self) -> Enhancements {
         match self {
             Self::Classic => Enhancements {
                 autosave: false,
+                weapon_reach: false,
                 ..Enhancements::default()
             },
             Self::Enhanced(enhancements) => enhancements,
@@ -123,10 +134,12 @@ mod tests {
             damage_numbers: true,
             auto_text: true,
             autosave: true,
+            weapon_reach: true,
         };
         assert!(PlayMode::Classic.enhancements().battle_animations);
         assert!(!PlayMode::Classic.enhancements().damage_numbers);
         assert!(!PlayMode::Classic.enhancements().autosave);
+        assert!(!PlayMode::Classic.enhancements().weapon_reach);
         assert_eq!(PlayMode::Enhanced(chosen).enhancements(), chosen);
     }
 
@@ -147,5 +160,6 @@ mod tests {
         assert!(!Enhancements::default().damage_numbers);
         assert!(!Enhancements::default().auto_text);
         assert!(Enhancements::default().autosave);
+        assert!(Enhancements::default().weapon_reach);
     }
 }

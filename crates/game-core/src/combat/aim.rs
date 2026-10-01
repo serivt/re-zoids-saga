@@ -1587,7 +1587,7 @@ pub fn shape(code: u8, back_row: bool) -> u8 {
 
 /// The groups each shape first tries, in order (ROM `0x6D43BC`, six a
 /// shape).
-const ORDER: [[u8; 6]; 13] = [
+pub(crate) const ORDER: [[u8; 6]; 13] = [
     [2, 1, 0, 5, 4, 3],
     [8, 7, 6, 8, 7, 6],
     [9, 10, 9, 10, 9, 10],
@@ -1624,7 +1624,7 @@ fn first_group(shape: u8, icons: [bool; SLOTS]) -> u8 {
 /// The cells of group `group`, in the order its cursors take them: 0–5 one
 /// cell, 6–8 a cell and the one behind it, 9 and 10 a column, 11 and 12 a
 /// square, 13 all.
-fn group_cells(group: u8) -> Vec<usize> {
+pub(crate) fn group_cells(group: u8) -> Vec<usize> {
     match group {
         0..=5 => vec![usize::from(group)],
         6..=8 => {

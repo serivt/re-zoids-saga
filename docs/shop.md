@@ -403,6 +403,11 @@ money too) and script 293 opens the unit's window (1) and the list's (3).
 
 ## Differences
 
+- In the enhanced mode, with the weapons' reach on, an armaments shop draws what the
+  part under the cursor reaches on the battle's grid, in the wallpaper between the count
+  and the money (see [menu.md](menu.md), Weapons' reach); SELECT turns it to the other
+  row.
+
 - The port draws each step of a list or a question at once and counts the frames its
   scripts would have cost, as it does in the pause menu. The original redraws over one
   to eight frames, so the port's windows change that much earlier.

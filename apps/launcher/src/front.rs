@@ -41,8 +41,8 @@ use game_core::port_text::{
     LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY,
     LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION,
     LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE,
-    LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WINDOW,
-    default_text,
+    LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME,
+    LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
 };
 use game_core::{Enhancement, TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -222,12 +222,13 @@ enum ModeLine {
     Back,
 }
 
-const MODE_LINES: [ModeLine; 6] = [
+const MODE_LINES: [ModeLine; 7] = [
     ModeLine::Mode,
     ModeLine::Enhancement(Enhancement::BattleAnimations),
     ModeLine::Enhancement(Enhancement::DamageNumbers),
     ModeLine::Enhancement(Enhancement::AutoText),
     ModeLine::Enhancement(Enhancement::Autosave),
+    ModeLine::Enhancement(Enhancement::WeaponReach),
     ModeLine::Back,
 ];
 
@@ -1805,6 +1806,7 @@ impl ModeLine {
             Self::Enhancement(Enhancement::DamageNumbers) => LAUNCHER_DAMAGE_NUMBERS,
             Self::Enhancement(Enhancement::AutoText) => LAUNCHER_AUTO_TEXT,
             Self::Enhancement(Enhancement::Autosave) => LAUNCHER_AUTOSAVE,
+            Self::Enhancement(Enhancement::WeaponReach) => LAUNCHER_WEAPON_REACH,
             Self::Back => LAUNCHER_BACK,
         }
     }

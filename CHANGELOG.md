@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a tiny, faint "Autosaving..." shows at the top left, in the translation's words, until
   they are written. It is on by default and turned off on the game mode's screen or in the
   pause menu's Config; the classic mode never autosaves.
+- **Weapon reach.** The enhanced mode draws, in the armaments shops and in the pause menu's
+  weapons list and equipment screen, a small picture of the battle's grid with the cells
+  the weapon under the cursor reaches and those one shot takes, from the front row or the
+  back; SELECT turns from one to the other. It is on by default and turned off like the
+  other conveniences.
 
 ### Fixed
 

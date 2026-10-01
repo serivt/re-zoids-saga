@@ -17,8 +17,8 @@ use crate::play_mode::{Enhancement, Enhancements};
 use crate::port_text::{
     OPTIONS_ANIMATIONS, OPTIONS_ANIMATIONS_HELP, OPTIONS_AUTO_TEXT, OPTIONS_AUTO_TEXT_HELP,
     OPTIONS_AUTOSAVE, OPTIONS_AUTOSAVE_HELP, OPTIONS_DAMAGE_NUMBERS, OPTIONS_DAMAGE_NUMBERS_HELP,
-    OPTIONS_KEYS, OPTIONS_OFF, OPTIONS_ON, OPTIONS_SPEED, OPTIONS_SPEED_HELP, full_width,
-    port_text,
+    OPTIONS_KEYS, OPTIONS_OFF, OPTIONS_ON, OPTIONS_SPEED, OPTIONS_SPEED_HELP, OPTIONS_WEAPON_REACH,
+    OPTIONS_WEAPON_REACH_HELP, full_width, port_text,
 };
 use crate::script::{MOVED_DOWN, MOVED_LEFT, MOVED_RIGHT, MOVED_UP, ScriptRunner};
 use crate::text::CELL_WIDTH;
@@ -56,12 +56,13 @@ enum Setting {
     Enhancement(Enhancement),
 }
 
-const SETTINGS: [Setting; 5] = [
+const SETTINGS: [Setting; 6] = [
     Setting::MessageSpeed,
     Setting::Enhancement(Enhancement::BattleAnimations),
     Setting::Enhancement(Enhancement::DamageNumbers),
     Setting::Enhancement(Enhancement::AutoText),
     Setting::Enhancement(Enhancement::Autosave),
+    Setting::Enhancement(Enhancement::WeaponReach),
 ];
 
 impl Setting {
@@ -77,6 +78,9 @@ impl Setting {
             }
             Self::Enhancement(Enhancement::AutoText) => (OPTIONS_AUTO_TEXT, OPTIONS_AUTO_TEXT_HELP),
             Self::Enhancement(Enhancement::Autosave) => (OPTIONS_AUTOSAVE, OPTIONS_AUTOSAVE_HELP),
+            Self::Enhancement(Enhancement::WeaponReach) => {
+                (OPTIONS_WEAPON_REACH, OPTIONS_WEAPON_REACH_HELP)
+            }
         }
     }
 }

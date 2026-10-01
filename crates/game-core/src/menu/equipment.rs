@@ -70,6 +70,20 @@ pub(super) struct Equipment {
     blink_from: Option<i32>,
 }
 
+/// The part the rack's list describes: the rack's own on 装備を外す, else
+/// the stocked part under the cursor.
+pub(super) fn shown_part(menu: &PauseMenu) -> Option<u16> {
+    match menu.equipment.entry? {
+        0 => menu.rack_part(),
+        _ => menu.chosen_part(),
+    }
+}
+
+/// The member whose Zoid the screen changes.
+pub(super) fn character(menu: &PauseMenu) -> u8 {
+    menu.member_character()
+}
+
 /// A weapon drawn on the rack list's Zoid picture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Mounted {

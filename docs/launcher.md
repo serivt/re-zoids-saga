@@ -43,6 +43,10 @@ Game mode chooses how the game plays, on a screen of its own:
   - *Autosave* (on by default) saves the game on each change of map into a place of its
     own, `game.auto.sav`, which つづきから lists first and セーブ never offers (see
     [formats/save.md](formats/save.md), The autosave).
+  - *Weapon reach* (on by default) draws, in the armaments shops and the pause menu's
+    weapons and equipment screens, the cells of the battle's grid the weapon under the
+    cursor reaches, from the front row or the back, SELECT turning from one to the other
+    (see [menu.md](menu.md), Weapons' reach).
 
 The mode is set before the game starts (`Game::set_play_mode`, see
 `crates/game-core/src/play_mode.rs`) and does not change while it plays; saves are the

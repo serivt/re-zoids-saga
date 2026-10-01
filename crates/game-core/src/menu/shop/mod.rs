@@ -301,6 +301,26 @@ impl ShopSession {
     }
 }
 
+/// The part the help describes on step `step`, bought or sold: `None` for
+/// an item or away from the goods and the wares.
+pub(in crate::menu) fn shown_part(menu: &PauseMenu, step: ShopStep) -> Option<u16> {
+    let session = menu.shop.as_ref()?;
+    let selling = match step {
+        ShopStep::Goods | ShopStep::GoodsNotice | ShopStep::ConfirmBuy | ShopStep::Bought => false,
+        ShopStep::Wares | ShopStep::ConfirmSell | ShopStep::Sold => true,
+        _ => return None,
+    };
+    let list = if selling {
+        &session.wares
+    } else {
+        &session.goods
+    };
+    match list.get(session.shown?)? {
+        Goods::Part(id) => Some(*id),
+        Goods::Item(_) => None,
+    }
+}
+
 impl PauseMenu {
     /// Opens `shop` on `windows` in the dark (`0x0805378C`, `0x0805451C`):
     /// the title, 買う / 売る and the money; the welcome and the choice

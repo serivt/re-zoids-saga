@@ -114,8 +114,11 @@ translated message wider than its note allows.
 | `port/options/auto-text-help` | ＯＮで会話が自動で進む　ＳＥＬＥＣＴでも切替 | Its help line, 224 pixels |
 | `port/options/autosave` | オートセーブ | The autosave's line, 96 pixels |
 | `port/options/autosave-help` | マップ移動時に専用のスロットへ記録 | Its help line, 224 pixels |
+| `port/options/weapon-reach` | 射程表示 | The weapons' reach's line, 96 pixels |
+| `port/options/weapon-reach-help` | 武器の射程をマスで表示　ＳＥＬＥＣＴで列を切替 | Its help line, 224 pixels |
 | `port/options/on`, `port/options/off` | ＯＮ, ＯＦＦ | A setting's value, 48 pixels |
 | `port/options/keys` | 左右：変更　Ｂ：もどる | The help's second line, 224 pixels |
+| `port/reach/front`, `port/reach/back` | FRONT, BACK | The row over the grid of a weapon's reach, in the small capitals alone; the plate widens past 27 pixels, up to 36 |
 | `port/autosave/notice` | Autosaving | The small notice while the autosave is written, in the small capitals alone (lower case shows as capitals, characters they lack are skipped), the port adding one to three dots; 120 pixels |
 | `port/demo/thanks` | あそんでくれて　ありがとう！ and two more lines | The thanks at the end of the demo, 3 lines of 224 pixels |
 | `port/demo/question` | ここまでの記録を　セーブしますか？ | The question after them, over the original's はい/いいえ |

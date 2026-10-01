@@ -542,14 +542,15 @@ the original's. In the classic mode コンフィグ is the original's (above). I
 mode (see [launcher.md](launcher.md)) it lists every setting the game lets the player
 change while it plays: window 4, a light menu like the save slots', takes the columns
 from the main list's right edge to the screen's, two rows a line and its frame's two,
-at least 8 to cover the status panel (12 with its five lines),
+at least 8 to cover the status panel (14 with its six lines),
 a line per setting with its value from cell 13 (further left when a translation's list
 starts further right and the widest value would not fit before the cursor's right mark):
 the message speed (１ to ５, the original's, stored in the party as its list does), the
 battle animations (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Without the attack scenes)
 the damage numbers (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Damage numbers), the
 auto text (ＯＮ or ＯＦＦ, see [formats/script-text.md](formats/script-text.md)) and the
-autosave (ＯＮ or ＯＦＦ, see [formats/save.md](formats/save.md), The autosave). The
+autosave (ＯＮ or ＯＦＦ, see [formats/save.md](formats/save.md), The autosave) and the
+weapons' reach (ＯＮ or ＯＦＦ, below). The
 help line says what
 the setting under the cursor does, and below it the keys. Up and down move (`0x40`);
 left and right, or A, change the value (`0x40`), the speed stopping at its ends and the
@@ -557,6 +558,35 @@ enhancements switching; B plays `0x3F` and goes back to the main list with the c
 コンフィグ. The settings hold from then on; the launcher remembers the enhancements for
 the next game. The port's messages are keyed `port/options/...` (see
 [translation.md](translation.md)). Implemented in `crates/game-core/src/menu/options.rs`.
+
+### Weapons' reach (a port feature)
+
+Source of knowledge: this project's own design, over the aim's reading of the battle's
+grid (see [combat.md](combat.md), The grid). With the enhanced mode's weapons' reach on,
+the screens that describe a part draw what it reaches beside it: the weapons list
+(武器), its right edge at column 129 and its top at row 74, under the part's values; the
+equipment screen's parts (武装), from (4, 4) over the wallpaper above the Zoid; and an
+armaments shop's goods and wares, centred on column 120 from row 81, in the wallpaper
+between the count and the money (see [shop.md](shop.md)). A support part that only
+raises its user draws nothing.
+
+The plate is 33×30 pixels, wider for a row name past 27 pixels: the windows' background
+framed in their ink, the row's name
+at its top in the port's small capitals (`port/reach/front`, FRONT, or
+`port/reach/back`, BACK), then two grids of 2×3 cells of 5 pixels, the other side on
+the left and the user's on the right, their front rows facing and each side's cells
+bottom up, as the battle shows them. The user's cell is blue; the cells the weapon can
+take are light amber, and those of its first group of targets, as one shot takes them,
+orange (a weapon for its own side lights the user's side, one for its user alone the
+user's cell). A weapon that reaches nothing from that row (too close or too far) leaves
+the other side empty. The cells come from the aim itself (`crates/game-core/src/combat/reach.rs`):
+the weapon's kind by its reach and spread (`0x0802BAF8`), its shape from the user's row
+(`0x0804593C`) and the groups each shape takes (ROM `0x6D43BC`).
+
+The user stands in the front row's middle, or on the equipment screen on its member's
+own formation slot. SELECT moves it to the other row, with sound `0x40`, and the choice
+holds while the menu or the shop stays open (in a shop SELECT does not turn the auto
+text). Implemented in `crates/game-core/src/menu/reach.rs`.
 
 ### Save slots (a port feature)
 

@@ -468,16 +468,20 @@ impl<'rom> Game<'rom> {
         self.play_mode
     }
 
-    /// SELECT while a text box shows on the field (its talks, events, shops
-    /// and battles, not the name entry, where SELECT turns the page), in the
-    /// enhanced mode: turns the auto text on or off, with the menus' move
-    /// sound, and tells the extensions (a port feature; the original's text
-    /// boxes ignore SELECT).
+    /// SELECT while a text box shows on the field (its talks, events and
+    /// battles, not the name entry, where SELECT turns the page, nor the
+    /// shops, where it turns the weapons' reach), in the enhanced mode:
+    /// turns the auto text on or off, with the menus' move sound, and
+    /// tells the extensions (a port feature; the original's text boxes
+    /// ignore SELECT).
     fn toggle_auto_text(&mut self) {
         let PlayMode::Enhanced(mut enhancements) = self.play_mode else {
             return;
         };
-        if !matches!(self.screen, Screen::Field) || !self.windows.shows_text_box() {
+        if !matches!(self.screen, Screen::Field)
+            || !self.windows.shows_text_box()
+            || self.shop.is_some()
+        {
             return;
         }
         enhancements.toggle(Enhancement::AutoText);
@@ -1550,8 +1554,13 @@ impl<'rom> Game<'rom> {
     /// the party and the game state it changed are kept and the event goes
     /// on.
     fn update_shop(&mut self, input: Input) -> Result<(), GameError> {
+        let enhancements = match self.play_mode {
+            PlayMode::Classic => None,
+            PlayMode::Enhanced(enhancements) => Some(enhancements),
+        };
         let closed = match self.shop.as_mut() {
             Some(shop) => {
+                shop.set_enhancements(enhancements);
                 shop.update(self.data.bytes(), input, &mut self.windows)? == MenuStep::Closed
             }
             None => true,

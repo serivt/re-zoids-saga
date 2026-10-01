@@ -22,6 +22,7 @@ pub mod deck;
 pub mod effects;
 mod items;
 mod numbers;
+pub mod reach;
 mod results;
 mod rows;
 pub mod scene;

@@ -72,12 +72,21 @@ pub const OPTIONS_AUTO_TEXT_HELP: &str = "port/options/auto-text-help";
 pub const OPTIONS_AUTOSAVE: &str = "port/options/autosave";
 /// See [`OPTIONS_AUTOSAVE`].
 pub const OPTIONS_AUTOSAVE_HELP: &str = "port/options/autosave-help";
+/// The weapons' reach's line and help.
+pub const OPTIONS_WEAPON_REACH: &str = "port/options/weapon-reach";
+/// See [`OPTIONS_WEAPON_REACH`].
+pub const OPTIONS_WEAPON_REACH_HELP: &str = "port/options/weapon-reach-help";
 /// A setting that is on, and off.
 pub const OPTIONS_ON: &str = "port/options/on";
 /// See [`OPTIONS_ON`].
 pub const OPTIONS_OFF: &str = "port/options/off";
 /// The keys, on the help line's second line.
 pub const OPTIONS_KEYS: &str = "port/options/keys";
+
+/// The row the weapons' reach is drawn from: the front, and the back.
+pub const REACH_FRONT: &str = "port/reach/front";
+/// See [`REACH_FRONT`].
+pub const REACH_BACK: &str = "port/reach/back";
 
 /// The notice over the field while the autosave is written.
 pub const AUTOSAVE_NOTICE: &str = "port/autosave/notice";
@@ -257,6 +266,8 @@ pub const LAUNCHER_AUTO_TEXT: &str = "port/launcher/auto-text";
 /// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_AUTOSAVE: &str = "port/launcher/autosave";
 /// See [`LAUNCHER_MODE`].
+pub const LAUNCHER_WEAPON_REACH: &str = "port/launcher/weapon-reach";
+/// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_PICK_MODE: &str = "port/launcher/pick-mode";
 /// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_CLASSIC_NOTE: &str = "port/launcher/classic-note";
@@ -378,6 +389,11 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         LAUNCHER_AUTOSAVE,
         "Autosave",
         "The enhanced mode's line that saves the game on each change of map, into a slot of its own listed first when continuing",
+    ),
+    launcher(
+        LAUNCHER_WEAPON_REACH,
+        "Weapon reach",
+        "The enhanced mode's line that draws, in the shops and the pause menu, the cells of the battle's grid the weapon under the cursor reaches",
     ),
     launcher_line(
         LAUNCHER_PICK_MODE,
@@ -863,6 +879,18 @@ pub const PORT_TEXTS: &[PortText] = &[
         pixels: 224,
     },
     PortText {
+        key: OPTIONS_WEAPON_REACH,
+        text: "射程表示",
+        note: "The pause menu's settings, enhanced mode: the weapons' reach's line, before its value at cell 13 (96 pixels)",
+        pixels: 96,
+    },
+    PortText {
+        key: OPTIONS_WEAPON_REACH_HELP,
+        text: "武器の射程をマスで表示　ＳＥＬＥＣＴで列を切替",
+        note: "The help line for the weapons' reach: on, the shops and the pause menu draw the cells of the battle's grid a weapon reaches; SELECT turns from the front row to the back; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
         key: OPTIONS_ON,
         text: "ＯＮ",
         note: "A setting that is on, in the pause menu's settings; 48 pixels",
@@ -879,6 +907,18 @@ pub const PORT_TEXTS: &[PortText] = &[
         text: "左右：変更　Ｂ：もどる",
         note: "The second help line of the pause menu's settings: left/right change, B goes back; 224 pixels",
         pixels: 224,
+    },
+    PortText {
+        key: REACH_FRONT,
+        text: "FRONT",
+        note: "Over the grid of a weapon's reach: its user stands in the front row. In the port's small capitals alone (lower case shows as capitals); the plate widens past 27 pixels, up to 36",
+        pixels: 36,
+    },
+    PortText {
+        key: REACH_BACK,
+        text: "BACK",
+        note: "Over the grid of a weapon's reach: its user stands in the back row. In the port's small capitals alone; the plate widens past 27 pixels, up to 36",
+        pixels: 36,
     },
     PortText {
         key: AUTOSAVE_NOTICE,
@@ -905,6 +945,9 @@ pub const PORT_TEXTS: &[PortText] = &[
         pixels: 224,
     },
 ];
+
+/// The messages drawn in the port's small capitals, measured in them.
+const SMALL_TEXTS: [&str; 3] = [REACH_FRONT, REACH_BACK, AUTOSAVE_NOTICE];
 
 /// The widest value of each marker, to check a message's lines.
 const WIDEST_VALUES: [(&str, u32); 4] = [
@@ -970,9 +1013,16 @@ pub fn problems<'a>(
         .into_iter()
         .filter_map(|(key, text)| {
             let limit = all_texts().find(|port| port.key == key)?.pixels;
+            let small = SMALL_TEXTS.contains(&key);
             let widest = fill(text, &WIDEST_VALUES)
                 .lines()
-                .map(|line| metrics.width(line))
+                .map(|line| {
+                    if small {
+                        metrics.small_width(line)
+                    } else {
+                        metrics.width(line)
+                    }
+                })
                 .max()
                 .unwrap_or(0);
             (widest > limit)

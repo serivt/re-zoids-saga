@@ -120,7 +120,7 @@ pub struct Weapon {
 }
 
 impl Weapon {
-    fn from_part(rom: &[u8], id: u16) -> Option<Self> {
+    pub(crate) fn from_part(rom: &[u8], id: u16) -> Option<Self> {
         let part = saga_party::part_record(rom, id)?;
         Some(Self {
             part: id,
