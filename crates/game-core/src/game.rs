@@ -2048,49 +2048,50 @@ impl<'rom> Game<'rom> {
     }
 
     /// Starts leaving by exit `exit`, a door when `door`: the screen
-    /// darkens with the door's sound, then the warp loads the next map.
+    /// darkens with the exit's sound, which the stepping command
+    /// (`0x0800B886`) and the door's push both take from its warp, then the
+    /// warp loads the next map.
     fn take_exit(&mut self, exit: usize, door: bool) -> Result<(), GameError> {
         self.exit_taken = Some(exit);
         if door {
             self.door_taken = Some(exit);
             self.events.fade_out_holding(DOOR_FADE_DELAY);
-            return self.play_door_sound(exit);
+        } else {
+            self.events.fade_out_holding(EXIT_FADE_DELAY);
         }
-        self.events.fade_out_holding(EXIT_FADE_DELAY);
-        Self::play(
-            &mut self.sound,
-            &self.data,
-            &self.extensions,
-            GameSound::Door,
-        )
+        self.play_door_sound(exit)
     }
 
     /// The sound a door plays (`0x080083B8`): its warp's own, none for
     /// `0x44`, or by default `0x45` when the player is on foot (sprite
     /// `0x98`) and the door sound otherwise.
     fn play_door_sound(&mut self, exit: usize) -> Result<(), GameError> {
-        let Some(map) = self.field.as_ref().map(Field::map) else {
+        let Some(field) = self.field.as_ref() else {
             return Ok(());
         };
-        Self::door_sound(&mut self.sound, &self.data, &self.extensions, map, exit)
+        let (map, sprite) = (field.map(), field.player().sprite);
+        Self::door_sound(
+            &mut self.sound,
+            &self.data,
+            &self.extensions,
+            (map, exit),
+            sprite,
+        )
     }
 
-    /// The sound exit `exit` of map `map` plays (`0x080083B8`).
+    /// The sound exit `exit` of map `map` plays (`0x080083B8`), the player
+    /// showing sprite `sprite`.
     fn door_sound(
         engine: &mut SoundEngine<'rom>,
         data: &GameData<'rom>,
         extensions: &SharedExtensions,
-        map: usize,
-        exit: usize,
+        (map, exit): (usize, usize),
+        sprite: u16,
     ) -> Result<(), GameError> {
         let Ok(warp) = data.warp(map, exit) else {
             return Ok(());
         };
-        let on_foot = data
-            .map_objects(map)
-            .ok()
-            .and_then(|objects| objects.first().map(|player| player.sprite))
-            == Some(ON_FOOT_SPRITE);
+        let on_foot = sprite == ON_FOOT_SPRITE;
         let sound = match warp.sound {
             NO_DOOR_SOUND => return Ok(()),
             0 if on_foot => usize::from(ON_FOOT_DOOR_SOUND),
@@ -2874,10 +2875,15 @@ impl EventHost for Host<'_, '_> {
     }
 
     fn exit_sound(&mut self) {
-        let Some((map, exit)) = self.portal_exit else {
+        let Some(exit) = self.portal_exit else {
             return;
         };
-        if let Err(error) = Game::door_sound(self.sound, &self.data, self.extensions, map, exit) {
+        let sprite = self
+            .field
+            .as_ref()
+            .map_or(ON_FOOT_SPRITE, |field| field.player().sprite);
+        if let Err(error) = Game::door_sound(self.sound, &self.data, self.extensions, exit, sprite)
+        {
             self.fail(error);
         }
     }
@@ -2908,6 +2914,9 @@ impl EventHost for Host<'_, '_> {
         };
         if let Some(field) = self.field.as_mut() {
             field.set_sheet(actor, sheet);
+            if let (Some(actor), Ok(sprite)) = (field.actor_mut(actor), u16::try_from(sprite)) {
+                actor.sprite = sprite;
+            }
         }
     }
 

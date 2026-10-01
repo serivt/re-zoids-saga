@@ -251,7 +251,7 @@ but not for a walk through (command 11) or with bit 2 of the field's state halfw
 so: the event walks the prince onto the exit and ends; the caller looks the warp up in the current map's table (see
 [formats/map.md](formats/map.md)), loads the destination scene and stands the player on
 the arrival metatile, turning it when the warp says so. The screen fades out with the
-door sound before the load and back in after it, at the timings in
+exit's sound before the load and back in after it, at the timings in
 [events.md](events.md), and the destination map runs its own event when it has one. The
 first room's lower exit lands in map 5 at metatile (8, 16): sprite (120, 256), camera
 (16, 160), as in the original.
@@ -263,7 +263,10 @@ toward a cell it cannot enter, the movement check (`0x0800AE7C`) reads that cell
 attribute (`0x080084D4`). A door (`0xC000 | n`) then:
 
 1. turns the player toward it;
-2. looks up exit `n` in the map's warp table and plays its sound (`0x080083B8`);
+2. looks up exit `n` in the map's warp table and plays its sound (`0x080083B8`): the
+   warp's own, none for `0x44`, or by default `0x45` while the player shows the prince
+   on foot (sprite `0x98`) and `0x82` otherwise. A walked exit plays it the same way
+   (the stepping command calls it at `0x0800B886`);
 3. warps with the table's facing (`0x08007188`), where a walked exit keeps the player's.
 
 Traced on the door of map 30 (`mq0200`) at (14, 8), leading to map 34 at (12, 20):

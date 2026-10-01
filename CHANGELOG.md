@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- An exit walked onto plays the sound its warp names, or the one for walking on foot,
+  as doors already did and as in the original; it always played the one for riding a
+  Zoid.
+
 ## [0.4.0] - 2026-10-01
 
 ### Added
