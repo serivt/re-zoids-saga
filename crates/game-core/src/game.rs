@@ -902,7 +902,7 @@ impl<'rom> Game<'rom> {
             }
             return Ok(());
         }
-        if start && !self.windows.any_open() {
+        if start && !self.windows.any_open() && title.takes_start() {
             Self::play(
                 &mut self.sound,
                 &self.data,

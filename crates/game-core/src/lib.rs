@@ -24,6 +24,7 @@ pub mod slots;
 pub mod sprite;
 pub mod story;
 pub mod text;
+pub mod title_intro;
 pub mod translation;
 pub mod window;
 pub mod windows;

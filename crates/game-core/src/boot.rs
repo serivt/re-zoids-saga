@@ -4,22 +4,22 @@
 //! Timings and layouts come from frame-by-frame captures of the original:
 //! the logo fades in over 45 frames from frame 30, holds until frame 375,
 //! fades out over 30 frames and leaves 30 frames of black; the title
-//! fades in over 165 frames and waits for START, which opens the menu
-//! script; the name entry lays out its windows as the original's window
+//! plays its intro (see [`crate::title_intro`]) and waits for START, which
+//! opens the menu script; the name entry lays out its windows as the original's window
 //! records show and moves its cursor 16 pixels per character.
 
-use extraction::saga::{self, BootError, KANA_COLUMNS, Logo, NameEntryGraphics, TitleGraphics};
+use extraction::saga::{self, BootError, KANA_COLUMNS, Logo, NameEntryGraphics};
 use formats::tile::{TILE_PIXELS, TilePiece, Tileset};
 use formats::tilemap::TileMap;
 use gba_runtime::ppu::{
-    FADE_STEPS, FullPalette, IndexedImage, Palette, PaletteBank, darken, draw_background,
-    draw_background_256, draw_indexed,
+    FADE_STEPS, FullPalette, IndexedImage, Palette, darken, draw_background_256, draw_indexed,
 };
 use platform::{Button, Frame, Input, Rgb};
 
 use crate::data::GameData;
 use crate::script::{ScriptError, ScriptRunner};
 use crate::text::CELL_WIDTH;
+use crate::title_intro::TitleVideo;
 use crate::translation::{AlphabetPage, NAME_ENTRY_TABLE, TITLE_TABLE};
 use crate::windows::{ScriptWindows, TextLayout};
 use crate::{ScriptHost, TextPainter, WindowPainter};
@@ -29,34 +29,16 @@ const LOGO_FADE_IN_FRAMES: u32 = 45;
 const LOGO_HOLD_UNTIL: u32 = 375;
 const LOGO_FADE_OUT_FRAMES: u32 = 30;
 const LOGO_TAIL_FRAMES: u32 = 30;
-const TITLE_FADE_IN_FRAMES: u32 = 166;
-/// Frames between START and the first operation of the menu script.
+/// Frames between START and the first operation of the menu script, one
+/// more when PRESS START showed and its line is cleared first (seen in a
+/// reference emulator).
 const TITLE_MENU_DELAY: u32 = 4;
-/// Frames from the title's showing to the end of its intro, when the title
-/// controller (`0x080020E0`, state 200) starts counting the frames without
-/// START (bit 8 of `0x0200E8A8`, set by `0x08002BF8`): 298 from the title's
-/// loader, which starts 26 frames before the logo is gone and the title
-/// shows; and the frames it counts before the attract demo (more than
-/// `0x257`).
-const TITLE_READY_FRAMES: u32 = 272;
+/// Frames the title controller (`0x080020E0`, state 200) counts without
+/// START once the intro is over (bit 8 of `0x0200E8A8`) before the attract
+/// demo: more than `0x257`. Then it sets bit 4, which stops PRESS START.
 const TITLE_IDLE_FRAMES: u32 = 600;
 const SCREEN_TILES: usize = 32;
 const TILE_PIXELS_I32: i32 = 8;
-const TITLE_TILE_BASE: usize = 0x102;
-const TITLE_PICTURE_BASE: usize = 0x115;
-const TITLE_PICTURE_COLUMNS: usize = 30;
-const TITLE_PICTURE_ROWS: (usize, usize) = (2, 18);
-const TITLE_OBJ_TILE_BASE: usize = 175;
-const TITLE_OBJ_TEXT_BASE: usize = 112;
-const TITLE_GLOW_TILE: u16 = 0x139;
-const TITLE_GLOW_RIGHT_TILE: u16 = 0x175;
-const TITLE_STRIP_TILE: usize = 0x10D;
-const TITLE_STRIP_STRIDE: usize = 11;
-const TITLE_BG1_SCROLL: (usize, usize) = (252, 232);
-const TITLE_BG3_SCROLL: (usize, usize) = (180, 224);
-const GLOW_PALETTE: u16 = 12 << 12;
-const STRIP_PALETTE: u16 = 11 << 12;
-const HFLIP: u16 = 0x0400;
 const NAME_SLOTS: usize = 8;
 const NAME_GRID_ROWS_ROM: usize = 5;
 /// Rows of characters a name-entry page shows.
@@ -86,90 +68,6 @@ pub(crate) const NAME_HELP: &str = "ＳＴＡＲＴ：終了　ＳＥＬＥＣ�
 const NAME_FIELD_PREFIX: &str = "\u{3000}\u{3000}\u{3000}";
 const CONFIRM_SCRIPT: usize = 1;
 const PLAYER_PORTRAIT: (u8, u8) = (0, 0);
-
-/// A sprite of the title screen: a block of consecutive OBJ tiles.
-#[derive(Debug, Clone, Copy)]
-struct TitleSprite {
-    x: i32,
-    y: i32,
-    columns: usize,
-    rows: usize,
-    tile: usize,
-    palette: usize,
-}
-
-const fn sprite(
-    x: i32,
-    y: i32,
-    columns: usize,
-    rows: usize,
-    tile: usize,
-    palette: usize,
-) -> TitleSprite {
-    TitleSprite {
-        x,
-        y,
-        columns,
-        rows,
-        tile,
-        palette,
-    }
-}
-
-/// The 50 sprites of the title as OAM lists them: the logo in three rows
-/// of 32×8 blocks, the subtitle and two copyright lines.
-const TITLE_SPRITES: [TitleSprite; 50] = [
-    sprite(8, 36, 4, 1, 0, 0),
-    sprite(40, 36, 4, 1, 4, 0),
-    sprite(72, 36, 4, 1, 8, 0),
-    sprite(104, 36, 2, 1, 12, 0),
-    sprite(8, 44, 4, 1, 14, 0),
-    sprite(40, 44, 4, 1, 18, 0),
-    sprite(72, 44, 4, 1, 22, 0),
-    sprite(104, 44, 2, 1, 26, 0),
-    sprite(8, 52, 4, 1, 28, 0),
-    sprite(40, 52, 4, 1, 32, 0),
-    sprite(72, 52, 4, 1, 36, 0),
-    sprite(104, 52, 2, 1, 40, 0),
-    sprite(120, 36, 4, 1, 42, 0),
-    sprite(152, 36, 4, 1, 46, 0),
-    sprite(184, 36, 4, 1, 50, 0),
-    sprite(216, 36, 2, 1, 54, 0),
-    sprite(120, 44, 4, 1, 56, 0),
-    sprite(152, 44, 4, 1, 60, 0),
-    sprite(184, 44, 4, 1, 64, 0),
-    sprite(216, 44, 2, 1, 68, 0),
-    sprite(120, 52, 4, 1, 70, 0),
-    sprite(152, 52, 4, 1, 74, 0),
-    sprite(184, 52, 4, 1, 78, 0),
-    sprite(216, 52, 2, 1, 82, 0),
-    sprite(64, 68, 4, 1, 84, 1),
-    sprite(96, 68, 4, 1, 88, 1),
-    sprite(128, 68, 4, 1, 92, 1),
-    sprite(160, 68, 2, 1, 96, 1),
-    sprite(64, 76, 4, 1, 98, 1),
-    sprite(96, 76, 4, 1, 102, 1),
-    sprite(128, 76, 4, 1, 106, 1),
-    sprite(160, 76, 2, 1, 110, 1),
-    sprite(32, 144, 4, 1, 112, 1),
-    sprite(64, 144, 4, 1, 116, 1),
-    sprite(96, 144, 4, 1, 120, 1),
-    sprite(128, 144, 4, 1, 124, 1),
-    sprite(160, 144, 4, 1, 128, 1),
-    sprite(192, 144, 2, 1, 132, 1),
-    sprite(208, 144, 1, 1, 134, 1),
-    sprite(32, 152, 4, 1, 135, 1),
-    sprite(64, 152, 4, 1, 139, 1),
-    sprite(96, 152, 1, 1, 143, 1),
-    sprite(104, 152, 4, 1, 144, 1),
-    sprite(136, 152, 4, 1, 148, 1),
-    sprite(168, 152, 4, 1, 152, 1),
-    sprite(200, 152, 2, 1, 156, 1),
-    sprite(0, 0, 0, 0, 0, 0),
-    sprite(0, 0, 0, 0, 0, 0),
-    sprite(0, 0, 0, 0, 0, 0),
-    sprite(0, 0, 0, 0, 0, 0),
-];
 
 /// The publisher logo with its fades.
 pub struct LogoScreen {
@@ -279,21 +177,16 @@ impl TitleChoice {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TitleState {
-    FadingIn,
     Waiting,
-    Starting(u32),
+    /// Frames since START, and those before the menu.
+    Starting(u32, u32),
     Menu,
 }
 
-/// The title screen: fades in, waits for START, then runs the menu script.
+/// The title screen: plays its intro, waits for START, then runs the menu
+/// script.
 pub struct TitleScreen {
-    graphics: TitleGraphics,
-    palettes: PaletteBank,
-    picture_palette: FullPalette,
-    glow: TileMap,
-    strip: TileMap,
-    picture: TileMap,
-    frame: u32,
+    video: TitleVideo,
     state: TitleState,
     runner: ScriptRunner,
     previous: Input,
@@ -311,18 +204,9 @@ impl TitleScreen {
     ///
     /// Returns [`BootError`] when a block cannot be read.
     pub fn new(data: &GameData<'_>) -> Result<Self, BootError> {
-        let graphics = data.title()?;
-        let palettes = PaletteBank::from_bgr555(&graphics.palettes);
-        let flat: Vec<u16> = graphics.palettes.iter().flatten().copied().collect();
         Ok(Self {
-            picture_palette: FullPalette::from_bgr555(&flat),
-            palettes,
-            glow: glow_map(),
-            strip: strip_map(),
-            picture: picture_map(),
-            graphics,
-            frame: 0,
-            state: TitleState::FadingIn,
+            video: TitleVideo::new(data.title()?),
+            state: TitleState::Waiting,
             runner: ScriptRunner::named(
                 TITLE_TABLE,
                 data.script_offsets(TITLE_TABLE)
@@ -343,6 +227,14 @@ impl TitleScreen {
         self.idle >= TITLE_IDLE_FRAMES
     }
 
+    /// Whether START on the next frame opens the menu: once the intro is
+    /// over and while the title waits for it. During the intro START skips
+    /// it instead, without the menu's sound.
+    #[must_use]
+    pub fn takes_start(&self) -> bool {
+        self.state == TitleState::Waiting && self.video.takes_start()
+    }
+
     /// Advances one frame; the menu runs on `windows` once START was
     /// pressed. Returns the choice when the menu ends.
     ///
@@ -357,27 +249,28 @@ impl TitleScreen {
     ) -> Result<Option<TitleChoice>, ScriptError> {
         let start = input.is_held(Button::Start) && !self.previous.is_held(Button::Start);
         self.previous = input;
-        self.frame += 1;
+        let waiting = self.state == TitleState::Waiting;
+        let taken = self.video.update(start && waiting);
         match self.state {
-            TitleState::FadingIn => {
-                if start || self.frame >= TITLE_FADE_IN_FRAMES {
-                    self.frame = TITLE_FADE_IN_FRAMES;
-                    self.state = TitleState::Waiting;
-                }
-            }
             TitleState::Waiting => {
-                if start {
+                if taken {
                     self.started = true;
-                    self.state = TitleState::Starting(0);
-                } else if !self.started && self.frame >= TITLE_READY_FRAMES {
+                    let delay = TITLE_MENU_DELAY + u32::from(self.video.shows_press_start());
+                    self.state = TitleState::Starting(0, delay);
+                } else if !self.started && self.video.counts_idle() {
                     self.idle += 1;
+                    if self.wants_demo() {
+                        self.video.stop_blinking();
+                    }
                 }
             }
-            TitleState::Starting(frames) if frames + 1 >= TITLE_MENU_DELAY => {
+            TitleState::Starting(frames, delay) if frames + 1 >= delay => {
                 self.runner.start(0)?;
                 self.state = TitleState::Menu;
             }
-            TitleState::Starting(frames) => self.state = TitleState::Starting(frames + 1),
+            TitleState::Starting(frames, delay) => {
+                self.state = TitleState::Starting(frames + 1, delay);
+            }
             TitleState::Menu => {
                 if self.runner.update(rom, input, windows)? {
                     self.state = TitleState::Waiting;
@@ -386,6 +279,12 @@ impl TitleScreen {
             }
         }
         Ok(None)
+    }
+
+    /// Advances the picture one frame without reading the buttons, as it
+    /// goes on while the attract demo darkens it.
+    pub fn animate(&mut self) {
+        self.video.update(false);
     }
 
     /// Runs the menu again, as START does, for the port's save slots left
@@ -403,100 +302,9 @@ impl TitleScreen {
         Ok(())
     }
 
-    /// Darkness of the current frame.
-    #[must_use]
-    pub fn darkness(&self) -> u8 {
-        if self.frame >= TITLE_FADE_IN_FRAMES {
-            0
-        } else {
-            fade_level(TITLE_FADE_IN_FRAMES - self.frame, TITLE_FADE_IN_FRAMES)
-        }
-    }
-
-    /// Draws the title layers and sprites.
+    /// Draws the title.
     pub fn draw(&self, frame: &mut Frame) {
-        frame.fill(Rgb::default());
-        let picture = |index: usize| {
-            index
-                .checked_sub(TITLE_PICTURE_BASE)
-                .and_then(|tile| self.graphics.picture.tile(tile))
-        };
-        draw_background_256(
-            frame,
-            |x, y| self.picture.wrapping(x, y),
-            picture,
-            &self.picture_palette,
-            (0, 0),
-            true,
-        );
-        let tiles = |index: usize| {
-            index
-                .checked_sub(TITLE_TILE_BASE)
-                .and_then(|tile| self.graphics.tiles.tile(tile))
-        };
-        draw_background(
-            frame,
-            |x, y| self.strip.wrapping(x, y),
-            tiles,
-            &self.palettes,
-            TITLE_BG3_SCROLL,
-            true,
-        );
-        draw_background(
-            frame,
-            |x, y| self.glow.wrapping(x, y),
-            tiles,
-            &self.palettes,
-            TITLE_BG1_SCROLL,
-            true,
-        );
-        for sprite in TITLE_SPRITES.iter().filter(|sprite| sprite.columns > 0) {
-            self.draw_sprite(frame, sprite);
-        }
-        darken(frame, self.darkness());
-    }
-
-    fn obj_tile(&self, index: usize) -> Option<&[u8; TILE_PIXELS]> {
-        if index < TITLE_OBJ_TEXT_BASE {
-            self.graphics.tiles.tile(TITLE_OBJ_TILE_BASE + index)
-        } else {
-            self.graphics.text_tiles.tile(index - TITLE_OBJ_TEXT_BASE)
-        }
-    }
-
-    fn draw_sprite(&self, frame: &mut Frame, sprite: &TitleSprite) {
-        let count = sprite.columns * sprite.rows;
-        let tiles = Tileset::from_pixels(
-            (0..count)
-                .map(|i| {
-                    self.obj_tile(sprite.tile + i)
-                        .copied()
-                        .unwrap_or([0; TILE_PIXELS])
-                })
-                .collect(),
-        );
-        let image = formats::tile::TileImage::compose(
-            &tiles,
-            &[TilePiece {
-                column: 0,
-                row: 0,
-                columns: sprite.columns,
-                rows: sprite.rows,
-            }],
-        );
-        let palette =
-            Palette::new(self.graphics.sprite_palettes[sprite.palette].map(Palette::from_bgr555));
-        draw_indexed(
-            frame,
-            (sprite.x, sprite.y),
-            IndexedImage {
-                width: image.width,
-                height: image.height,
-                indices: &image.indices,
-            },
-            &palette,
-            Some(0),
-        );
+        self.video.draw(frame);
     }
 }
 
@@ -506,68 +314,6 @@ fn blank_map() -> TileMap {
         height: SCREEN_TILES,
         entries: vec![0x100; SCREEN_TILES * SCREEN_TILES],
     }
-}
-
-/// BG1 as the loader builds it: two 10×6 glow blocks and a mirrored
-/// strip between them on the first and last rows.
-fn glow_map() -> TileMap {
-    let mut map = blank_map();
-    let mut set = |x: usize, y: usize, entry: u16| map.entries[y * SCREEN_TILES + x] = entry;
-    for row in 0..6 {
-        for column in 0..10 {
-            let index = u16::try_from(row * 10 + column).unwrap_or(0);
-            set(column, row, GLOW_PALETTE | (TITLE_GLOW_TILE + index));
-            set(
-                column + 19,
-                row,
-                GLOW_PALETTE | (TITLE_GLOW_RIGHT_TILE + index),
-            );
-        }
-    }
-    for (row, base) in [(0usize, 0x102u16), (5, 0x107)] {
-        for i in 0..4u16 {
-            set(10 + usize::from(i), row, STRIP_PALETTE | (base + i));
-        }
-        for i in 0..5u16 {
-            set(
-                14 + usize::from(i),
-                row,
-                STRIP_PALETTE | HFLIP | (base + 4 - i),
-            );
-        }
-    }
-    map
-}
-
-/// BG3 as the loader builds it: a 12×4 block of consecutive tiles with an
-/// 11-tile stride, so each row starts where the previous one ended.
-fn strip_map() -> TileMap {
-    let mut map = blank_map();
-    for row in 0..4 {
-        for column in 0..12 {
-            let tile =
-                u16::try_from(TITLE_STRIP_TILE + row * TITLE_STRIP_STRIDE + column).unwrap_or(0);
-            map.entries[row * SCREEN_TILES + column] = STRIP_PALETTE | tile;
-        }
-    }
-    map
-}
-
-/// BG2 as the loader builds it: the 30×16 picture, one tile after another.
-fn picture_map() -> TileMap {
-    let mut map = TileMap {
-        width: SCREEN_TILES,
-        height: SCREEN_TILES,
-        entries: vec![0x80; SCREEN_TILES * SCREEN_TILES],
-    };
-    for row in TITLE_PICTURE_ROWS.0..TITLE_PICTURE_ROWS.1 {
-        for column in 0..TITLE_PICTURE_COLUMNS {
-            let index = (row - TITLE_PICTURE_ROWS.0) * TITLE_PICTURE_COLUMNS + column;
-            map.entries[row * SCREEN_TILES + column] =
-                u16::try_from(TITLE_PICTURE_BASE + index).unwrap_or(0);
-        }
-    }
-    map
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -931,23 +677,5 @@ mod tests {
         }
         assert!(done);
         assert_eq!(fade_level(3, 6), FADE_STEPS / 2);
-    }
-
-    #[test]
-    fn title_maps_follow_the_loader_layout() {
-        let glow = glow_map();
-        assert_eq!(glow.entries[0], GLOW_PALETTE | 0x139);
-        assert_eq!(glow.entries[9], GLOW_PALETTE | 0x142);
-        assert_eq!(glow.entries[SCREEN_TILES + 19], GLOW_PALETTE | 0x17F);
-        assert_eq!(glow.entries[10], STRIP_PALETTE | 0x102);
-        assert_eq!(glow.entries[14], STRIP_PALETTE | HFLIP | 0x106);
-        assert_eq!(glow.entries[SCREEN_TILES * 6], 0x100);
-        let strip = strip_map();
-        assert_eq!(strip.entries[11], STRIP_PALETTE | 0x118);
-        assert_eq!(strip.entries[SCREEN_TILES], STRIP_PALETTE | 0x118);
-        let picture = picture_map();
-        assert_eq!(picture.entries[SCREEN_TILES * 2], 0x115);
-        assert_eq!(picture.entries[SCREEN_TILES * 3], 0x115 + 30);
-        assert_eq!(picture.entries[0], 0x80);
     }
 }

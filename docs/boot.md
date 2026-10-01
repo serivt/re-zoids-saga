@@ -32,23 +32,74 @@ Tilemaps: BG2 rows 2–17 hold the picture tile after tile (30 per row), the res
 `0x80`; BG1 rows 0–5 hold two 10×6 glow blocks (tiles `0x139`… and `0x175`…, palette 12)
 with a mirrored strip on rows 0 and 5 between them (palette 11), scrolled by (−4, −24);
 BG3 rows 0–3 hold a 12×4 block from tile `0x10D` with an 11-tile row stride (palette
-11), scrolled by (−76, −32). Fifty sprites (32×8, 16×8 and 8×8) draw "ZOIDS SAGA", the
-subtitle and the copyright lines; OBJ tiles 0–111 are the 4bpp block from tile 175 on,
-112 on the copyright block. The title fades in over about 165 frames; START skips the
-fade, and START again runs the menu script at ROM `0x6C04FE` five frames later: reset, open menu window 0
+11), scrolled by (−76, −32). These are the maps once the intro below is over; 46
+sprites (32×8, 16×8 and 8×8, priority 1) then draw "ZOIDS SAGA", the subtitle and the
+copyright lines; OBJ tiles 0–111 are the 4bpp block from tile 175 on, 112 on the
+copyright block. START, from the second frame after the intro, runs the menu script at
+ROM `0x6C04FE` five frames later, six when PRESS START showed and its line is cleared
+first: reset, open menu window 0
 at (10, 10) 9×8 tiles, the three choices, a menu, then a switch on var1 (0 new game,
 1 continue, 2 options). The script ends by storing the variables and resetting the text
 system, which clears them, so the game reads the choice from the stored copy. The
 second menu's options and the guides they open are described in [guide.md](guide.md).
 
-### The title's intro (not modeled yet)
+### The title's intro
 
-In the original the title does not simply fade in: from the loader (frame 409) its tasks
-(`0x08002E49`, `0x08002A31`, `0x080027AD`) show an emblem on black that opens, the sky
-brightening behind it, then "ZOIDS SAGA" with a shimmer, the subtitle and the
-copyright lines, and from frame 707 (`0x08002BF8` sets bit 8 of `0x0200E8A8`) PRESS
-START blinks (tasks `0x0800338D` and `0x0800331D`). The port fades the whole title in
-over 166 frames instead.
+Source of knowledge: own reading of the title's loader (`0x0800248C`) and its tasks,
+checked frame by frame in a reference emulator against the display registers, the map
+copy in IWRAM (`0x0300239C`, the four screen blocks the vertical blank copies to VRAM
+with the scroll values at `0x03004B9C` and the brightness level at `0x03002356`) and
+screenshots. Frames below count from power-on; the loader starts at 409 and the port
+shows the title from 435, when the logo is gone, with the loader's first 26 frames run.
+
+The loader lays the plate: BG1 the left glow block, BG2 (4bpp for now) the right one
+with the strip's edge, BG3 the strip's middle three columns, with scrolls that put the
+halves together at the middle, and the fade task (`0x08004034`) brings it out of black,
+one level a frame from 416 to 446. At 478 three tasks start:
+
+- `0x08002E49` hands the vertical blank callbacks `0x08002DF8`, `0x08002E20` (14 times)
+  and `0x08002E34`: BG3 comes on at 479 darkened 15/16 and brightens by a level a frame.
+- `0x08002A31` opens the plate for 36 frames: BG0 and BG1 slide right and BG2 left by a
+  pixel a frame; every eighth frame the strip in BG3 grows a column on each side (tiles
+  `0x10D + column + row × 11`, the fifth time writing before the block's first cell);
+  every fourth frame the pieces between the halves change, from the list at `0x663F60`
+  (4-byte entries: the cell in bits 2–7 and the screen block in bits 0–1 of the first
+  byte, 3 ending a step; the second byte's nibbles are the strip tiles of rows 0 and 5;
+  BG2's are flipped). At 514 it copies BG2's rows 0–5 to BG1 from column 14, and at 530
+  turns BG0 and BG2 off (`0x08002C50`) and starts `0x08002F39`. Then it raises BG1 and
+  BG3 a pixel every fourth frame 32 times; at 688 it lays the subtitle in BG0 (rows 4–5,
+  tiles `0xE205`…) and blends it in through the window at lines 64–87 (`0x08002D28`,
+  `0x08002D9C`, weights (16−n, n)); at 706 it creates the sprites and turns BG0 off
+  (`0x08002C3C`); at 707 the intro is over (bit 8 of `0x0200E8A8`).
+- `0x08002F39` lays the picture's map in BG2 and makes it 8bpp with priority 2 at 532
+  (`0x08003244`), then darkens it line by line from a horizontal-blank routine
+  (`0x080032AC`, copied to `0x0200EB30`): each line's brightness level is the low nibble
+  of one of two 160-entry tables at `0x0200E8B0`, swapped every frame (`0x080032D0`).
+  Each entry starts at level 15 with a wait of its distance from line 80; each frame
+  the table not shown takes the shown one with the wait lowered, or once it is 0 the
+  level, so the picture opens from the middle out. Line n shows entry n−1, set on the
+  horizontal blank before it. When the last line's level is 0 (627) the effect ends
+  (`0x080032F8`); the logo goes in BG0 (rows 0–2, two 14-column halves, tiles `0xD1B1`
+  on, scrolled by (−8, −36), priority 0) and blends in over 32 frames (`0x08002C64`,
+  `0x08002CA4`, `0x08002CC0`): weights (n, 16) brightening, then (16, 16−n).
+- `0x080027AD` reads START from 479. It stops the others, clears the effects
+  (`0x0800292C`), lays the finished maps (the strip between the glow blocks from
+  `0x6640D4`, nine entries per row with the flip bit) and the sprites, and fades in with
+  the fade task; the frame after, the layers come back on while the loader is still
+  busy, from a line that moves between 36 and 52 with the frame's work and at the level
+  the emulator reads from the write-only brightness register (13), then the screen is
+  black until the fade, which ends 36 frames after START.
+
+From the frame after the intro's end the loader starts `0x0800338D`, which blinks PRESS
+START in BG1 (row 9, columns 10–18, tiles `0xE221`…): PRESS, START 15 frames later,
+nothing 15 later, twice, then the whole line and nothing twice, every 15 frames.
+`0x0800331D` stops it and clears the line when START opens the menu or the attract demo
+begins (bits 2 and 4). The port (`crates/game-core/src/title_intro.rs`) keeps the maps,
+scrolls, levels and registers as these tasks and callbacks leave them and composes the
+picture per pixel with the hardware's priorities, window and effects. Checked against
+the reference emulator frame by frame from 435 to 830, with START at four moments of the
+intro and six after it: the pictures match within one step per 8-bit channel, which the
+emulator's rounding of the blends gives, except the skip's flash line.
 
 ### Attract demo
 
@@ -69,9 +120,11 @@ scene's end or 6 after START. From power-on the first demo's scenes start at fra
 2000, 2651 and 3459, the title loads again at 4080 and the second demo starts at 5018.
 
 In the port (`crates/game-core/src/attract.rs`) the title shows 26 frames after its
-loader, as at the boot, so the count starts 272 frames after it shows; the stretches of
-black and of scene then start and end on the original's frames, the scenes' own steps
-within a frame or two, and the pictures match.
+loader, as at the boot, and the count starts the frame after its intro's end, 299
+frames after the loader, as the controller runs before the task that marks it; the
+title's darkening, with PRESS START cleared, the stretches of black and of scene then
+start and end on the original's frames, the scenes' own steps within a frame or two, and
+the pictures match. After the demo the title's intro plays again.
 
 ## Name entry
 

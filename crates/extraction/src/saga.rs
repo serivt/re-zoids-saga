@@ -577,6 +577,14 @@ const TITLE_TEXT_TILES_OFFSET: usize = 0x0006_310C;
 const TITLE_PALETTES_OFFSET: usize = 0x0006_78C0;
 const TITLE_PALETTE_COUNT: usize = 11;
 const TITLE_EXTRA_PALETTES: [usize; 4] = [0x0006_3394, 0x0006_33B4, 0x0006_33D4, 0x0006_33F4];
+const TITLE_INTRO_PIECES_OFFSET: usize = 0x0066_3F60;
+const TITLE_INTRO_PIECE_LEN: usize = 4;
+/// Steps of the intro's piece list, and at most how many entries it reads.
+const TITLE_INTRO_STEPS: usize = 9;
+const TITLE_INTRO_PIECES_MAX: usize = 64;
+/// The value in a piece's low two bits that ends a step.
+const TITLE_INTRO_STEP_END: u8 = 3;
+const TITLE_SKIP_STRIP_OFFSET: usize = 0x0066_40D4;
 const NAME_ENTRY_PICTURE_OFFSET: usize = 0x0041_42B8;
 const NAME_ENTRY_PICTURE_PALETTE_OFFSET: usize = 0x0042_5D58;
 const NAME_ENTRY_SPRITES: [(usize, usize); 3] = [
@@ -623,6 +631,15 @@ pub struct TitleGraphics {
     pub palettes: Vec<[u16; 16]>,
     /// Sprite palettes 0 and 1.
     pub sprite_palettes: [[u16; 16]; 2],
+    /// The pieces the intro lays every fourth frame as the plate opens,
+    /// one list per step: a byte with the map cell (bits 2–7) and its
+    /// screen block (bits 0–1), then the strip tiles of its top row (low
+    /// nibble) and its bottom row (high nibble).
+    pub intro_steps: Vec<Vec<[u8; 2]>>,
+    /// The strip between the glow blocks when START skips the intro: nine
+    /// entries for the top row and nine for the bottom one, strip tiles
+    /// with the horizontal flip bit.
+    pub skip_strip: [[u16; 9]; 2],
 }
 
 /// Graphics of the name entry screen besides the windows and the font.
@@ -728,13 +745,43 @@ pub fn title(rom: &[u8]) -> Result<TitleGraphics, BootError> {
         palette_at(rom, TITLE_EXTRA_PALETTES[2], "title palettes")?,
         palette_at(rom, TITLE_EXTRA_PALETTES[3], "title palettes")?,
     ];
+    let strip = slice(rom, TITLE_SKIP_STRIP_OFFSET, 36, "title skip strip")?;
+    let entry = |index: usize| u16::from_le_bytes([strip[index * 2], strip[index * 2 + 1]]);
     Ok(TitleGraphics {
         tiles,
         picture,
         text_tiles,
         palettes,
         sprite_palettes,
+        intro_steps: intro_steps(rom)?,
+        skip_strip: [
+            std::array::from_fn(entry),
+            std::array::from_fn(|index| entry(index + 9)),
+        ],
     })
+}
+
+/// The intro's piece list, split into its steps (task `0x08002A30`).
+fn intro_steps(rom: &[u8]) -> Result<Vec<Vec<[u8; 2]>>, BootError> {
+    let entries = slice(
+        rom,
+        TITLE_INTRO_PIECES_OFFSET,
+        TITLE_INTRO_PIECES_MAX * TITLE_INTRO_PIECE_LEN,
+        "title intro pieces",
+    )?;
+    let mut steps = Vec::new();
+    let mut step = Vec::new();
+    for entry in entries.chunks_exact(TITLE_INTRO_PIECE_LEN) {
+        if entry[0] & 3 == TITLE_INTRO_STEP_END {
+            steps.push(std::mem::take(&mut step));
+            if steps.len() == TITLE_INTRO_STEPS {
+                break;
+            }
+        } else {
+            step.push([entry[0], entry[1]]);
+        }
+    }
+    Ok(steps)
 }
 
 /// Reads the name entry screen graphics.
@@ -2002,7 +2049,7 @@ mod tests {
 
     #[test]
     fn reads_the_title_and_name_entry_graphics() {
-        let mut rom = vec![0; NAME_ENTRY_SPRITES[1].0 + 0x1000];
+        let mut rom = vec![0; TITLE_INTRO_PIECES_OFFSET + 0x1000];
         let mut tile = vec![0u8; 32];
         tile[0] = 0x21;
         put(&mut rom, TITLE_TILES_OFFSET, &stored_lz77(&tile));
@@ -2025,6 +2072,25 @@ mod tests {
         assert_eq!(read.palettes.len(), 15);
         assert_eq!(read.palettes[14][1], 0x001F);
         assert_eq!(read.sprite_palettes[1][1], 0x001F);
+        assert!(read.intro_steps.is_empty());
+        put(
+            &mut rom,
+            TITLE_INTRO_PIECES_OFFSET,
+            &[
+                0x28, 0x50, 0, 0, 3, 0, 0, 0, 0x29, 0x50, 0, 0, 0x0E, 0x61, 0, 0, 3, 0, 0, 0,
+            ],
+        );
+        put(
+            &mut rom,
+            TITLE_SKIP_STRIP_OFFSET + 34,
+            &0x0405u16.to_le_bytes(),
+        );
+        let read = title(&rom).unwrap();
+        assert_eq!(
+            read.intro_steps[..2],
+            [vec![[0x28, 0x50]], vec![[0x29, 0x50], [0x0E, 0x61]]]
+        );
+        assert_eq!(read.skip_strip[1][8], 0x0405);
         put(&mut rom, NAME_ENTRY_PICTURE_OFFSET, &stored_lz77(&picture));
         put(
             &mut rom,

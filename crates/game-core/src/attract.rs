@@ -32,7 +32,7 @@ use gba_runtime::ppu::{FADE_STEPS, darken};
 
 /// Frames from the count's end to the first scene's start: the fade task's
 /// darkening and the tasks' hand-overs.
-const LEAVE_FRAMES: u32 = 38;
+const LEAVE_FRAMES: u32 = 37;
 /// Frames of the darkening's start the fade task leaves at full light: the
 /// controller's hand-over, the fade task's first frame, and the frame the
 /// level reaches the screen.
@@ -109,7 +109,8 @@ impl Attract {
             return Ok(AttractStep::Playing);
         }
         match &mut self.phase {
-            Phase::Leaving(_, frames) => {
+            Phase::Leaving(title, frames) => {
+                title.animate();
                 *frames += 1;
                 if *frames >= LEAVE_FRAMES {
                     return Ok(self.start_scene(data));

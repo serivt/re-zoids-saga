@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The title's attract demo.** Ten seconds on the title without START play one of the
   original's two demos: four battle scenes of the anime's pilots and Zoids, one after
   another, as in the original; START stops it, and the title comes back with its song.
+- **The title's intro.** The title no longer just fades in: as in the original, the
+  emblem opens on black, the sky rises line by line from the middle, "ZOIDS SAGA" and
+  its subtitle light up, and PRESS START blinks under them. START during the intro skips
+  to the finished title, which fades in, as in the original; the intro plays again after
+  the attract demo or a guide.
 - **Update check.** When its screen opens, the launcher asks the project's repository for
   its release tags (`vX.Y.Z`); when one is newer than the port, an *Update available* line
   with the new version shows at the bottom, and choosing it opens the releases page in
