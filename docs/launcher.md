@@ -15,10 +15,19 @@ system's dialog, and below it every language the translations' repository offers
 listed in its `po/languages.json`) downloads that language's PO file, checks that it
 reads, keeps it in the launcher's settings folder as `<code>.po` and chooses it; a
 language already kept says *downloaded*, and choosing it again downloads the latest
-corrections. This is the only time the launcher goes online, and only when asked: it
-fetches the list when the screen opens and a file when a language is chosen, over HTTPS
-from `raw.githubusercontent.com`, and sends nothing else. Without a connection the
-screen says so and a file can still be opened. Only the verified dump,
+corrections. It fetches the list when the screen opens and a file when a language is
+chosen, over HTTPS from `raw.githubusercontent.com`, and sends nothing else. Without a
+connection the screen says so and a file can still be opened.
+
+When its screen opens the launcher also asks, once, whether a newer version is out: it
+reads the project's tags from GitHub's API (`api.github.com/repos/serivt/re-zoids-saga/tags`,
+over HTTPS, on a thread of its own, sending nothing but the request) and takes the highest
+of those named `vX.Y.Z` by semantic versioning. When that is newer than the port's own
+version, an *Update available* line with the new version shows in green after Quit (the
+lines then a pixel closer); choosing it opens the releases page
+(`github.com/serivt/re-zoids-saga/releases`) in the web browser. Without a connection, or
+with an answer it cannot read, nothing shows (`apps/launcher/src/update.rs`). These are
+the only times the launcher goes online. Only the verified dump,
 Zoids Saga (Japan, Rev 1), plays: for the first release (Rev 0), another dump of the
 game or another game it says so and Play stays off, and the command line refuses them
 the same way. It speaks the chosen translation's language (English without one). The

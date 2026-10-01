@@ -43,8 +43,8 @@ use game_core::port_text::{
     LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY, LAUNCHER_TOUCH_OPTIONS_HELP,
     LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP,
     LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE,
-    LAUNCHER_UP, LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW,
-    default_text,
+    LAUNCHER_UP, LAUNCHER_UPDATE, LAUNCHER_UPDATE_HELP, LAUNCHER_VERSION, LAUNCHER_VOLUME,
+    LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
 };
 use game_core::{Enhancement, TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -57,6 +57,7 @@ use crate::download::{Answer, Download, Language};
 use crate::quit::QuitPrompt;
 use crate::saves;
 use crate::settings::{FULL_VOLUME, GameMode, SCALES, Settings, TOUCH_OPACITIES, TOUCH_SIZES};
+use crate::update::{RELEASES_URL, UpdateCheck, Version};
 
 /// `desktop`, a text that names keys, or on Android `touch`, the one that
 /// names taps and the on-screen pad's buttons.
@@ -147,6 +148,8 @@ enum Line {
     About,
     Play,
     Quit,
+    /// A newer release is out: opens the releases page.
+    Update,
 }
 
 const LINES: [Line; 7] = [
@@ -158,6 +161,19 @@ const LINES: [Line; 7] = [
     Line::Play,
     Line::Quit,
 ];
+/// The main screen's lines when a newer release is out, the update last,
+/// and their spacing then, a pixel closer so all eight fit the panel.
+const LINES_WITH_UPDATE: [Line; 8] = [
+    Line::Rom,
+    Line::Translation,
+    Line::Mode,
+    Line::Options,
+    Line::About,
+    Line::Play,
+    Line::Quit,
+    Line::Update,
+];
+const UPDATE_LINE_HEIGHT: usize = 9;
 
 /// The lines of the about screen the cursor stops on, top to bottom.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -378,6 +394,10 @@ pub struct Front {
     languages: Option<Result<Vec<Language>, String>>,
     /// The download running, if any, and the language it brings.
     download: Option<(Download, Option<String>)>,
+    /// The check for a newer release while it runs, and the release it
+    /// found.
+    update_check: Option<UpdateCheck>,
+    newer: Option<Version>,
     /// Why the last translation asked for could not be downloaded.
     download_failure: Option<String>,
     /// The save a dialog is choosing a place for: what it does, the slot
@@ -440,6 +460,8 @@ impl Front {
             save_choice: None,
             save_status: None,
             unopened: false,
+            update_check: None,
+            newer: None,
             line: 0,
             screen: Screen::Main,
             choosing: None,
@@ -649,6 +671,7 @@ impl Front {
             return Ok(Step::Stay);
         }
         self.take_download();
+        self.take_update();
         if let Some((action, slot, choice)) = &self.save_choice {
             if let Some(answer) = choice.answer() {
                 let (action, slot) = (*action, *slot);
@@ -695,7 +718,8 @@ impl Front {
         let chosen = Input::default().with(Button::A);
         match self.screen {
             Screen::Main => {
-                let Some(line) = row_at(y, FIRST_LINE_Y, LINE_HEIGHT, LINES.len()) else {
+                let Some(line) = row_at(y, FIRST_LINE_Y, self.line_height(), self.lines().len())
+                else {
                     return Input::default();
                 };
                 self.line = line;
@@ -779,6 +803,40 @@ impl Front {
         if !matches!(self.languages, Some(Ok(_))) && self.download.is_none() {
             self.languages = None;
             self.download = Some((Download::languages(), None));
+        }
+    }
+
+    /// Starts asking whether a newer release is out; the main screen
+    /// offers it once the answer says so.
+    pub fn check_for_update(&mut self) {
+        self.update_check = Some(UpdateCheck::start());
+    }
+
+    /// Takes the answer of the check for a newer release, once it has
+    /// finished; a failed check shows nothing.
+    fn take_update(&mut self) {
+        let Some(answer) = self.update_check.as_ref().and_then(UpdateCheck::answer) else {
+            return;
+        };
+        self.update_check = None;
+        self.newer = answer.ok().flatten();
+    }
+
+    /// The main screen's lines, with the update's when one is out.
+    fn lines(&self) -> &'static [Line] {
+        if self.newer.is_some() {
+            &LINES_WITH_UPDATE
+        } else {
+            &LINES
+        }
+    }
+
+    /// The main screen's line spacing.
+    fn line_height(&self) -> usize {
+        if self.newer.is_some() {
+            UPDATE_LINE_HEIGHT
+        } else {
+            LINE_HEIGHT
         }
     }
 
@@ -979,9 +1037,9 @@ impl Front {
             self.line = self.line.saturating_sub(1);
         }
         if pressed.is_held(Button::Down) {
-            self.line = (self.line + 1).min(LINES.len() - 1);
+            self.line = (self.line + 1).min(self.lines().len() - 1);
         }
-        let line = LINES[self.line];
+        let line = self.lines()[self.line];
         if pressed.is_held(Button::B) && line == Line::Translation {
             self.translation = None;
         }
@@ -1011,6 +1069,7 @@ impl Front {
             Line::Play if self.playable() => return Ok(Step::Play),
             Line::Play => {}
             Line::Quit => return Ok(Step::Quit),
+            Line::Update => self.unopened = open_url(RELEASES_URL).is_err(),
         }
         Ok(Step::Stay)
     }
@@ -1343,11 +1402,13 @@ impl Front {
             self.text(LAUNCHER_OPTIONS),
         ];
         let value_x = self.value_column(&labels);
-        for (index, line) in LINES.iter().enumerate() {
-            let y = FIRST_LINE_Y + index * LINE_HEIGHT;
+        for (index, line) in self.lines().iter().enumerate() {
+            let y = FIRST_LINE_Y + index * self.line_height();
             let selected = index == self.line;
             let color = if *line == Line::Play && !self.playable() {
                 UNAVAILABLE
+            } else if *line == Line::Update {
+                GOOD
             } else if selected {
                 TEXT
             } else {
@@ -1361,6 +1422,16 @@ impl Front {
                 Line::About => (self.text(LAUNCHER_ABOUT), None),
                 Line::Play => (self.text(LAUNCHER_PLAY), None),
                 Line::Quit => (self.text(LAUNCHER_QUIT), None),
+                Line::Update => (
+                    format!(
+                        "{} {}",
+                        self.text(LAUNCHER_UPDATE),
+                        self.newer
+                            .map(|newer| newer.to_string())
+                            .unwrap_or_default()
+                    ),
+                    None,
+                ),
             };
             self.draw_line(frame, (y, selected, color), &label, value);
         }
@@ -1757,13 +1828,16 @@ impl Front {
 
     /// The line under the panel: about the line under the cursor.
     fn status(&self) -> (String, Rgb) {
-        match LINES[self.line] {
+        let line = self.lines()[self.line.min(self.lines().len() - 1)];
+        match line {
+            Line::Update if self.unopened => (self.text(LAUNCHER_PAGE_UNOPENED), BAD),
+            Line::Update => (self.text(LAUNCHER_UPDATE_HELP), GOOD),
             Line::Mode => (self.text(LAUNCHER_PICK_MODE), DIM),
             Line::Options => (self.text(PICK_OPTIONS), DIM),
             Line::About => (self.text(LAUNCHER_PICK_ABOUT), DIM),
             Line::Rom | Line::Play | Line::Quit => match &self.rom {
                 None => (self.text(LAUNCHER_PICK_ROM), WARNING),
-                Some((_, kind)) if LINES[self.line] == Line::Play && kind.playable() => {
+                Some((_, kind)) if line == Line::Play && kind.playable() => {
                     (self.text(LAUNCHER_READY), GOOD)
                 }
                 Some((_, kind)) => (self.text(kind.message()), kind_color(*kind)),
@@ -2155,6 +2229,7 @@ fn stepped(value: u8, more: bool, range: &std::ops::RangeInclusive<u8>) -> u8 {
 pub fn run(display: &mut Sdl3Display, settings_path: Option<&Path>) -> Result<Option<Choice>> {
     let settings = settings_path.map(Settings::load).unwrap_or_default();
     let mut front = Front::new(&settings);
+    front.check_for_update();
     let mut applied = front.settings();
     apply(display, &applied)?;
     let mut frame = Frame::new(

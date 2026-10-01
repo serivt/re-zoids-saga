@@ -273,6 +273,10 @@ pub const LAUNCHER_AUTO_TEXT: &str = "port/launcher/auto-text";
 pub const LAUNCHER_AUTOSAVE: &str = "port/launcher/autosave";
 /// See [`LAUNCHER_MODE`].
 pub const LAUNCHER_WEAPON_REACH: &str = "port/launcher/weapon-reach";
+/// The main screen's line when a newer release is out, and its help.
+pub const LAUNCHER_UPDATE: &str = "port/launcher/update";
+/// See [`LAUNCHER_UPDATE`].
+pub const LAUNCHER_UPDATE_HELP: &str = "port/launcher/update-help";
 /// The game mode's line of the fast forward's speed.
 pub const LAUNCHER_FAST_FORWARD: &str = "port/launcher/fast-forward";
 /// See [`LAUNCHER_MODE`].
@@ -397,6 +401,16 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         LAUNCHER_AUTOSAVE,
         "Autosave",
         "The enhanced mode's line that saves the game on each change of map, into a slot of its own listed first when continuing",
+    ),
+    launcher(
+        LAUNCHER_UPDATE,
+        "Update available",
+        "The main screen's line, after Quit, when a newer release of the port is out; the new version (v0.4.0) follows it",
+    ),
+    launcher_line(
+        LAUNCHER_UPDATE_HELP,
+        "A new version is out: open its page.",
+        "The status line under the update's line: choosing it opens the releases page in the web browser",
     ),
     launcher(
         LAUNCHER_FAST_FORWARD,

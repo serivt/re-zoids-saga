@@ -10,6 +10,7 @@ mod pacing;
 mod quit;
 mod saves;
 mod settings;
+mod update;
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
