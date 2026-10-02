@@ -137,6 +137,9 @@ pub enum Event {
     },
     /// The save could not be read or written; the text says why.
     StorageFailed(String),
+    /// An achievement was unlocked, by its key (see
+    /// [`crate::achievements`]).
+    AchievementUnlocked(String),
 }
 
 /// A part that watches the game and may answer its questions. Every method

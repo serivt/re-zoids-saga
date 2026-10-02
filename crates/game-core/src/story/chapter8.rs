@@ -17,7 +17,7 @@ use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
 /// Set once the Emperor has sent for the Death Stinger (`0x0802205C`).
-const CHAPTER_OPENED: u16 = 0x1B2;
+pub(super) const CHAPTER_OPENED: u16 = 0x1B2;
 /// Set once the portal has brought the party near New Helic City.
 const ARRIVED: u16 = 0x1B3;
 /// Set once the party has first seen the city's ruins.

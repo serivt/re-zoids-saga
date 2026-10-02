@@ -51,8 +51,10 @@ impl Extension for StorageReport {
     }
 
     fn on_event(&mut self, event: &GameEvent) {
-        if let GameEvent::StorageFailed(reason) = event {
-            eprintln!("Save:       {reason}");
+        match event {
+            GameEvent::StorageFailed(reason) => eprintln!("Save:       {reason}"),
+            GameEvent::AchievementUnlocked(key) => println!("Achievement: {key}"),
+            _ => {}
         }
     }
 }
@@ -181,6 +183,9 @@ fn launch(
         .borrow_mut()
         .insert(Box::new(StorageReport));
     game.extensions().borrow_mut().insert(Box::new(ModeKeeper));
+    let achievements = saves::achievements_file(&save_path);
+    println!("Save:       achievements in {}", achievements.display());
+    game.set_achievement_storage(Box::new(FileStorage::new(achievements)));
     if let Some(path) = &options.translation {
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read translation {}", path.display()))?;

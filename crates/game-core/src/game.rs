@@ -32,6 +32,7 @@ use gba_runtime::ppu::{FADE_STEPS, SCREEN_HEIGHT, SCREEN_WIDTH, darken};
 use platform::{Button, Frame, Input, Rgb, SaveStorage, StorageError};
 use thiserror::Error;
 
+use crate::achievements::{Report, Tracker};
 use crate::attract::{Attract, AttractStep};
 use crate::autosave::{Autosaver, Notice};
 use crate::battle::Staged;
@@ -333,6 +334,8 @@ pub struct Game<'rom> {
     started_wins: u16,
     /// The player's statistics, kept with the saves (see [`crate::stats`]).
     stats: Stats,
+    /// The enhanced mode's achievements (see [`crate::achievements`]).
+    achievements: Tracker,
     /// The game frames that make one shown frame (see
     /// [`Game::set_time_scale`]), and those counted toward the next.
     time_scale: u32,
@@ -457,6 +460,97 @@ impl<'rom> Game<'rom> {
     /// game; saving never offers it.
     pub fn set_autosave_storage(&mut self, storage: Box<dyn SaveStorage + Send>) {
         self.autosave = Some(Autosaver::new(storage, self.save.clone()));
+    }
+
+    /// Builds the pause menu once the field has darkened, with the save
+    /// slots, the enhancements, the statistics and the achievements.
+    fn open_pause_menu(&mut self) -> Result<(), GameError> {
+        let mut menu = PauseMenu::new(&self.data, self.party.clone(), self.state.clone())?;
+        self.offer_save_slots(&mut menu);
+        menu.set_enhancements(match self.play_mode {
+            PlayMode::Classic => None,
+            PlayMode::Enhanced(enhancements) => Some(enhancements),
+        });
+        menu.set_stats(self.stats);
+        menu.set_achievements(self.achievements.unlocked());
+        menu.open(self.data.bytes(), &mut self.windows)?;
+        self.screen = Screen::Menu(Box::new(menu));
+        Self::emit(&self.extensions, &Event::MenuOpened);
+        Ok(())
+    }
+
+    /// Keeps the enhanced mode's achievements in `storage`, shared by
+    /// every game (see [`crate::achievements`]); without it they last
+    /// until the game closes.
+    pub fn set_achievement_storage(&mut self, storage: Box<dyn SaveStorage>) {
+        self.achievements.set_storage(storage);
+        self.report_achievements();
+    }
+
+    /// Whether the achievements are tracked: in the enhanced mode, and not
+    /// while the debugging mode makes the game easy.
+    fn tracks_achievements(&self) -> bool {
+        matches!(self.play_mode, PlayMode::Enhanced(_)) && !self.debug
+    }
+
+    /// A frame of the achievements: the game state checked twice a second
+    /// while the player walks freely, the staff roll noted, the toast
+    /// announcing what was unlocked moved on, and the extensions told.
+    fn track_achievements(&mut self) -> Result<(), GameError> {
+        if !self.tracks_achievements() {
+            return Ok(());
+        }
+        self.achievements
+            .credits_running(self.credits.is_some(), &self.stats);
+        let free = matches!(self.screen, Screen::Field)
+            && self.shop.is_none()
+            && self.combat.is_none()
+            && self.credits.is_none()
+            && self.battle.is_none()
+            && self.player_in_control();
+        if free && self.achievements.due() {
+            let state = self.progress_snapshot();
+            self.achievements
+                .check(self.data.bytes(), &state, &self.stats);
+        }
+        let shown = free && self.shown_brightness == 0;
+        if let Some(sound) = self.achievements.step(shown) {
+            Self::emit(&self.extensions, &Event::SoundRequested(usize::from(sound)));
+            self.sound.play(usize::from(sound))?;
+        }
+        self.report_achievements();
+        Ok(())
+    }
+
+    /// Tells the extensions what the achievements reported.
+    fn report_achievements(&mut self) {
+        for report in self.achievements.take_reports() {
+            let event = match report {
+                Report::Unlocked(key) => Event::AchievementUnlocked(key.to_owned()),
+                Report::StorageFailed(error) => Event::StorageFailed(error),
+            };
+            Self::emit(&self.extensions, &event);
+        }
+    }
+
+    /// The game state with the flags, the level, the experience and the
+    /// money as they stand, which the block itself takes only when the
+    /// game is saved.
+    fn progress_snapshot(&self) -> Vec<u8> {
+        let mut state = self.state.clone();
+        if let Ok(mut progress) = Progress::read(&state) {
+            progress.flags = [0; FLAG_WORDS];
+            for flag in self.windows.flags() {
+                progress.set_flag(flag, true);
+            }
+            progress.level = u8::try_from(self.party.level).unwrap_or(u8::MAX);
+            progress.experience = self.party.experience;
+            progress.money = self.party.money;
+            if progress.write(&mut state).is_err() {
+                state.clone_from(&self.state);
+            }
+        }
+        state
     }
 
     /// Counts a frame of play toward the time played, one in each
@@ -603,6 +697,7 @@ impl<'rom> Game<'rom> {
             battle_lost: false,
             started_wins: 0,
             stats: Stats::default(),
+            achievements: Tracker::default(),
             time_scale: 1,
             time_owed: 0,
             defeated: false,
@@ -793,17 +888,7 @@ impl<'rom> Game<'rom> {
                 let frames = *frames + 1;
                 self.screen = Screen::OpeningMenu(frames);
                 if frames >= MENU_OPEN_FRAMES {
-                    let mut menu =
-                        PauseMenu::new(&self.data, self.party.clone(), self.state.clone())?;
-                    self.offer_save_slots(&mut menu);
-                    menu.set_enhancements(match self.play_mode {
-                        PlayMode::Classic => None,
-                        PlayMode::Enhanced(enhancements) => Some(enhancements),
-                    });
-                    menu.set_stats(self.stats);
-                    menu.open(rom, &mut self.windows)?;
-                    self.screen = Screen::Menu(Box::new(menu));
-                    Self::emit(&self.extensions, &Event::MenuOpened);
+                    self.open_pause_menu()?;
                 }
             }
             Screen::Menu(menu) => match menu.update(rom, input, &mut self.windows)? {
@@ -850,6 +935,7 @@ impl<'rom> Game<'rom> {
                 }
             }
         }
+        self.track_achievements()?;
         for sound in self.windows.take_sounds() {
             self.sound.play(usize::from(sound))?;
         }
@@ -1602,6 +1688,9 @@ impl<'rom> Game<'rom> {
                 if matches!(shop.shop_kind(), Some(Shop::Lab(_))) {
                     extraction::saga_party::heal_all(&mut self.state);
                 }
+                if shop.developments() > 0 && self.tracks_achievements() {
+                    self.achievements.developed();
+                }
                 Self::emit(&self.extensions, &Event::ShopClosed);
             }
         }
@@ -1956,6 +2045,11 @@ impl<'rom> Game<'rom> {
             if let Some(combat) = self.combat.take() {
                 self.stats
                     .record_battle(outcome, &combat.tally(), combat.story_battle());
+                if self.tracks_achievements() {
+                    let story = combat.story_battle().is_some();
+                    self.achievements
+                        .battle_ended(outcome, &combat.tally(), story);
+                }
                 if combat.state().len() == self.state.len() {
                     self.state.clone_from_slice(combat.state());
                     take_party(&self.state, &mut self.party);
@@ -2159,6 +2253,8 @@ impl<'rom> Game<'rom> {
                     let level = notice.level(NOTICE_LEVELS);
                     draw_notice(frame, AUTOSAVE_NOTICE_AT, &text, &self.painter, level);
                 }
+                self.achievements
+                    .draw(frame, &self.extensions, &self.painter, &self.skin);
                 if self.shown_white.1 {
                     whiten(frame, self.shown_brightness);
                 } else {

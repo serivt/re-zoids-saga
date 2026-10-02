@@ -15,7 +15,7 @@ use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
 /// Set once the chapter's opening has played (`0x08025468`).
-const CHAPTER_OPENED: u16 = 0x12F;
+pub(super) const CHAPTER_OPENED: u16 = 0x12F;
 /// Set once the party is ready to set out from the briefing room (Regina's
 /// question, `0x0802672C`).
 const SET_OUT: u16 = 0x130;

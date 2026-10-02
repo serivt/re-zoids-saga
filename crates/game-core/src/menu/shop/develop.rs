@@ -791,6 +791,7 @@ impl PauseMenu {
         let price = saga_party::development(rom, zoid).map_or(0, |needed| needed.money);
         self.party.money = self.party.money.saturating_sub(price);
         saga_party::develop(rom, &mut self.game_state, zoid, development.base);
+        self.developments += 1;
         self.answer(SCRIPT_DONE)
     }
 

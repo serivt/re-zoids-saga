@@ -19,7 +19,7 @@ use crate::menu::Shop;
 
 /// Set once the Emperor has sent Gale for the Death Saurer's data
 /// (`0x0801BF40`).
-const CHAPTER_OPENED: u16 = 0x194;
+pub(super) const CHAPTER_OPENED: u16 = 0x194;
 /// Set once the portal has brought the party to the Empire.
 const ARRIVED: u16 = 0x195;
 /// Set once the party has first seen the town below Miletos castle.
@@ -45,7 +45,7 @@ const ROSSO_MET: u16 = 0x1A2;
 /// Set once Raven has struck.
 const RAVEN_MET: u16 = 0x1A3;
 /// Set once Rosso and Viola have joined.
-const ROSSO_JOINED: u16 = 0x1A4;
+pub(super) const ROSSO_JOINED: u16 = 0x1A4;
 /// Set once Gray Colony has pointed the party to the mountains' lab.
 const LAB_POINTED: u16 = 0x1A5;
 /// Set once the party has found the hidden lab.
@@ -119,7 +119,7 @@ const PRINCE_STANDING: usize = 0x98;
 /// The characters of group 5, met as the chapter opens (`0x080099F0`).
 const CHAPTER_GROUP: u8 = 5;
 /// The Zi data Rosso gives (`0x08037A24` with `0x5B`).
-const ROSSO_GIFT: u8 = 0x5B;
+pub(super) const ROSSO_GIFT: u8 = 0x5B;
 /// The lists Rosso and Viola, then Van and Irvine, join with.
 const ROSSO_LISTS: [u8; 2] = [0x16, 0x17];
 const VAN_LISTS: [u8; 2] = [0x18, 0x19];

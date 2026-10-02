@@ -16,7 +16,7 @@ use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
 /// Set once the Emperor has sent Gale through time (`0x080172F4`).
-const CHAPTER_OPENED: u16 = 0x16D;
+pub(super) const CHAPTER_OPENED: u16 = 0x16D;
 /// Set once the party has found the Ark base destroyed and met Gale.
 const ARK_BASE_SEEN: u16 = 0x16E;
 /// Set once Fiene has joined.
@@ -98,7 +98,7 @@ const PRINCE_STANDING: usize = 0x98;
 /// Moonbay's sprite as she turns to go (`0x080184BC`).
 const MOONBAY_LEAVING: usize = 0xA6;
 /// The Zi data Irvine gives (`0x08037A24` with `0x48`).
-const IRVINE_GIFT: u8 = 0x48;
+pub(super) const IRVINE_GIFT: u8 = 0x48;
 /// The characters of group 3, met as the chapter opens (`0x080099D8`).
 const CHAPTER_GROUP: u8 = 3;
 

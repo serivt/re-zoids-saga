@@ -14,7 +14,7 @@ use crate::menu::Shop;
 
 /// Set once the Emperor's scene that opens the chapter has run
 /// (`0x08014C68`).
-pub const CHAPTER_OPENED: u16 = 0x158;
+pub(super) const CHAPTER_OPENED: u16 = 0x158;
 /// Set once the party has come through the portal into the desert.
 const DESERT_REACHED: u16 = 0x159;
 /// Tested with [`DESERT_REACHED`] before the rare-hertz zone is watched;

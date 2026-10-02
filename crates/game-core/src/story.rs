@@ -59,6 +59,46 @@ use crate::event::{
 use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
+/// The flags the openings of chapters 2 to 10 set as the party arrives in
+/// each, so the chapter before is over: Sand Colony, the throne room of
+/// chapter 3 and so on to the castle's room after the staff roll.
+pub(crate) const CHAPTER_OPENINGS: [u16; 9] = [
+    chapter2::SAND_COLONY_ARRIVED,
+    chapter3::CHAPTER_OPENED,
+    chapter4::CHAPTER_OPENED,
+    chapter5::CHAPTER_OPENED,
+    chapter6::CHAPTER_OPENED,
+    chapter7::CHAPTER_OPENED,
+    chapter8::CHAPTER_OPENED,
+    chapter9::CHAPTER_OPENED,
+    chapter10::CHAPTER_OPENED,
+];
+/// Set once Vega's Führer is beaten (chapter 10).
+pub(crate) const VEGA_BEATEN: u16 = chapter10::VEGA_BEATEN;
+/// Set once Rosso and Viola join in the ruins (chapter 6).
+pub(crate) const ROSSO_JOINED: u16 = chapter6::ROSSO_JOINED;
+/// Set once each of chapter 10's researchers has given his Zi data.
+pub(crate) const RESEARCHERS_GAVE: [u16; 2] =
+    [chapter10::FIRST_DATA_GIVEN, chapter10::SECOND_DATA_GIVEN];
+/// The Zoid Federation's Ultrasaurus fight, which only a defiant answer
+/// starts (chapter 5).
+pub(crate) const ULTRASAURUS_BATTLE: u8 = chapter5::ULTRASAURUS_BATTLE;
+
+/// The Zi data the story gives outside chests: Irvine's (chapter 4),
+/// Rosso's (chapter 6), Blue Gem's (chapter 7), Vega's and the
+/// researchers' (chapter 10).
+pub(crate) fn zi_data_gifts() -> impl Iterator<Item = u8> {
+    [
+        chapter4::IRVINE_GIFT,
+        chapter6::ROSSO_GIFT,
+        chapter10::VEGA_ZI_DATA,
+    ]
+    .into_iter()
+    .chain(chapter7::BLUE_GEM_GIFTS)
+    .chain(chapter10::FIRST_DATA)
+    .chain(chapter10::SECOND_DATA)
+}
+
 /// Set by the first room once the opening has played.
 pub const OPENING_SEEN: u16 = 0x11F;
 /// Set by speaking to the soldier by the stairs of the ground floor.

@@ -90,6 +90,16 @@ pub const OPTIONS_OFF: &str = "port/options/off";
 pub const OPTIONS_KEYS: &str = "port/options/keys";
 /// The enhanced mode's main list's line that opens the statistics.
 pub const MENU_STATS: &str = "port/menu/stats";
+/// The enhanced mode's main list's line that opens the achievements (see
+/// [`crate::achievements`]).
+pub const MENU_ACHIEVEMENTS: &str = "port/menu/achievements";
+/// The achievements' pages, shown on the help line with their number and
+/// how many are unlocked.
+pub const ACHIEVEMENT_PAGE: &str = "port/achievements/page";
+/// The first line of the window that announces an achievement unlocked.
+pub const ACHIEVEMENT_UNLOCKED: &str = "port/achievements/unlocked";
+/// The window's second line when several were unlocked at once.
+pub const ACHIEVEMENT_MANY: &str = "port/achievements/many";
 /// The enhanced mode's main list's last line, which leaves the game for
 /// the launcher, and the question it asks in the help line.
 pub const MENU_QUIT: &str = "port/menu/quit";
@@ -1025,6 +1035,30 @@ pub const PORT_TEXTS: &[PortText] = &[
         pixels: 56,
     },
     PortText {
+        key: MENU_ACHIEVEMENTS,
+        text: "実績",
+        note: "The enhanced mode's line of the pause menu's main list, after the statistics, that opens the achievements (a port feature); as wide as the list's other lines, 56 pixels",
+        pixels: 56,
+    },
+    PortText {
+        key: ACHIEVEMENT_PAGE,
+        text: "実績　{page}／{pages}　達成　{count}／{total}",
+        note: "The achievements' first help line, with the page's number of the pages and the achievements unlocked of all of them; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: ACHIEVEMENT_UNLOCKED,
+        text: "実績解除！",
+        note: "The first line of the window that slides down at the field's top when an achievement is unlocked; the achievement's name follows on the second line; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: ACHIEVEMENT_MANY,
+        text: "{count}件の実績",
+        note: "That window's second line when several achievements were unlocked at once, as a game saved before is continued; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
         key: STATS_PAGE_BATTLES,
         text: "記録　{page}／{pages}　戦い",
         note: "The statistics' first help line on the battles' page, with its number of the pages; 224 pixels",
@@ -1225,9 +1259,13 @@ pub fn default_text(key: &str) -> Option<&'static str> {
         .map(|text| text.text)
 }
 
-/// The game's messages and the launcher's, in the template's order.
+/// The game's messages, the achievements' and the launcher's, in the
+/// template's order.
 pub fn all_texts() -> impl Iterator<Item = &'static PortText> {
-    PORT_TEXTS.iter().chain(LAUNCHER_TEXTS)
+    PORT_TEXTS
+        .iter()
+        .chain(crate::achievements::texts())
+        .chain(LAUNCHER_TEXTS)
 }
 
 /// The text of the message `key`: an extension's answer, or the port's

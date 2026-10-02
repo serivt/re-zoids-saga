@@ -32,13 +32,13 @@ use formats::progress::{character_known, command_learned};
 
 /// The window the pages show in: the one the status list and the settings
 /// use, across the screen above the help line.
-const WINDOW: u8 = 4;
-const KIND: u8 = 0x21;
-const STYLE: u8 = 4;
-const RECT: (u8, u8, u8, u8) = (0, 0, 30, 14);
+pub(super) const WINDOW: u8 = 4;
+pub(super) const KIND: u8 = 0x21;
+pub(super) const STYLE: u8 = 4;
+pub(super) const RECT: (u8, u8, u8, u8) = (0, 0, 30, 14);
 /// The cells of a line that hold no text: the frame and the cursor's mark
 /// on each side, and one between the value and the frame.
-const MARGIN_CELLS: usize = 5;
+pub(super) const MARGIN_CELLS: usize = 5;
 /// The deck commands there are (the records at ROM `0x683AC0`).
 const DECK_COMMANDS: usize = 33;
 /// The Zoid index a unit record keeps at `+6`.
@@ -245,7 +245,7 @@ fn zoid_kinds(state: &[u8]) -> usize {
 }
 
 /// Prints `text` in window `id`.
-fn put_text(windows: &mut ScriptWindows<'_>, id: u8, text: &str) {
+pub(super) fn put_text(windows: &mut ScriptWindows<'_>, id: u8, text: &str) {
     for ch in text.chars() {
         windows.put_char(id, ch);
     }

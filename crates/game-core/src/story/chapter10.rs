@@ -18,7 +18,7 @@ use crate::menu::Shop;
 use extraction::saga::Reward;
 
 /// Set once the chapter's opening has played at the castle (`0x08029E50`).
-const CHAPTER_OPENED: u16 = 0x137;
+pub(super) const CHAPTER_OPENED: u16 = 0x137;
 /// Set when the prince tells Regina he is ready (`0x0802A698`); cleared
 /// each time the castle's room loads.
 const SET_OUT: u16 = 0x138;
@@ -27,12 +27,12 @@ const SET_OUT: u16 = 0x138;
 const GATHERED: u16 = 0x139;
 /// Set once each researcher of the lab (map 322) has handed over his Zi
 /// data (`0x08006D30`, `0x08006D94`).
-const FIRST_DATA_GIVEN: u16 = 0x13A;
-const SECOND_DATA_GIVEN: u16 = 0x13B;
+pub(super) const FIRST_DATA_GIVEN: u16 = 0x13A;
+pub(super) const SECOND_DATA_GIVEN: u16 = 0x13B;
 /// Set once Vega is beaten (story battle 41), once he has challenged the
 /// party (spoken to, `0x0802AA14`), and once his Zoid has been placed on
 /// map 317 the first time.
-const VEGA_BEATEN: u16 = 0x13C;
+pub(super) const VEGA_BEATEN: u16 = 0x13C;
 const VEGA_CHALLENGED: u16 = 0x13D;
 const VEGA_PLACED: u16 = 0x13E;
 
@@ -315,7 +315,7 @@ const VEGA_TASK: &[Op] = &[
 ];
 
 /// What Vega leaves behind.
-const VEGA_ZI_DATA: u8 = 0x78;
+pub(super) const VEGA_ZI_DATA: u8 = 0x78;
 const VEGA_CORE: u8 = 8;
 /// Where his Führer appears the first time.
 const VEGA_CELL: (usize, usize) = (0xD, 4);
@@ -355,8 +355,8 @@ const VEGA_CHALLENGES: &[Op] = &[
 /// The Zi data the two researchers of map 322 hand over: the Imperial
 /// army's own Zoids (`0x08006D30`) and those it had gathered
 /// (`0x08006D94`).
-const FIRST_DATA: [u8; 8] = [0x95, 0x7C, 0x80, 0x7E, 0x7F, 0x7D, 0x81, 0x92];
-const SECOND_DATA: [u8; 8] = [0x3D, 0x3F, 0x17, 0x12, 6, 0x11, 0x20, 0x8C];
+pub(super) const FIRST_DATA: [u8; 8] = [0x95, 0x7C, 0x80, 0x7E, 0x7F, 0x7D, 0x81, 0x92];
+pub(super) const SECOND_DATA: [u8; 8] = [0x3D, 0x3F, 0x17, 0x12, 6, 0x11, 0x20, 0x8C];
 
 /// A researcher: the first time his line (`0x2D3` or `0x2D4`) and his eight
 /// Zi data, later `0x2D5`.

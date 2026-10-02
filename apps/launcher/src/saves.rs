@@ -3,7 +3,8 @@
 //! slot's `.sav` through the system's dialog (to an emulator, another
 //! device or a backup) and imports one, which must read as a save of the
 //! game before it replaces the slot; the save it replaces is kept beside
-//! it as `.bak`.
+//! it as `.bak`. The enhanced mode's achievements, which every slot
+//! shares, are kept beside them in a file of their own.
 //!
 //! Source of knowledge: this project's own design.
 
@@ -16,11 +17,21 @@ use platform_sdl3::slot_path;
 /// replaces.
 pub const SAVE_EXTENSION: &str = "sav";
 const BACKUP_EXTENSION: &str = "bak";
+/// The extension of the file beside the saves that keeps the enhanced
+/// mode's achievements, which every slot shares.
+const ACHIEVEMENTS_EXTENSION: &str = "achievements";
 
 /// Where save slot `slot` (from 0) of the ROM at `rom` is kept.
 #[must_use]
 pub fn slot_file(rom: &Path, slot: usize) -> PathBuf {
     slot_path(&rom.with_extension(SAVE_EXTENSION), slot)
+}
+
+/// Where the achievements of the games saved at `save` are kept: beside
+/// it, with its name.
+#[must_use]
+pub fn achievements_file(save: &Path) -> PathBuf {
+    save.with_extension(ACHIEVEMENTS_EXTENSION)
 }
 
 /// Whether `bytes` read as a save of the game whose ROM is `rom_bytes`,
@@ -76,6 +87,10 @@ mod tests {
         assert_eq!(slot_file(rom, 0), PathBuf::from("/data/rom.sav"));
         assert_eq!(slot_file(rom, 2), PathBuf::from("/data/rom.3.sav"));
         assert_eq!(export_name(1), "Zoids Saga (slot 2).sav");
+        assert_eq!(
+            achievements_file(&slot_file(rom, 0)),
+            PathBuf::from("/data/rom.achievements")
+        );
     }
 
     #[test]

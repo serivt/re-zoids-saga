@@ -390,6 +390,12 @@ impl PauseMenu {
         self.shop.as_ref().map(|session| session.shop)
     }
 
+    /// The Zoids a lab developed while the menu was open.
+    #[must_use]
+    pub fn developments(&self) -> u32 {
+        self.developments
+    }
+
     /// The welcome, once the shop has brightened, and the question of the
     /// choice in the same frame; its menu runs from the next.
     pub(super) fn welcome(

@@ -18,7 +18,7 @@ use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
 /// Set once the Emperor has sent Blood to the colosseum (`0x08019B04`).
-const CHAPTER_OPENED: u16 = 0x178;
+pub(super) const CHAPTER_OPENED: u16 = 0x178;
 /// Set once the portal has brought the party into the battle field.
 const DISTRICT_REACHED: u16 = 0x179;
 /// Set once Team Blitz has told the party how to reach the champion's
@@ -449,7 +449,7 @@ const DISTRICT_ARRIVAL: &[Op] = &[Op::IfFlags {
 const DISTRICT_RETURN_POINT: u8 = 0xC;
 
 /// The Zoid Federation's Ultrasaurus fight (story battle 25).
-const ULTRASAURUS_BATTLE: u8 = 25;
+pub(super) const ULTRASAURUS_BATTLE: u8 = 25;
 const ULTRASAURUS_BATTLE_OPS: [Op; 4] = story_battle(ULTRASAURUS_BATTLE);
 /// The Ultrasaurus's battle (the hook at `0x08018FFC`): won, the field
 /// brightens at once and nothing else changes.

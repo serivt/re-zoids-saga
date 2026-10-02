@@ -1,5 +1,6 @@
 //! Game systems shared across the Zoids titles: menus, battle framework, world, script interpreter and save system.
 
+pub mod achievements;
 pub mod attract;
 pub mod autosave;
 pub mod battle;

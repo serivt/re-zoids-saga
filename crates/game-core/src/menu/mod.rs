@@ -29,6 +29,7 @@ use crate::translation::{ITEM_TABLE, NAME_TABLE, PART_TABLE, PAUSE_MENU_TABLE};
 use crate::windows::ScriptWindows;
 use crate::{ScriptHost, TextPainter, WindowPainter, draw_sprite};
 
+mod achievements;
 mod equipment;
 pub(crate) mod formation;
 mod items;
@@ -133,12 +134,15 @@ const ITEM_WEAPONS: u16 = 2;
 const ITEM_FORMATION: u16 = 3;
 const ITEM_CONFIG: u16 = 4;
 const ITEM_SAVE: u16 = 5;
-/// The enhanced mode's own line of the main list, after セーブ (see
-/// [`PauseMenu::main_item`]); not one of the original's.
+/// The enhanced mode's own lines of the main list, after セーブ: the
+/// statistics and the achievements (see [`PauseMenu::main_item`]); not
+/// the original's.
 const ITEM_STATISTICS: u16 = 6;
+/// See [`ITEM_STATISTICS`].
+const ITEM_ACHIEVEMENTS: u16 = 7;
 /// The enhanced mode's last line of the main list, which leaves the game
 /// for the launcher; not one of the original's.
-const ITEM_QUIT: u16 = 7;
+const ITEM_QUIT: u16 = 8;
 /// The はい/いいえ window script 61 opens.
 const YES_NO_WINDOW: u8 = 7;
 const STATUS_UNIT: u16 = 0;
@@ -378,8 +382,10 @@ enum MenuState {
     SaveSlot,
     /// The port's list of settings, コンフィグ in the enhanced mode.
     Options,
-    /// The port's statistics, opened from its list of settings.
+    /// The port's statistics, opened from the main list.
     Statistics,
+    /// The port's achievements, opened from the main list.
+    Achievements,
     Unit,
     Character,
     Zoid,
@@ -454,6 +460,9 @@ pub struct PauseMenu {
     /// コンフィグ's settings in the enhanced mode.
     options: options::Options,
     statistics: statistics::Statistics,
+    achievements: achievements::AchievementPages,
+    /// The Zoids the lab developed while the menu was open.
+    developments: u32,
     /// The weapons' reach the enhanced mode draws, and whether SELECT
     /// turned it to the other row.
     reach: Option<reach::ReachPanel>,
@@ -553,6 +562,8 @@ impl PauseMenu {
             save: save_slots::SaveSlots::default(),
             options: options::Options::default(),
             statistics: statistics::Statistics::default(),
+            achievements: achievements::AchievementPages::default(),
+            developments: 0,
             reach: None,
             reach_back: false,
             equipment: equipment::Equipment::default(),
@@ -742,8 +753,8 @@ impl PauseMenu {
         step
     }
 
-    /// A frame of a screen of the port's own: the save slots, the settings
-    /// or the statistics.
+    /// A frame of a screen of the port's own: the save slots, the settings,
+    /// the statistics or the achievements.
     fn port_screen_frame(
         &mut self,
         rom: &[u8],
@@ -753,6 +764,10 @@ impl PauseMenu {
         match self.state {
             MenuState::SaveSlot => self.save_slot_frame(rom, input, windows),
             MenuState::Options => self.options_frame(rom, input, windows),
+            MenuState::Achievements => {
+                self.achievements_frame(rom, input, windows)?;
+                Ok(MenuStep::Open)
+            }
             _ => {
                 self.statistics_frame(rom, input, windows)?;
                 Ok(MenuStep::Open)
@@ -789,7 +804,10 @@ impl PauseMenu {
             MenuState::Closed => return Ok(MenuStep::Closed),
             MenuState::Saving => return Ok(MenuStep::Save),
             MenuState::Quitting => return Ok(MenuStep::Quit),
-            MenuState::SaveSlot | MenuState::Options | MenuState::Statistics => {
+            MenuState::SaveSlot
+            | MenuState::Options
+            | MenuState::Statistics
+            | MenuState::Achievements => {
                 return self.port_screen_frame(rom, input, windows);
             }
             _ => {}
@@ -851,6 +869,7 @@ impl PauseMenu {
             | MenuState::SaveSlot
             | MenuState::Options
             | MenuState::Statistics
+            | MenuState::Achievements
             | MenuState::Closing(_)
             | MenuState::Closed => {}
         }
@@ -1408,6 +1427,12 @@ impl PauseMenu {
                 self.open_statistics(self.held, windows);
                 Ok(())
             }
+            ITEM_ACHIEVEMENTS => {
+                windows.clear_window(HELP_WINDOW);
+                windows.play_sound(MENU_MOVE_SOUND);
+                self.open_achievements(self.held, windows);
+                Ok(())
+            }
             ITEM_SAVE if self.offers_slots() => {
                 windows.clear_window(HELP_WINDOW);
                 self.open_save_slots(windows);
@@ -1425,15 +1450,13 @@ impl PauseMenu {
     }
 
     /// The entry of main list line `choice`: the original's, or in the
-    /// enhanced mode, whose list goes on after セーブ with the statistics
-    /// and 終了.
+    /// enhanced mode, whose list goes on after セーブ with the statistics,
+    /// the achievements and 終了.
     fn main_item(&self, choice: u16) -> u16 {
         if !self.offers_options() || choice <= ITEM_SAVE {
             choice
-        } else if choice == ITEM_STATISTICS {
-            ITEM_STATISTICS
         } else {
-            ITEM_QUIT
+            choice.min(ITEM_QUIT)
         }
     }
 
@@ -1984,8 +2007,8 @@ fn print_number(windows: &mut ScriptWindows<'_>, window: u8, value: u32, cells: 
 }
 
 /// The enhanced mode's main list: the original's lines as script 46 left
-/// them, then the statistics' line and 終了; the list scrolls to keep the
-/// cursor in its window.
+/// them, then the statistics' line, the achievements' and 終了; the list
+/// scrolls to keep the cursor in its window.
 fn add_port_lines(windows: &mut ScriptWindows<'_>) {
     let Some(lines) = windows
         .windows()
@@ -1997,10 +2020,13 @@ fn add_port_lines(windows: &mut ScriptWindows<'_>) {
     };
     let extensions = windows.extensions().clone();
     let stats = crate::port_text::port_text(&extensions, crate::port_text::MENU_STATS);
+    let achievements =
+        crate::port_text::port_text(&extensions, crate::port_text::MENU_ACHIEVEMENTS);
     let quit = crate::port_text::port_text(&extensions, crate::port_text::MENU_QUIT);
     windows.clear_window(MENU_WINDOW);
     let mut texts: Vec<&str> = lines.iter().map(String::as_str).collect();
     texts.push(&stats);
+    texts.push(&achievements);
     texts.push(&quit);
     for (index, text) in texts.iter().enumerate() {
         if index > 0 {

@@ -18,7 +18,7 @@ use crate::field::{Direction, PIXEL};
 use crate::menu::Shop;
 
 /// Set once the Emperor has sent Blood after Fran (`0x0801EF1C`).
-const CHAPTER_OPENED: u16 = 0x1AB;
+pub(super) const CHAPTER_OPENED: u16 = 0x1AB;
 /// Set once the portal has brought the party to the forest.
 const ARRIVED: u16 = 0x1AC;
 /// Set once Blue Gem has seen to the Liger Zero and Solid has taken the
@@ -83,7 +83,7 @@ const CHAPTER_GROUP: u8 = 6;
 const ALSTER_LISTS: [u8; 2] = [0x1A, 0x1B];
 /// The Zi data Blue Gem gives (`0x08037A24`): the Trinity Liger's
 /// upgrade and three of his own.
-const BLUE_GEM_GIFTS: [u8; 4] = [0x90, 0x43, 0x44, 0x45];
+pub(super) const BLUE_GEM_GIFTS: [u8; 4] = [0x90, 0x43, 0x44, 0x45];
 /// The return point the Führer's loss takes the party to: Blue Gem's
 /// house.
 const BLUE_GEM_RETURN_POINT: u8 = 0x11;
