@@ -232,9 +232,10 @@ impl<'rom> GameData<'rom> {
     }
 
     /// Adds the character of the companions' record `index` to the party
-    /// in `state`; `None` when the record cannot be read.
-    pub fn join_companion(&self, state: &mut [u8], index: usize) -> Option<()> {
-        saga_party::join_companion(self.rom, state, index)
+    /// in `state`, with a unit of its Zoid when `zoid`; `None` when the
+    /// record cannot be read.
+    pub fn join_companion(&self, state: &mut [u8], index: usize, zoid: bool) -> Option<()> {
+        saga_party::join_companion(self.rom, state, index, zoid)
     }
 
     /// Takes the character of the companions' record `index` out of the

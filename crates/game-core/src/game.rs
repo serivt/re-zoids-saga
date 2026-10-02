@@ -39,7 +39,6 @@ use crate::boot::{LogoScreen, NameEntry, TitleChoice, TitleScreen};
 use crate::combat::{Combat, Outcome};
 use crate::credits::Credits;
 use crate::data::GameData;
-use crate::demo::{DemoEnd, DemoStep};
 use crate::event::{
     BLACK, ChestKind, EventHost, Events, FIELD_HOOK, FIELD_WATCH, HoldStep, MAP_TASK, Op,
     WarpRedirect,
@@ -57,8 +56,7 @@ use crate::slots::{self, Pick, Purpose, Slot, SlotPicker};
 use crate::story;
 use crate::text::TextMetrics;
 use crate::translation::{
-    DIALOGUE_TABLE, ITEM_TABLE, NAME_TABLE, PART_TABLE, PAUSE_MENU_TABLE, Translation,
-    TranslationExtension,
+    DIALOGUE_TABLE, ITEM_TABLE, NAME_TABLE, PART_TABLE, Translation, TranslationExtension,
 };
 use crate::windows::{
     DEFAULT_PLAYER_NAME, NOTICE_LEVELS, ScriptWindows, TRANSLATED_PLAYER_NAME, draw_notice,
@@ -227,8 +225,6 @@ enum Screen {
     Menu(Box<PauseMenu>),
     Continuing(Continuing),
     Guide(Box<Guide>),
-    /// The port's end of the demo, over the field.
-    DemoEnd(Box<DemoEnd>),
 }
 
 /// Where continuing is: frames since the title's script ended (the title
@@ -328,12 +324,13 @@ pub struct Game<'rom> {
     defeated: bool,
     /// Whether the last battle an event fought was lost.
     battle_lost: bool,
+    /// The roaming battles won as the game was started or continued
+    /// (IWRAM `0x030022DC`, which only the start and the continue write).
+    started_wins: u16,
     field: Option<Field>,
     /// Whether the port's debugging mode is on (see
     /// [`Game::toggle_debug_mode`]).
     debug: bool,
-    /// The map and flag where the demo ends (see [`Game::set_demo_end`]).
-    demo_end: Option<(usize, u16)>,
     /// How the game plays (see [`Game::set_play_mode`]).
     play_mode: PlayMode,
     events: Events,
@@ -452,14 +449,6 @@ impl<'rom> Game<'rom> {
         self.autosave = Some(Autosaver::new(storage, self.save.clone()));
     }
 
-    /// Ends the demo, a port feature, once the player walks freely on
-    /// `map` with `flag` set: the game thanks the player, offers to save
-    /// and goes back to the title (see [`crate::demo`]). `None` lets the
-    /// game go on. By default the demo ends where the port's story does.
-    pub fn set_demo_end(&mut self, end: Option<(usize, u16)>) {
-        self.demo_end = end;
-    }
-
     /// Plays as the original, or with the port's enhancements (see
     /// [`crate::play_mode`]). The launcher sets it before the game starts;
     /// by default the game plays as the original.
@@ -569,10 +558,10 @@ impl<'rom> Game<'rom> {
             encounter: None,
             aftermath: None,
             battle_lost: false,
+            started_wins: 0,
             defeated: false,
             field: None,
             debug: false,
-            demo_end: Some(story::DEMO_END),
             play_mode: PlayMode::default(),
             events: Events::new(),
             screen: Screen::Loading,
@@ -614,7 +603,7 @@ impl<'rom> Game<'rom> {
             Screen::Title(_) | Screen::Attract(_) => Stage::Title,
             Screen::NameEntry(_) => Stage::NameEntry,
             Screen::Loading | Screen::LeavingNameEntry(..) => Stage::Loading,
-            Screen::Field | Screen::OpeningMenu(_) | Screen::DemoEnd(_) => Stage::Field,
+            Screen::Field | Screen::OpeningMenu(_) => Stage::Field,
             Screen::Menu(_) => Stage::Menu,
             Screen::Continuing(_) => Stage::Continuing,
             Screen::Guide(_) => Stage::Guide,
@@ -750,7 +739,6 @@ impl<'rom> Game<'rom> {
             Screen::NameEntry(_) | Screen::LeavingNameEntry(..) => self.update_name_entry(input)?,
             Screen::Loading => {}
             Screen::Field => self.update_field_screen(input, start)?,
-            Screen::DemoEnd(_) => self.update_demo_end(input)?,
             Screen::OpeningMenu(frames) => {
                 if let Some(field) = &mut self.field {
                     field.update(Input::default());
@@ -1107,6 +1095,7 @@ impl<'rom> Game<'rom> {
         let map = usize::from(progress.map);
         let cell = (usize::from(progress.column), usize::from(progress.row));
         self.objects.forget();
+        self.started_wins = formats::progress::battles_won(&self.state);
         if !self.windows.flag(OPENING_SEEN_FLAG) && map == FIRST_ROOM_MAP {
             return self.start_new_game_room();
         }
@@ -1358,6 +1347,7 @@ impl<'rom> Game<'rom> {
     /// Enters the first room of a new game from black: the room's handler
     /// starts the opening, and the room brightens while the game holds.
     fn start_new_game_room(&mut self) -> Result<(), GameError> {
+        self.started_wins = formats::progress::battles_won(&self.state);
         self.enter_map(FIRST_ROOM_MAP, PLAYER_START)?;
         self.play_map_music(FIRST_ROOM_MAP)?;
         self.events.set_brightness(BLACK);
@@ -1432,6 +1422,7 @@ impl<'rom> Game<'rom> {
             encounter: self.encounter,
             aftermath: &mut self.aftermath,
             battle_lost: self.battle_lost,
+            started_wins: self.started_wins,
             warped: &mut self.warped,
             portal_exit: self.portal_exit,
             chest: self.chest,
@@ -1447,80 +1438,11 @@ impl<'rom> Game<'rom> {
         }
     }
 
-    /// Whether the demo ends now: the player walks freely, in full light,
-    /// on its last map with its flag set.
-    fn demo_ends_here(&self) -> bool {
-        self.demo_end.is_some_and(|(map, flag)| {
-            self.windows.flag(flag)
-                && self.field.as_ref().is_some_and(|field| field.map() == map)
-                && self.events.brightness() == 0
-                && self.player_in_control()
-        })
-    }
-
-    /// Starts the end of the demo over the field.
-    fn begin_demo_end(&mut self, input: Input) {
-        let offsets = self
-            .data
-            .script_offsets(PAUSE_MENU_TABLE)
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-        let (contents, line) = if self.slots.len() > 1 {
-            let contents = self.slot_contents();
-            let line = self.default_save_slot(&contents);
-            (contents, line)
-        } else {
-            (Vec::new(), 0)
-        };
-        let mut demo = DemoEnd::new(offsets, contents, line);
-        demo.open(input);
-        self.screen = Screen::DemoEnd(Box::new(demo));
-    }
-
-    /// A frame of the end of the demo: the field goes on moving behind it,
-    /// the game is saved when asked, and the title follows the fade.
-    fn update_demo_end(&mut self, input: Input) -> Result<(), GameError> {
-        if let Some(field) = &mut self.field {
-            field.update(Input::default());
-        }
-        let rom = self.data.bytes();
-        let Screen::DemoEnd(demo) = &mut self.screen else {
-            return Ok(());
-        };
-        match demo.update(rom, input, &mut self.windows)? {
-            DemoStep::Continue => {}
-            DemoStep::Save(slot) => {
-                let party = self.party.clone();
-                let written = self.write_save(&party, slot);
-                if let Screen::DemoEnd(demo) = &mut self.screen {
-                    demo.saved(written, &mut self.windows);
-                }
-            }
-            DemoStep::Leaving => self.sound.stop_music(),
-            DemoStep::Title => {
-                self.windows.close_window(None);
-                self.field = None;
-                self.screen = Screen::Title(TitleScreen::new(&self.data)?);
-                Self::emit(&self.extensions, &Event::TitleShown);
-                Self::play(
-                    &mut self.sound,
-                    &self.data,
-                    &self.extensions,
-                    GameSound::TitleMusic,
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    /// A frame on the field: the end of the demo once it is reached, the
-    /// pause menu on START while the player walks freely, or the field's
-    /// own frame, after which the autosave may be written.
+    /// A frame on the field: the pause menu on START while the player walks
+    /// freely, or the field's own frame, after which the autosave may be
+    /// written.
     fn update_field_screen(&mut self, input: Input, start: bool) -> Result<(), GameError> {
-        if self.demo_ends_here() {
-            self.begin_demo_end(input);
-        } else if start && self.player_in_control() {
+        if start && self.player_in_control() {
             self.screen = Screen::OpeningMenu(0);
         } else {
             let busy = self.autosave.as_ref().is_some_and(Autosaver::is_busy);
@@ -2187,13 +2109,6 @@ impl<'rom> Game<'rom> {
             }
             Screen::Menu(menu) => menu.draw(frame, &self.windows, &self.skin, &self.painter),
             Screen::Guide(guide) => guide.draw(frame, &self.windows, &self.skin, &self.painter),
-            Screen::DemoEnd(demo) => {
-                if let Some(field) = &self.field {
-                    field.draw(frame);
-                }
-                self.windows.draw(frame, &self.skin, &self.painter);
-                darken(frame, demo.darkness());
-            }
             Screen::Continuing(continuing) => {
                 let darkness = continuing.darkness();
                 if darkness < FADE_STEPS {
@@ -2277,6 +2192,7 @@ struct Host<'a, 'rom> {
     encounter: Option<usize>,
     aftermath: &'a mut Option<(usize, Outcome)>,
     battle_lost: bool,
+    started_wins: u16,
     warped: &'a mut Option<usize>,
     portal_exit: Option<(usize, usize)>,
     chest: Option<(usize, u16)>,
@@ -2586,10 +2502,10 @@ impl EventHost for Host<'_, '_> {
         self.data.companion_offered(self.state, index)
     }
 
-    fn join_companion(&mut self, index: u8) {
+    fn join_companion(&mut self, index: u8, zoid: bool) {
         if self
             .data
-            .join_companion(self.state, usize::from(index))
+            .join_companion(self.state, usize::from(index), zoid)
             .is_none()
         {
             self.fail(GameError::Text(format!("no companion {index}")));
@@ -2868,6 +2784,18 @@ impl EventHost for Host<'_, '_> {
 
     fn forget_battles_won(&mut self) {
         formats::progress::forget_battles(self.state);
+    }
+
+    fn rotating_arms_shop(&self) -> u8 {
+        saga_shop::rotating_arms_shop(self.data.bytes(), self.started_wins).unwrap_or(0)
+    }
+
+    fn keep_object_cell(&mut self, slot: usize, (column, row): (usize, usize)) {
+        let cell = (
+            u8::try_from(column).unwrap_or(u8::MAX),
+            u8::try_from(row).unwrap_or(u8::MAX),
+        );
+        formats::progress::set_object_cell(self.state, slot, cell);
     }
 
     fn set_return_point(&mut self, index: u8) {

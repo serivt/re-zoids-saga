@@ -227,7 +227,7 @@ grows a line for it, moving up (window 1 at (5, 1) 20×12 with four slots), and 
 cursor starts on the latest game among all of them, as before. The autosave counts as
 a save to choose from, so with one slot and an autosave the list shows too. A game
 continued from it has no slot of its own: the pause menu's セーブ starts on the first
-empty slot, else the latest game. セーブ and the end of the demo never offer the
+empty slot, else the latest game. セーブ never offers the
 autosave, and the title's guides read the latest game, the autosave included.
 
 The autosave was continued in the port on the map it was written on, after walking

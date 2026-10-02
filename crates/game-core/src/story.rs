@@ -8,6 +8,41 @@
 //! (see `docs/events.md`). Dialogue indices are strings of the `dialogue`
 //! table; actors are object indices (the game's entity index minus one).
 
+/// A companion's caller (chapters 9 and 10): with slot `$slot` empty,
+/// the pick of the other slot is taken off the list, the list is offered
+/// (`$list`) and a pick joins the party (`$taken`), with a unit of its
+/// Zoid when `$zoid`; with the slot full, he offers to send the pick away
+/// (`$change`).
+macro_rules! caller {
+    ($slot:expr, $other:expr, $list:expr, $taken:expr, $change:expr, $zoid:expr) => {
+        &[
+            Op::OfferCompanions,
+            Op::Wait(1),
+            Op::IfCompanion {
+                slot: $slot,
+                then: &[
+                    Op::Dialogue($change),
+                    Op::IfChoice {
+                        then: &[Op::DropCompanion($slot)],
+                        otherwise: &[],
+                    },
+                ],
+                otherwise: &[
+                    Op::HideCompanion($other),
+                    Op::Dialogue($list),
+                    Op::TakeCompanion {
+                        slot: $slot,
+                        zoid: $zoid,
+                        then: &[Op::Dialogue($taken)],
+                    },
+                ],
+            },
+        ]
+    };
+}
+use caller;
+
+mod chapter10;
 mod chapter2;
 mod chapter3;
 mod chapter4;
@@ -1720,9 +1755,6 @@ const PORTAL_ARRIVAL_SOUND: u16 = 0x49;
 const PORTAL_BRINGS_STEP: usize = 32;
 /// Sand Colony's field, where the party goes on (map 31).
 const SAND_COLONY_FIELD: usize = 31;
-/// Where the port's story stops, and its demo ends: chapter 9's first map
-/// once chapter 8 is over.
-pub const DEMO_END: (usize, u16) = chapter9::STORY_END;
 /// A cell off the map, left of its top row.
 const BESIDE_THE_MAP: (usize, usize) = (0xFF, 0);
 
@@ -2204,7 +2236,8 @@ pub fn map_handler(map: usize) -> Option<&'static [Op]> {
             .or_else(|| chapter6::map_handler(map))
             .or_else(|| chapter7::map_handler(map))
             .or_else(|| chapter8::map_handler(map))
-            .or_else(|| chapter9::map_handler(map)),
+            .or_else(|| chapter9::map_handler(map))
+            .or_else(|| chapter10::map_handler(map)),
     }
 }
 
@@ -2284,6 +2317,7 @@ pub fn talk_handler(address: u32) -> Option<&'static [Op]> {
             .or_else(|| chapter6::talk_handler(address))
             .or_else(|| chapter7::talk_handler(address))
             .or_else(|| chapter8::talk_handler(address))
-            .or_else(|| chapter9::talk_handler(address)),
+            .or_else(|| chapter9::talk_handler(address))
+            .or_else(|| chapter10::talk_handler(address)),
     }
 }

@@ -849,7 +849,7 @@ load instead (280 for 279, 282 for 281). The chapter's story:
 | 283 | `0x08026F2C` | not `0x133` | Reaching cell (9, 5): Gale (task `0x08026F7C`, `0x296`); story battle 37; won, Gale falls before Jack (`0x297`), the party goes through the door (284), Blood finds Gale and Fran's warp takes them (`0x298` to `0x29A`) | `0x133` |
 | 285 | `0x0802745C` | not `0x134` | Opis (task `0x080274B4`, `0x29B`); story battle 38; won, Opis sinks and seems to fall (`0x29C`, `0x29D`), the party runs from a blast (`0x29E`) to the hall (281), Opis rises and meets Blood (`0x29F` to `0x2A1`) | `0x134` |
 | 296 | `0x080279C0` | not `0x135` | The Emperor (task `0x08027AAC`, `0x2A2` to `0x2A6`); story battle 39 | `0x135` |
-| 296 | | `0x135`, not `0x136` | The finale (task `0x08027E8C`): the Emperor's Zoid burns and he calls on his son (`0x2A7`, `0x2A8`); Opis, Blood, Fran and Gale face their rivals (`0x2A9` to `0x2AF`); story battle 40; won, the space-time transfer device opens, the Emperor overloads it and flees through it (`0x2B0` to `0x2B2`), Blood, Fran, Gale and Opis follow (`0x2B3` to `0x2B7`) and it closes (`0x2B8`); at home (276, 277) the Queen and Regina welcome the prince (`0x2B9` to `0x2BE`) and he kneels at the ceremony; the staff roll (below); the companions leave, the characters of group 9 are met (`0x08009A20`) and the party is taken to map 340, chapter 10's first | `0x136` |
+| 296 | | `0x135`, not `0x136` | The finale (task `0x08027E8C`): the Emperor's Zoid burns and he calls on his son (`0x2A7`, `0x2A8`); Opis, Blood, Fran and Gale face their rivals (`0x2A9` to `0x2AF`); story battle 40; won, the space-time transfer device opens, the Emperor overloads it and flees through it (`0x2B0` to `0x2B2`), Blood, Fran, Gale and Opis follow (`0x2B3` to `0x2B7`) and it closes (`0x2B8`); at home (276, 277) the Queen and Regina welcome the prince (`0x2B9` to `0x2BE`) and he kneels at the ceremony; the staff roll (below); the companions leave, the characters of group 9 are met (`0x08009A20`) and the party is taken to map 340, where chapter 10 opens (see "Chapter 10") | `0x136` |
 
 The teacher uses `0x08012090`: deck command `0x1D` (`0x080095DC` through `0x08009430`,
 dialogues `0x3B4` and `0x3B5`). The keepers (`0x080093CC` on): item shop 18, armaments
@@ -922,19 +922,76 @@ but for the scenery a pixel off here and there on about one frame in five: the
 original rewrites the layer's scroll table late in its busy frames, how late moving
 with the load, and the port takes line 100 as the point the rewrite reaches.
 
-## The end of the demo (a port feature)
+## Chapter 10
 
-Source of knowledge: this project's own design. The port's story stops where chapter 9
-does, in chapter 10's first map (340) once the Emperor is beaten (flag `0x136`). When
-the player walks freely there in full light (after the scene's fade in, or after
-continuing a save made there), the game waits a second and ends the demo (`crates/game-core/src/demo.rs`): a story box, window 0 at (0, 12) 30×8, thanks the
-player (`port/demo/thanks`) and waits for A with the prompt blinking; it then asks
-`port/demo/question` over the original's はい/いいえ window (`pause-menu` 61). はい saves:
-with several save slots their list comes first, with the title's layout, B going back
-to the question; `port/demo/saved` follows. いいえ, B, or a notice dismissed closes the
-windows, stops the music and fades to black over 16 frames, and 30 frames later the
-title starts again. The field keeps moving behind the windows. `Game::set_demo_end`
-moves the end, or with `None` lets the game go on.
+Source of knowledge: own reading of the area's map handlers (`0x08029E50`, `0x0802A848`;
+the others only set the field's hooks), the tasks they spawn, the objects' code and the
+routines named below; checked against a reference emulator with saves patched to each
+scene's flags, as the earlier chapters'. Implemented in
+`crates/game-core/src/story/chapter10.rs`.
+
+Area 10 is maps 297 to 342: the castle's room where the chapter opens (340), the castle
+(339) and its town (335 to 338), and a newly found space-time with its world map (341),
+a lab (322) and the place where Vega's Führer roams (317). It follows the staff roll and
+has no ending of its own: the story is over, and the chapter is the party's new journey,
+with Vega as the last foe.
+
+| Where | Handler | Condition | What happens | Sets |
+|---|---|---|---|---|
+| 340 | `0x08029E50` | not `0x137`, not `0x139` | The room laid out with the prince in the king's clothes at (2, 5) (ROM `0x0832B3F8`); the castle's task (`0x08029F40`, which the end of chapter 9 also calls directly): Regina scolds the new king for leaving on a journey again, Earth and Jack side with him (`0x2CD`), they tell him to speak to Regina when ready and that they will call companions (`0x2CE`), the three take their places and the prince changes into his own clothes (`0x080089A0` with `0x98`) | `0x137`, `0x139` |
+| 340 | | `0x137`, not `0x139` | The room without the three (`0x0832B448`): the prince walks to (6, 2), the three step out of the party onto his cell and to their places, and tell him again (`0x2CE`) | `0x139` |
+| 340 | | `0x139` | The room with the three in their places (`0x0832B498`) | |
+| 340 | | | Each load clears `0x138`. The prince walks freely; Earth and Jack call companions (below); Regina asks whether he is ready (`0x0802A698`, `0x2CF`, yes sets `0x138`); then the three leave the room and the prince walks out by its exit | clears `0x139` |
+| 317 | `0x0802A848` | not `0x13C` | Vega's Führer roams the map (entity command 2), placed on (13, 4) the first time; spoken to (`0x0802AA14`), Vega wants to play (`0x2D0`, sets `0x13D`) and it stops; story battle 41. Won, the Führer stops at the end of its animation, Vega cannot believe it (`0x2D1`), a space-time warp takes him (sounds `0x6F`, `0x6D`; his object state set to (255, 255)), the party wonders (`0x2D2`) and finds what he left: the Zi data of `0x78` and Zoid core 8 (`0x080379B4`) | `0x13E` the first time; `0x13C` |
+| 322 | | not `0x13A`, `0x13B` | Each researcher (`0x08006D30`, `0x08006D94`) the first time announces the Zi data found (`0x2D3`, `0x2D4`) and gives eight: `0x95`, `0x7C`, `0x80`, `0x7E`, `0x7F`, `0x7D`, `0x81` and `0x92` (the Emperor's army's own), or `0x3D`, `0x3F`, `0x17`, `0x12`, 6, `0x11`, `0x20` and `0x8C` (those it had gathered); later `0x2D5` | `0x13A`, `0x13B` |
+
+Vega's Führer is placed only the first time (`0x13E`); after that it stands where its
+object state keeps it. Map 317 keeps its objects' states (its record id has bit 15, see
+[formats/map.md](formats/map.md)), so the Führer is found where it last stood, also
+after a lost battle; but a rebuild of the area's objects (a continue, a change of area,
+a lab's keeper spoken to) puts it back off the map, where the map's handler leaves it: the
+Führer is not seen again. The port does the same.
+
+The companions: Earth (`0x0802A6D0`) and Jack (`0x0802A78C`) offer chapter 9's list (see
+"Chapter 9") with their own lines (`0x287`, `0x28B`, `0x289`; `0x281`, `0x285`,
+`0x283`), into the same slots, but a pick joins without a Zoid of its own
+(`0x0802A67C`: `0x080372D0` with the character, bits 6 and no Zoid), to ride one of
+the party's.
+
+The teacher (`0x08009540`) uses `0x08009430` for deck command `0x10` (`0x3CF` and the
+lesson, later `0x3CE`). The keepers: item shop 19 (`0x080093F0`), lab 18
+(`0x08009424`) and an armaments shop (`0x080093FC`) that the roaming battles won pick:
+entry `n % 12` of the bytes at ROM `0x666E74`, where `n` is IWRAM `0x030022DC`, which
+only the boot (cleared), the start of a new game and the continue write, with a copy of
+the game state's `+0x0A`. The maps 299 to 303 have the shops of chapter 5 (see
+"Chapter 5").
+
+The end of chapter 9 warps the party to map 340 from within its own task: the room's
+handler runs in that call, lays out the room for the opening and stands the prince on
+(2, 5), and the task it spawns into slot 3 is lost; the finale then brightens the room,
+waits a second and calls the castle's task itself.
+
+What the chapter needed of the engine: companions that join without a Zoid
+(`Op::TakeCompanion` with `zoid: false`), an actor set roaming or standing
+(`Op::Roam`), an actor's cell written into its object state (`Op::KeepCell`), and the
+rotating armaments shop (`Op::RotatingArmsShop`).
+
+Checked against the original, scene by scene from patched saves: the opening, from a
+continue and right after the staff roll (the opening's first line 129 frames after the
+area's song on both sides); the return to the room; the companions' choice (the game
+state byte for byte the original's but for the play time and the area's map Zoids,
+which are random); the setting out; Vega's challenge, story battle 41 won and its
+gifts; the researchers' Zi data; the shops and the teacher. Every interval that no key
+bounds is equal; the pictures of the opening's walk match frame by frame. Found and
+fixed on the way: an exit walked onto, like a door, plays the sound its warp names, or
+by default `0x45` while the player shows the prince on foot (sprite `0x98`) and `0x82`
+otherwise (`0x080083B8`, called from the stepping command at `0x0800B886`); the port
+played `0x82` for every walked exit and took the sprite from the map's object list
+instead of the player's own. Known differences, not modeled: the castle (339) brightens
+3 frames later than the port's estimate after the room's exit, a load the original
+takes longer for; and a dialogue's key wait (`0x05` with mode 0, as `0x22` closing a
+gift's box has) takes the original two frames longer under keys pressed every other
+frame, as page turns do.
 
 ## Story inventory
 

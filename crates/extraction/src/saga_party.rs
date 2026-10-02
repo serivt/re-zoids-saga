@@ -1124,8 +1124,10 @@ const COMPANIONS: usize = 0x0032_AF28;
 const COMPANION_LEN: usize = 8;
 /// Records the table holds.
 pub const COMPANION_COUNT: usize = 0x1D;
-/// The level bits a companion joins with (`0x08026614`).
+/// The level bits a companion joins with (`0x08026614`), and those of one
+/// who joins without a Zoid (`0x0802A67C`).
 const COMPANION_BITS: u16 = 0xE;
+const LONE_COMPANION_BITS: u16 = 6;
 /// The characters whose first flag bit offers the records of kinds 2 and
 /// 3 (`+0x34EC` and `+0x34F0` of the game state).
 const COMPANION_KEYS: [u8; 2] = [0x12, 0x13];
@@ -1178,20 +1180,26 @@ pub fn companion_offered(rom: &[u8], state: &[u8], index: usize) -> bool {
     }
 }
 
-/// Adds the character of record `index` to the party with a unit of its
-/// Zoid (`0x08026614`, `0x080372D0` with bits `0xE`).
-pub fn join_companion(rom: &[u8], state: &mut [u8], index: usize) -> Option<()> {
+/// Adds the character of record `index` to the party: with a unit of its
+/// Zoid when `zoid` (`0x08026614`, `0x080372D0` with bits `0xE`), as
+/// chapter 9 does, else alone (`0x0802A67C`, `0x080372D0` with bits 6 and
+/// no Zoid), as chapter 10 does.
+pub fn join_companion(rom: &[u8], state: &mut [u8], index: usize, zoid: bool) -> Option<()> {
     if state.len() != STATE_LEN {
         return None;
     }
     let companion = companion(rom, index)?;
-    add_character(
-        rom,
-        state,
-        companion.character,
-        COMPANION_BITS,
-        companion.zoid,
-    )
+    if zoid {
+        add_character(
+            rom,
+            state,
+            companion.character,
+            COMPANION_BITS,
+            companion.zoid,
+        )
+    } else {
+        add_character(rom, state, companion.character, LONE_COMPANION_BITS, 0)
+    }
 }
 
 /// Takes the character of record `index` out of the party (`0x08026634`:

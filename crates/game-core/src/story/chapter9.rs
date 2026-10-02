@@ -447,40 +447,12 @@ const REGINA_ASKS: &[Op] = &[
     },
 ];
 
-/// A companion's caller: Earth (`0x08026764`) fills slot 0, Jack
-/// (`0x0802681C`) slot 1. With the slot empty, the other slot's pick is
-/// taken off the list, the list is offered (`0x288`, `0x282`) and a pick
-/// joins the party (`0x28C`, `0x286`); with it full, he offers to send the
-/// pick away (`0x28A`, `0x284`).
-macro_rules! caller {
-    ($slot:expr, $other:expr, $list:expr, $taken:expr, $change:expr) => {
-        &[
-            Op::OfferCompanions,
-            Op::Wait(1),
-            Op::IfCompanion {
-                slot: $slot,
-                then: &[
-                    Op::Dialogue($change),
-                    Op::IfChoice {
-                        then: &[Op::DropCompanion($slot)],
-                        otherwise: &[],
-                    },
-                ],
-                otherwise: &[
-                    Op::HideCompanion($other),
-                    Op::Dialogue($list),
-                    Op::TakeCompanion {
-                        slot: $slot,
-                        then: &[Op::Dialogue($taken)],
-                    },
-                ],
-            },
-        ]
-    };
-}
-
-const EARTH_CALLS: &[Op] = caller!(0, 1, 0x288, 0x28C, 0x28A);
-const JACK_CALLS: &[Op] = caller!(1, 0, 0x282, 0x286, 0x284);
+/// A companion's caller (see [`super::caller`]): Earth (`0x08026764`)
+/// fills slot 0, Jack (`0x0802681C`) slot 1; the list (`0x288`, `0x282`),
+/// the pick joining with a unit of its Zoid (`0x28C`, `0x286`) and the
+/// offer to send it away (`0x28A`, `0x284`).
+const EARTH_CALLS: &[Op] = super::caller!(0, 1, 0x288, 0x28C, 0x28A, true);
+const JACK_CALLS: &[Op] = super::caller!(1, 0, 0x282, 0x286, 0x284, true);
 
 /// A beaten party's way home: the return point, facing up, and the field
 /// brightening while the game holds; the scene's task ends.
@@ -959,7 +931,9 @@ const fn into_the_device(unit: usize) -> [Op; 4] {
 /// (`0x2B8`). At home the Queen welcomes the prince (`0x2B9`, `0x2BA`),
 /// Regina talks with him (`0x2BB` to `0x2BD`), Earth teases them (`0x2BE`),
 /// and at the ceremony the prince kneels; the staff roll, and the party
-/// is taken to chapter 10's first map.
+/// is taken to chapter 10's first map, whose handler runs within this
+/// task (what it spawns is lost), so the task calls the castle's own after
+/// the fade in (see [`super::chapter10::CASTLE_TASK`]).
 const FINALE: &[Op] = &[
     Op::Sound(ALARM_SOUND),
     Op::Wait(60),
@@ -1306,8 +1280,7 @@ const HOMECOMING_SCENE: &[Op] = &[
     },
     Op::Spawn(HELPER_TASK, FADE_IN),
     Op::Wait(60),
-    Op::Control(true),
-    Op::End,
+    Op::Call(super::chapter10::CASTLE_TASK),
 ];
 
 /// The castle's heart (`0x080279C0`): the first time, the party walks in
@@ -1348,10 +1321,6 @@ const HEART_ARRIVAL: &[Op] = &[Op::IfFlags {
         otherwise: &[],
     }],
 }];
-
-/// Where the port's story stops: chapter 10's first map once the Emperor
-/// is beaten.
-pub(super) const STORY_END: (usize, u16) = (CHAPTER_10_START, EMPEROR_BEATEN);
 
 /// The teacher of area 9: deck command `0x1D` (`0x080095DC` through
 /// `0x08009430`).

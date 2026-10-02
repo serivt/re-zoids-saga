@@ -208,10 +208,13 @@ pub enum Op {
     },
     /// When the menu just shown picked a record (script variable 1 below
     /// `0x1D`), puts it in companion slot `slot`, adds its character to the
-    /// party with a unit of its Zoid (`0x08026614`) and runs `then`.
+    /// party and runs `then`.
     TakeCompanion {
         /// The slot.
         slot: usize,
+        /// Whether the character joins with a unit of its Zoid
+        /// (`0x08026614`, chapter 9) or alone (`0x0802A67C`, chapter 10).
+        zoid: bool,
         /// Program run once a record is taken.
         then: &'static [Op],
     },
@@ -642,6 +645,17 @@ pub enum Op {
     /// Makes actor `actor`'s animation stop at its end (entity flag
     /// `0x400`) without changing it.
     Once(usize),
+    /// Opens the armaments shop of area 10's map 337 (`0x080093FC`), the
+    /// one the roaming battles won as the game was started or continued
+    /// pick (see [`extraction::saga_shop::rotating_arms_shop`]), holding
+    /// the game as [`Op::Shop`] does.
+    RotatingArmsShop,
+    /// Sets actor `actor` walking around at random (entity command 2), or
+    /// standing still (1).
+    Roam(usize, bool),
+    /// Writes actor `actor`'s cell into its object state, as a step does
+    /// (the game state's `+0x52 + 0x10 × n`).
+    KeepCell(usize),
     /// Loads the colosseum's arena for match `n` (`0x0801A70C`): its list
     /// with the formation's members after it (see
     /// [`extraction::saga_arena::arena_objects`]) and the player on
@@ -722,7 +736,7 @@ pub trait EventHost {
     /// Whether record `index` of the companions' table is offered.
     fn companion_offered(&self, index: usize) -> bool;
     /// Adds the character of the companions' record `index` to the party.
-    fn join_companion(&mut self, index: u8);
+    fn join_companion(&mut self, index: u8, zoid: bool);
     /// Takes the character of the companions' record `index` out of the
     /// party.
     fn leave_companion(&mut self, index: u8);
@@ -784,6 +798,10 @@ pub trait EventHost {
     fn battles_won(&self) -> u16;
     /// Clears the count of roaming battles won.
     fn forget_battles_won(&mut self);
+    /// The armaments shop area 10's rotating keeper opens.
+    fn rotating_arms_shop(&self) -> u8;
+    /// Writes `cell` into object state `slot`.
+    fn keep_object_cell(&mut self, slot: usize, cell: (usize, usize));
     /// Makes return point `index` the one a beaten party is taken to.
     fn set_return_point(&mut self, index: u8);
     /// Plays the sound of the exit the player pushed into.
@@ -1500,6 +1518,7 @@ impl Events {
             | Op::PlaceRandom(..)
             | Op::CellTiles(_)
             | Op::Once(_)
+            | Op::Roam(..)
             | Op::Pan(..) => {
                 if let Some(field) = host.field() {
                     command_actor(field, op);
@@ -1774,13 +1793,13 @@ impl Events {
                 then,
                 otherwise,
             } => taken(companion(host, slot).is_some(), then, otherwise),
-            Op::TakeCompanion { slot, then } => {
+            Op::TakeCompanion { slot, zoid, then } => {
                 let picked = u8::try_from(host.saved_vars()[1])
                     .ok()
                     .filter(|&index| usize::from(index) < COMPANION_RECORDS);
                 if let Some(index) = picked {
                     host.set_state_byte(COMPANION_SLOTS + slot, index);
-                    host.join_companion(index);
+                    host.join_companion(index, zoid);
                 }
                 taken(picked.is_some(), then, &[])
             }
@@ -2140,6 +2159,15 @@ fn apply(op: Op, host: &mut impl EventHost) {
         Op::AfterCombat => host.after_combat(),
         Op::RestartMapMusic => host.restart_map_music(),
         Op::ForgetBattlesWon => host.forget_battles_won(),
+        Op::KeepCell(actor) => {
+            let kept = host
+                .field()
+                .and_then(|field| field.actor(actor))
+                .and_then(|actor| actor.slot.map(|slot| (slot, (actor.column, actor.row))));
+            if let Some((slot, cell)) = kept {
+                host.keep_object_cell(slot, cell);
+            }
+        }
         Op::ReturnPoint(index) => host.set_return_point(index),
         Op::ExitSound => host.exit_sound(),
         _ => {}
@@ -2149,11 +2177,7 @@ fn apply(op: Op, host: &mut impl EventHost) {
 /// Applies an op that commands an actor.
 fn command_actor(field: &mut Field, op: Op) {
     match op {
-        Op::Once(actor) => {
-            if let Some(actor) = field.actor_mut(actor) {
-                actor.once = true;
-            }
-        }
+        Op::Once(_) | Op::Roam(..) => mark_actor(field, op),
         Op::Walk {
             actor,
             to,
@@ -2244,6 +2268,28 @@ fn command_actor(field: &mut Field, op: Op) {
     }
 }
 
+/// Makes an actor's animation stop at its end, or sets it roaming or
+/// standing.
+fn mark_actor(field: &mut Field, op: Op) {
+    match op {
+        Op::Once(actor) => {
+            if let Some(actor) = field.actor_mut(actor) {
+                actor.once = true;
+            }
+        }
+        Op::Roam(actor, roams) => {
+            if let Some(actor) = field.actor_mut(actor) {
+                actor.command = if roams {
+                    Command::Wander
+                } else {
+                    Command::Idle
+                };
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Walks the player to the cell `by` cells from its own, `through` walls
 /// and actors or not.
 fn step_player(field: &mut Field, by: (isize, isize), speed: i32, shift: i8, through: bool) {
@@ -2292,6 +2338,7 @@ const fn starts_hold(op: &Op) -> bool {
             | Op::ChestName
             | Op::Battle(_)
             | Op::Shop(_)
+            | Op::RotatingArmsShop
             | Op::Combat
             | Op::StoryBattle(_)
             | Op::Credits
@@ -2320,6 +2367,11 @@ fn start_hold(slot: usize, op: Op, host: &mut impl EventHost) -> Hold {
         }
         Op::Shop(shop) => {
             host.start_shop(shop);
+            Hold::Shop(slot)
+        }
+        Op::RotatingArmsShop => {
+            let shop = host.rotating_arms_shop();
+            host.start_shop(Shop::Arms(shop));
             Hold::Shop(slot)
         }
         Op::Combat => {
@@ -2543,8 +2595,8 @@ mod tests {
             index % 2 == 0
         }
 
-        fn join_companion(&mut self, index: u8) {
-            self.log.push(format!("join companion {index}"));
+        fn join_companion(&mut self, index: u8, zoid: bool) {
+            self.log.push(format!("join companion {index} {zoid}"));
         }
 
         fn leave_companion(&mut self, index: u8) {
@@ -2658,6 +2710,14 @@ mod tests {
 
         fn forget_battles_won(&mut self) {
             self.battles_won = 0;
+        }
+
+        fn rotating_arms_shop(&self) -> u8 {
+            1
+        }
+
+        fn keep_object_cell(&mut self, slot: usize, cell: (usize, usize)) {
+            self.log.push(format!("keep {slot} {cell:?}"));
         }
 
         fn set_return_point(&mut self, index: u8) {

@@ -97,13 +97,6 @@ pub const REACH_BACK: &str = "port/reach/back";
 /// The notice over the field while the autosave is written.
 pub const AUTOSAVE_NOTICE: &str = "port/autosave/notice";
 
-/// The thanks at the end of the demo, in the story box.
-pub const DEMO_THANKS: &str = "port/demo/thanks";
-/// The question after the thanks.
-pub const DEMO_QUESTION: &str = "port/demo/question";
-/// The notice once the game is saved at the end of the demo.
-pub const DEMO_SAVED: &str = "port/demo/saved";
-
 /// The line under the launcher's title.
 pub const LAUNCHER_SUBTITLE: &str = "port/launcher/subtitle";
 /// The label of the launcher's ROM line.
@@ -970,24 +963,6 @@ pub const PORT_TEXTS: &[PortText] = &[
         text: "Autosaving",
         note: "The small notice at the field's top left while the enhanced mode's autosave is written, in the port's small capitals (lower case shows as capitals; characters they lack are skipped), followed by one to three dots the port adds; one line of 120 pixels",
         pixels: 120,
-    },
-    PortText {
-        key: DEMO_THANKS,
-        text: "あそんでくれて　ありがとう！\nこの体験版は　ここまでです。\nつづきは　これからのバージョンで！",
-        note: "The thanks once chapter 1, the end of the demo, is over: up to 3 lines of 224 pixels in the story box",
-        pixels: 224,
-    },
-    PortText {
-        key: DEMO_QUESTION,
-        text: "ここまでの記録を　セーブしますか？",
-        note: "The question after the demo's thanks, over the original's yes/no window: up to 3 lines of 224 pixels",
-        pixels: 224,
-    },
-    PortText {
-        key: DEMO_SAVED,
-        text: "セーブしました。",
-        note: "The notice once the game is saved at the end of the demo: up to 3 lines of 224 pixels",
-        pixels: 224,
     },
 ];
 

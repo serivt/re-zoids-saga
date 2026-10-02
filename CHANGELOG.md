@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The story of chapter 10, which follows the staff credits as in the original: the new
+  king sets out again with Regina, Earth and Jack into a newly found space-time, with
+  companions Earth and Jack call in at the castle; researchers hand over the Zi data of
+  the Emperor's army; and Vega, thrown out of his own time, challenges the party with his
+  Berserk Fury, the last story battle (41), and leaves Zi data and a Zoid core behind.
+  The area's shops, lab and teacher come with it. The game can now be played to its end.
+
+### Changed
+
+- The game no longer stops at the start of chapter 10: the end of the demo, its thanks
+  and its offer to save are gone.
+
 ### Fixed
 
 - An exit walked onto plays the sound its warp names, or the one for walking on foot,

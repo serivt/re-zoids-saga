@@ -34,6 +34,10 @@ const PARTS_STOCK: usize = 0x334C;
 const PART_RECORDS: usize = 0x0066_C8F8;
 const PART_RECORD_LEN: usize = 24;
 const PART_PRICE: usize = 4;
+/// The armaments shops the keeper of area 10's map 337 (`0x080093FC`)
+/// picks from: twelve bytes at ROM `0x666E74`.
+const ROTATING_ARMS_SHOPS: usize = 0x0066_6E74;
+const ROTATING_ARMS_SHOP_COUNT: u16 = 12;
 
 /// Consumables there are: the ones the item shops sell back.
 pub const CONSUMABLES: u8 = 7;
@@ -105,6 +109,17 @@ pub fn arms_shop(rom: &[u8], shop: u8) -> Option<Vec<u16>> {
             .take_while(|&part| part != END_OF_PARTS)
             .collect(),
     )
+}
+
+/// The armaments shop the keeper of area 10's map 337 opens (`0x080093FC`):
+/// entry `wins % 12` of the bytes at ROM `0x666E74`, `wins` being the
+/// roaming battles won as the game was started or continued (IWRAM
+/// `0x030022DC`, a copy of the game state's `+0x0A` the continue makes).
+/// `None` when the table lies outside `rom`.
+#[must_use]
+pub fn rotating_arms_shop(rom: &[u8], wins: u16) -> Option<u8> {
+    rom.get(ROTATING_ARMS_SHOPS + usize::from(wins % ROTATING_ARMS_SHOP_COUNT))
+        .copied()
 }
 
 /// What `item` costs; the shops buy it back for half.
@@ -191,6 +206,16 @@ mod tests {
         let mut rom = vec![0; at + bytes.len()];
         rom[at..].copy_from_slice(bytes);
         rom
+    }
+
+    #[test]
+    fn the_rotating_shop_follows_the_wins_round_twelve() {
+        let table: Vec<u8> = (1..=12).collect();
+        let rom = rom_with(ROTATING_ARMS_SHOPS, &table);
+        assert_eq!(rotating_arms_shop(&rom, 0), Some(1));
+        assert_eq!(rotating_arms_shop(&rom, 11), Some(12));
+        assert_eq!(rotating_arms_shop(&rom, 25), Some(2));
+        assert_eq!(rotating_arms_shop(&[], 0), None);
     }
 
     #[test]

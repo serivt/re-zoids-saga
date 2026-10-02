@@ -693,9 +693,10 @@ bit 1 (`2`) its side's.
   | 12 | Support; attack and most |
   | 14 | Support; attack and flags `0x400`; attack |
 
-  The roaming enemies of the first nine areas all choose the first way; the others
-  belong to story battles' enemies. A record naming a way past 16 would send the
-  original to an empty entry of the table; the port takes the first way.
+  The roaming enemies of all ten areas choose the first way; the others belong to
+  story battles' enemies (Vega's Berserk Fury, story battle 41, the last way, 16). A
+  record naming a way past 16 would send the original to an empty entry of the table;
+  the port takes the first way.
 
   Checked against the original for ways 0 to 5, 12 and 13, the ways of story battles
   30, 34 and 36 to 40: each battle replayed from the original's game state and

@@ -84,9 +84,8 @@ language; a name entered or loaded from a save stays as it is.
 
 ## The port's own messages
 
-What the port adds to the game (the save slots, see [menu.md](menu.md), and the end of
-the demo, see [events.md](events.md)) has no ROM
-text, so its messages are this project's own, in Japanese by default, under reserved
+What the port adds to the game (the save slots, see [menu.md](menu.md), the autosave,
+the weapons' reach) has no ROM text, so its messages are this project's own, in Japanese by default, under reserved
 keys that start with `port/`. The template lists them with the scope `port` (part of
 the default scopes), each with a note on its room; markers `{level}`, `{area}`,
 `{money}` and `{slot}` print the value with full-width digits. The launcher reports a
@@ -123,9 +122,6 @@ translated message wider than its note allows.
 | `port/options/keys` | 左右：変更　Ｂ：もどる | The help's second line, 224 pixels |
 | `port/reach/front`, `port/reach/back` | FRONT, BACK | The row over the grid of a weapon's reach, in the small capitals alone; the plate widens past 27 pixels, up to 36 |
 | `port/autosave/notice` | Autosaving | The small notice while the autosave is written, in the small capitals alone (lower case shows as capitals, characters they lack are skipped), the port adding one to three dots; 120 pixels |
-| `port/demo/thanks` | あそんでくれて　ありがとう！ and two more lines | The thanks at the end of the demo, 3 lines of 224 pixels |
-| `port/demo/question` | ここまでの記録を　セーブしますか？ | The question after them, over the original's はい/いいえ |
-| `port/demo/saved` | セーブしました。 | The notice once saved |
 | `port/launcher/...` | English | The launcher's screens, main, options, about and the keyboard's and gamepad's buttons, and the question before closing (asked in the game too): labels and values of the panel up to 208 pixels (the pad's directions up to 40), the subtitle, status and help lines up to 232 |
 
 The launcher's screen comes before any ROM is read, so its messages are English by
