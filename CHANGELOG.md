@@ -9,14 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Statistics.** The enhanced mode's Config ends with a Statistics line that opens three
-  pages over the menu: the battles won, lost and retreated from, the enemy Zoids
-  destroyed and the party's, and the money battles brought; the Zi data, the kinds of
-  Zoid, the characters and the deck commands collected, each of its total; and the time
-  played, the biggest blow, the longest battle and the story battles won. The game counts
-  them from a new game on and keeps them inside each save, where the original never
-  looks, so the saves stay the original's.
-
+- **Records.** In the enhanced mode the pause menu has a Records line after Config that
+  opens three pages of statistics over the menu: the battles won, lost and retreated
+  from, the enemy Zoids destroyed and the party's, and the money battles brought; the Zi
+  data, the kinds of Zoid, the characters and the deck commands collected, each of its
+  total; and the time played, the biggest blow, the longest battle and the story battles
+  won. The game counts them from a new game on and keeps them inside each save, where
+  the original never looks, so the saves stay the original's.
 - The story of chapter 10, which follows the staff credits as in the original: the new
   king sets out again with Regina, Earth and Jack into a newly found space-time, with
   companions Earth and Jack call in at the castle; researchers hand over the Zi data of

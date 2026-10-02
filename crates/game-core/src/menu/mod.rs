@@ -133,6 +133,9 @@ const ITEM_WEAPONS: u16 = 2;
 const ITEM_FORMATION: u16 = 3;
 const ITEM_CONFIG: u16 = 4;
 const ITEM_SAVE: u16 = 5;
+/// The enhanced mode's own line of the main list, after コンフィグ (see
+/// [`PauseMenu::main_item`]); not one of the original's.
+const ITEM_STATISTICS: u16 = 6;
 const STATUS_UNIT: u16 = 0;
 const STATUS_CHARACTER: u16 = 1;
 const STATUS_WEAPONS: u16 = 2;
@@ -607,6 +610,9 @@ impl PauseMenu {
     fn build(&mut self, rom: &[u8], windows: &mut ScriptWindows<'_>) -> Result<(), ScriptError> {
         windows.close_window(None);
         self.run_now(rom, SCRIPT_OPEN_MENU, windows)?;
+        if self.offers_options() {
+            add_statistics_line(windows);
+        }
         self.run_now(rom, SCRIPT_PANEL_WINDOW, windows)?;
         self.print_panel(rom, windows)?;
         self.run_now(rom, SCRIPT_MONEY_WINDOW, windows)?;
@@ -736,7 +742,7 @@ impl PauseMenu {
             MenuState::SaveSlot => self.save_slot_frame(rom, input, windows),
             MenuState::Options => self.options_frame(rom, input, windows),
             _ => {
-                self.statistics_frame(input, windows);
+                self.statistics_frame(rom, input, windows)?;
                 Ok(MenuStep::Open)
             }
         }
@@ -1349,7 +1355,7 @@ impl PauseMenu {
             return Ok(());
         }
         self.main_line = usize::from(choice);
-        match choice {
+        match self.main_item(choice) {
             ITEM_STATUS => {
                 self.run_now(rom, SCRIPT_STATUS_WINDOW, windows)?;
                 self.return_to(rom, Return::Status, windows)
@@ -1380,6 +1386,12 @@ impl PauseMenu {
                 self.state = MenuState::Speed;
                 Ok(())
             }
+            ITEM_STATISTICS => {
+                windows.clear_window(HELP_WINDOW);
+                windows.play_sound(MENU_MOVE_SOUND);
+                self.open_statistics(self.held, windows);
+                Ok(())
+            }
             ITEM_SAVE if self.offers_slots() => {
                 windows.clear_window(HELP_WINDOW);
                 self.open_save_slots(windows);
@@ -1393,6 +1405,19 @@ impl PauseMenu {
                 Ok(())
             }
             _ => self.placeholder(rom, Return::Main, windows),
+        }
+    }
+
+    /// The entry of main list line `choice`: the original's, or in the
+    /// enhanced mode, whose list has the statistics after コンフィグ, those
+    /// and the original's shifted past them.
+    fn main_item(&self, choice: u16) -> u16 {
+        if !self.offers_options() || choice < ITEM_SAVE {
+            choice
+        } else if choice == ITEM_SAVE {
+            ITEM_STATISTICS
+        } else {
+            choice - 1
         }
     }
 
@@ -1899,6 +1924,33 @@ fn print_number(windows: &mut ScriptWindows<'_>, window: u8, value: u32, cells: 
     }
     for ch in digits.chars() {
         windows.put_char(window, ch);
+    }
+}
+
+/// The enhanced mode's main list: the original's lines as script 46 left
+/// them, with the statistics' line after コンフィグ; the list scrolls to
+/// keep the cursor in its window.
+fn add_statistics_line(windows: &mut ScriptWindows<'_>) {
+    let Some(lines) = windows
+        .windows()
+        .get(usize::from(MENU_WINDOW))
+        .and_then(Option::as_ref)
+        .map(|window| window.lines.clone())
+    else {
+        return;
+    };
+    let label = crate::port_text::port_text(windows.extensions(), crate::port_text::MENU_STATS);
+    windows.clear_window(MENU_WINDOW);
+    let at = usize::from(ITEM_SAVE).min(lines.len());
+    let mut texts: Vec<&str> = lines.iter().map(String::as_str).collect();
+    texts.insert(at, &label);
+    for (index, text) in texts.iter().enumerate() {
+        if index > 0 {
+            windows.line_break(MENU_WINDOW);
+        }
+        for ch in text.chars() {
+            windows.put_char(MENU_WINDOW, ch);
+        }
     }
 }
 

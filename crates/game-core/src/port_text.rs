@@ -88,10 +88,8 @@ pub const OPTIONS_ON: &str = "port/options/on";
 pub const OPTIONS_OFF: &str = "port/options/off";
 /// The keys, on the help line's second line.
 pub const OPTIONS_KEYS: &str = "port/options/keys";
-/// The settings' line that opens the statistics, and its help.
-pub const OPTIONS_STATS: &str = "port/options/stats";
-/// See [`OPTIONS_STATS`].
-pub const OPTIONS_STATS_HELP: &str = "port/options/stats-help";
+/// The enhanced mode's main list's line that opens the statistics.
+pub const MENU_STATS: &str = "port/menu/stats";
 /// The statistics' pages, shown on the help line with their number.
 pub const STATS_PAGE_BATTLES: &str = "port/stats/page-battles";
 /// See [`STATS_PAGE_BATTLES`].
@@ -996,16 +994,10 @@ pub const PORT_TEXTS: &[PortText] = &[
         pixels: 48,
     },
     PortText {
-        key: OPTIONS_STATS,
+        key: MENU_STATS,
         text: "記録",
-        note: "The settings' line that opens the statistics of the game played (a port feature); it has no value; 104 pixels",
-        pixels: 104,
-    },
-    PortText {
-        key: OPTIONS_STATS_HELP,
-        text: "これまでの戦いと収集の記録を見る　Ａで開く",
-        note: "The help line of the statistics' line: it shows the record of the battles fought and of the collection, A opens it; 224 pixels",
-        pixels: 224,
+        note: "The enhanced mode's line of the pause menu's main list, after Config, that opens the statistics of the game played (a port feature); as wide as the list's other lines, 56 pixels",
+        pixels: 56,
     },
     PortText {
         key: STATS_PAGE_BATTLES,

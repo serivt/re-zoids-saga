@@ -542,7 +542,7 @@ the original's. In the classic mode コンフィグ is the original's (above). I
 mode (see [launcher.md](launcher.md)) it lists every setting the game lets the player
 change while it plays: window 4, a light menu like the save slots', takes the columns
 from the main list's right edge to the screen's, two rows a line and its frame's two,
-at least 8 to cover the status panel and at most 14, down to the help line (its eight
+at least 8 to cover the status panel and at most 14, down to the help line (its seven
 lines scroll, with the list's marks),
 a line per setting with its value from cell 13 (further left when a translation's list
 starts further right and the widest value would not fit before the cursor's right mark):
@@ -552,8 +552,8 @@ the damage numbers (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Damage numb
 auto text (ＯＮ or ＯＦＦ, see [formats/script-text.md](formats/script-text.md)) and the
 autosave (ＯＮ or ＯＦＦ, see [formats/save.md](formats/save.md), The autosave), the
 weapons' reach (ＯＮ or ＯＦＦ, below) and the fast forward's speed (２倍 to ４倍,
-stopping at its ends like the message speed; see [launcher.md](launcher.md)), and last
-記録, with no value, which opens the statistics (below). The help line says what
+stopping at its ends like the message speed; see [launcher.md](launcher.md)). The help
+line says what
 the setting under the cursor does, and below it the keys. Up and down move (`0x40`);
 left and right, or A, change the value (`0x40`), the speed stopping at its ends and the
 enhancements switching; B plays `0x3F` and goes back to the main list with the cursor on
@@ -564,12 +564,16 @@ the next game. The port's messages are keyed `port/options/...` (see
 ### Statistics (a port feature)
 
 Source of knowledge: this project's own design; the windows and sounds are the
-original's. On 記録, the enhanced mode's last setting, A or right plays `0x40` and opens
-the player's statistics over the menu: window 4 again, across the screen (columns 0 to
-29, rows 0 to 13), no cursor, a line per statistic with its value right-aligned a cell
-before the frame. The help line names the page with its number (記録　１／３　戦い) and
-gives the keys; left and right turn the page (`0x40`, round from the last to the first),
-B plays `0x3F` and goes back to the settings with the cursor on 記録. The three pages:
+original's. In the enhanced mode the main list has a seventh line, 記録, after コンフィグ:
+once script 46 has printed the original's six, the list is printed again with it in
+fifth place (`port/menu/stats`), and window 3, still 14 rows, scrolls to keep the cursor
+in sight, with the list's marks; the lines after it move one down. A on it plays `0x40`
+and opens the player's statistics over the menu: window 4, across the screen (columns 0
+to 29, rows 0 to 13), no cursor, a line per statistic with its value right-aligned a
+cell before the frame. The help line names the page with its number (記録　１／３　戦い)
+and gives the keys; left and right turn the page (`0x40`, round from the last to the
+first), B plays `0x3F` and goes back to the main list with the cursor on 記録. The three
+pages:
 
 | Page | Lines |
 |---|---|

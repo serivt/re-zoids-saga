@@ -18,8 +18,8 @@ use crate::port_text::{
     OPTIONS_ANIMATIONS, OPTIONS_ANIMATIONS_HELP, OPTIONS_AUTO_TEXT, OPTIONS_AUTO_TEXT_HELP,
     OPTIONS_AUTOSAVE, OPTIONS_AUTOSAVE_HELP, OPTIONS_DAMAGE_NUMBERS, OPTIONS_DAMAGE_NUMBERS_HELP,
     OPTIONS_FAST_FORWARD, OPTIONS_FAST_FORWARD_HELP, OPTIONS_FAST_FORWARD_VALUE, OPTIONS_KEYS,
-    OPTIONS_OFF, OPTIONS_ON, OPTIONS_SPEED, OPTIONS_SPEED_HELP, OPTIONS_STATS, OPTIONS_STATS_HELP,
-    OPTIONS_WEAPON_REACH, OPTIONS_WEAPON_REACH_HELP, fill, full_width, port_text,
+    OPTIONS_OFF, OPTIONS_ON, OPTIONS_SPEED, OPTIONS_SPEED_HELP, OPTIONS_WEAPON_REACH,
+    OPTIONS_WEAPON_REACH_HELP, fill, full_width, port_text,
 };
 use crate::script::{MOVED_DOWN, MOVED_LEFT, MOVED_RIGHT, MOVED_UP, ScriptRunner};
 use crate::text::CELL_WIDTH;
@@ -59,11 +59,9 @@ enum Setting {
     MessageSpeed,
     Enhancement(Enhancement),
     FastForward,
-    /// Not a setting: the line that opens the statistics.
-    Statistics,
 }
 
-const SETTINGS: [Setting; 8] = [
+const SETTINGS: [Setting; 7] = [
     Setting::MessageSpeed,
     Setting::Enhancement(Enhancement::BattleAnimations),
     Setting::Enhancement(Enhancement::DamageNumbers),
@@ -71,7 +69,6 @@ const SETTINGS: [Setting; 8] = [
     Setting::Enhancement(Enhancement::Autosave),
     Setting::Enhancement(Enhancement::WeaponReach),
     Setting::FastForward,
-    Setting::Statistics,
 ];
 
 impl Setting {
@@ -91,7 +88,6 @@ impl Setting {
                 (OPTIONS_WEAPON_REACH, OPTIONS_WEAPON_REACH_HELP)
             }
             Self::FastForward => (OPTIONS_FAST_FORWARD, OPTIONS_FAST_FORWARD_HELP),
-            Self::Statistics => (OPTIONS_STATS, OPTIONS_STATS_HELP),
         }
     }
 }
@@ -128,20 +124,6 @@ impl PauseMenu {
     /// コンフィグ in the enhanced mode: the list beside the main one, the
     /// cursor on its first line.
     pub(super) fn open_options(&mut self, windows: &mut ScriptWindows<'_>) {
-        self.open_options_at(0, windows);
-    }
-
-    /// Back to the list from the statistics, the cursor on their line.
-    pub(super) fn reopen_options(&mut self, windows: &mut ScriptWindows<'_>) {
-        let line = SETTINGS
-            .iter()
-            .position(|setting| *setting == Setting::Statistics)
-            .unwrap_or(0);
-        self.open_options_at(line, windows);
-    }
-
-    /// The list beside the main one, the cursor on line `line`.
-    fn open_options_at(&mut self, line: usize, windows: &mut ScriptWindows<'_>) {
         let left = windows
             .windows()
             .get(usize::from(MENU_WINDOW))
@@ -152,7 +134,7 @@ impl PauseMenu {
             .clamp(PANEL_ROWS, MOST_ROWS);
         let rect = (left, 0, SCREEN_COLUMNS.saturating_sub(left), rows);
         windows.open_window(LIST_WINDOW, LIST_KIND, rect, STYLE);
-        self.options.line = line;
+        self.options.line = 0;
         self.draw_options(windows);
         windows.present(Some(HELP_WINDOW));
         let mut runner = ScriptRunner::new(Vec::new());
@@ -180,12 +162,6 @@ impl PauseMenu {
         let [code, line, ..] = *runner.vars();
         self.options.line = usize::from(line).min(SETTINGS.len() - 1);
         let setting = SETTINGS[self.options.line];
-        if setting == Setting::Statistics && matches!(code, MOVED_RIGHT | CONFIRMED) {
-            windows.play_sound(MENU_MOVE_SOUND);
-            self.options.runner = None;
-            self.open_statistics(input, windows);
-            return Ok(MenuStep::Open);
-        }
         let changed = match code {
             MOVED_UP | MOVED_DOWN => {
                 self.describe_option(windows);
@@ -216,7 +192,6 @@ impl PauseMenu {
     /// Changes `setting` a step up (`more`) or down; whether it changed.
     fn change(&mut self, setting: Setting, more: bool) -> bool {
         match setting {
-            Setting::Statistics => false,
             Setting::MessageSpeed => {
                 let speed = self.party.message_speed;
                 let next = if more {
@@ -277,7 +252,6 @@ impl PauseMenu {
                     let speed = self.options.enhancements.unwrap_or_default().fast_forward;
                     fast_forward_value(&extensions, speed)
                 }
-                Setting::Statistics => String::new(),
             };
             put_text(windows, &port_text(&extensions, label));
             windows.pad_to(LIST_WINDOW, value_cell);

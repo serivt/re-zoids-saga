@@ -1,7 +1,7 @@
-//! The statistics in the enhanced mode's コンフィグ, a port feature: three
-//! pages, the battles fought, the collection and the other records, in a
-//! window over the menu, left and right turning the page and B going back
-//! to the settings.
+//! The statistics, a port feature: the enhanced mode's main list has a
+//! line for them after コンフィグ, which opens three pages, the battles
+//! fought, the collection and the other records, in a window over the
+//! menu, left and right turning the page and B going back to the list.
 //!
 //! Source of knowledge: this project's own design; the counts come from
 //! the player's statistics (see [`crate::stats`]) and the collection from
@@ -11,7 +11,7 @@
 
 use platform::{Button, Input};
 
-use super::{HELP_WINDOW, LEAVE_SOUND, MENU_MOVE_SOUND, MenuState, PauseMenu};
+use super::{HELP_WINDOW, LEAVE_SOUND, MENU_MOVE_SOUND, MenuState, PauseMenu, Return};
 use crate::ScriptHost;
 use crate::extension::SharedExtensions;
 use crate::port_text::{
@@ -21,6 +21,7 @@ use crate::port_text::{
     STATS_STORY, STATS_TIME, STATS_TIMES, STATS_UNITS, STATS_WON, STATS_ZI_DATA, STATS_ZOIDS, fill,
     port_text,
 };
+use crate::script::ScriptError;
 use crate::stats::Stats;
 use crate::text::CELL_WIDTH;
 use crate::windows::ScriptWindows;
@@ -29,8 +30,8 @@ use extraction::saga_guide::CHARACTER_COUNT;
 use extraction::saga_party::{self, ZI_DATA_ZOIDS};
 use formats::progress::{character_known, command_learned};
 
-/// The window the pages show in: the settings' list's, across the screen
-/// above the help line.
+/// The window the pages show in: the one the status list and the settings
+/// use, across the screen above the help line.
 const WINDOW: u8 = 4;
 const KIND: u8 = 0x21;
 const STYLE: u8 = 4;
@@ -56,8 +57,8 @@ pub(super) struct Statistics {
 }
 
 impl PauseMenu {
-    /// Shows `stats`, the player's statistics, in the enhanced mode's
-    /// コンフィグ.
+    /// Shows `stats`, the player's statistics, in the enhanced mode's main
+    /// list.
     pub fn set_stats(&mut self, stats: Stats) {
         self.statistics.stats = stats;
     }
@@ -74,26 +75,32 @@ impl PauseMenu {
     }
 
     /// A frame of the statistics: left and right turn the page, B goes
-    /// back to the settings.
-    pub(super) fn statistics_frame(&mut self, input: Input, windows: &mut ScriptWindows<'_>) {
+    /// back to the main list with the cursor on their line.
+    pub(super) fn statistics_frame(
+        &mut self,
+        rom: &[u8],
+        input: Input,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
         let previous = std::mem::replace(&mut self.statistics.previous, input);
         let pressed = |button| input.is_held(button) && !previous.is_held(button);
         if pressed(Button::B) {
             windows.play_sound(LEAVE_SOUND);
             windows.close_window(Some(WINDOW));
-            self.reopen_options(windows);
-            return;
+            self.runner.hold(input);
+            return self.return_to(rom, Return::Main, windows);
         }
         let turn = if pressed(Button::Right) {
             1
         } else if pressed(Button::Left) {
             PAGES - 1
         } else {
-            return;
+            return Ok(());
         };
         self.statistics.page = (self.statistics.page + turn) % PAGES;
         windows.play_sound(MENU_MOVE_SOUND);
         self.draw_statistics(windows);
+        Ok(())
     }
 
     /// Prints the page, a line per statistic with its value at the right,
