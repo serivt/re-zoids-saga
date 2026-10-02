@@ -564,10 +564,11 @@ the next game. The port's messages are keyed `port/options/...` (see
 ### Statistics (a port feature)
 
 Source of knowledge: this project's own design; the windows and sounds are the
-original's. In the enhanced mode the main list has a seventh line, 記録, after コンフィグ:
-once script 46 has printed the original's six, the list is printed again with it in
-fifth place (`port/menu/stats`), and window 3, still 14 rows, scrolls to keep the cursor
-in sight, with the list's marks; the lines after it move one down. A on it plays `0x40`
+original's. In the enhanced mode the main list has two lines of the port's own: 記録
+after コンフィグ and 終了 last (see Leaving for the launcher, below). Once script 46 has
+printed the original's six, the list is printed again with them (`port/menu/stats`,
+`port/menu/quit`), and window 3, still 14 rows, scrolls to keep the cursor in sight,
+with the list's marks; セーブ moves one down. A on 記録 plays `0x40`
 and opens the player's statistics over the menu: window 4, across the screen (columns 0
 to 29, rows 0 to 13), no cursor, a line per statistic with its value right-aligned a
 cell before the frame. The help line names the page with its number (記録　１／３　戦い)
@@ -586,6 +587,18 @@ them with each save (see [formats/save.md](formats/save.md)); a save the port ha
 written yet, or one an emulator wrote since, starts them from nothing. The messages are
 keyed `port/stats/...` (see [translation.md](translation.md)). Implemented in
 `crates/game-core/src/stats.rs` and `crates/game-core/src/menu/statistics.rs`.
+
+### Leaving for the launcher (a port feature)
+
+Source of knowledge: this project's own design; the はい/いいえ window and its sounds are
+the original's. 終了, the enhanced mode's last line of the main list, asks on the help
+line whether to go back to the launcher (`port/menu/quit-question`) and warns that what
+was not saved is lost (`port/menu/quit-unsaved`), over the original's cancelable
+はい/いいえ window (script 61, window 7). いいえ or B close it and go back to the main
+list with the cursor on 終了; はい closes the menu's windows, the screen goes black and
+the game asks its frontend to close it (`Game::wants_to_leave`): the launcher then shows
+its own screen again, as it was, to play again or choose another ROM. A game the command
+line started closes instead. Nothing is saved on the way out.
 
 ### Weapons' reach (a port feature)
 

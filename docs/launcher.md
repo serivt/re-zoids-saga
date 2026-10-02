@@ -92,7 +92,10 @@ folder where SDL keeps a program's preferences (Application Support on macOS,
 `~/.local/share` on Linux, AppData on Windows).
 
 Esc on the launcher's screen, or while the game plays, asks before closing (No is chosen
-at first; Esc again stays), and the game waits while it asks.
+at first; Esc again stays), and the game waits while it asks. In the enhanced mode the
+pause menu's last line, 終了, goes back from the game to this screen instead (see
+[menu.md](menu.md), Leaving for the launcher); the window stays open and the screen
+comes back as it was. A game the command line started closes instead.
 
 The game runs at the GBA's rate, a frame every 16.743 ms (280 896 cycles of its clock),
 about 59.73 a second, whatever the screen's refresh. The window waits for the screen's

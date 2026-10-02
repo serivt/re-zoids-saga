@@ -90,13 +90,11 @@ impl Extension for ModeKeeper {
 /// Returns an error when the options, the ROM or a translation cannot be
 /// read, or the window cannot be opened.
 pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
-    let mut options = Options::parse(args)?;
+    let options = Options::parse(args)?;
     if options.version {
         println!("{} {}", front::PROJECT_NAME, front::VERSION);
         return Ok(());
     }
-    let mut display = None;
-    let mut settings = None;
     if options.rom_path.is_none()
         && let Some(path) = &options.dump_path
     {
@@ -105,21 +103,45 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
         front::Front::new(&settings).draw(&mut frame);
         return write_ppm(path, &frame);
     }
-    if options.rom_path.is_none() {
-        let mut shown = open_window(
-            front::PROJECT_NAME,
-            SCREEN_WIDTH,
-            SCREEN_HEIGHT,
-            saved_settings().scale,
-        )?;
-        let Some(choice) = front::run(&mut shown, settings_path().as_deref())? else {
-            return Ok(());
-        };
-        options.rom_path = Some(choice.rom);
-        options.translation = choice.translation.or(options.translation);
-        settings = Some(choice.settings);
-        display = Some(shown);
+    let from_front = options.rom_path.is_none();
+    let mut shown = None;
+    loop {
+        let mut display = None;
+        let mut settings = None;
+        let mut game_options = options.clone();
+        if from_front {
+            let mut window = match shown.take() {
+                Some(window) => window,
+                None => open_window(
+                    front::PROJECT_NAME,
+                    SCREEN_WIDTH,
+                    SCREEN_HEIGHT,
+                    saved_settings().scale,
+                )?,
+            };
+            let Some(choice) = front::run(&mut window, settings_path().as_deref())? else {
+                return Ok(());
+            };
+            game_options.rom_path = Some(choice.rom);
+            game_options.translation = choice.translation.or(game_options.translation);
+            settings = Some(choice.settings);
+            display = Some(window);
+        }
+        match launch(&game_options, display, settings)? {
+            Some(window) if from_front => shown = Some(window),
+            _ => return Ok(()),
+        }
     }
+}
+
+/// Plays the ROM `options` name in `display`, the launcher's window, or a
+/// new one, with `settings` or those saved; returns the window when the
+/// player left the game for the launcher, `None` once it is over.
+fn launch(
+    options: &Options,
+    display: Option<Sdl3Display>,
+    settings: Option<settings::Settings>,
+) -> Result<Option<Sdl3Display>> {
     let rom_path = options.rom_path.clone().context(USAGE)?;
     let rom = std::fs::read(&rom_path)
         .with_context(|| format!("cannot read ROM {}", rom_path.display()))?;
@@ -139,10 +161,11 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
         return match &options.dump_path {
             Some(path) => write_ppm(path, &frame),
             None => show(&title, &frame),
-        };
+        }
+        .map(|()| None);
     }
     if let Some((path, scopes)) = &options.template {
-        return export_template(&rom, path, scopes);
+        return export_template(&rom, path, scopes).map(|()| None);
     }
     let mut game = if options.room || options.dump_path.is_some() {
         Game::in_first_room(&rom)?
@@ -177,7 +200,7 @@ pub fn run(args: impl IntoIterator<Item = OsString>) -> Result<()> {
         Some(path) => {
             let mut frame = Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default());
             game.draw(&mut frame);
-            write_ppm(path, &frame)
+            write_ppm(path, &frame).map(|()| None)
         }
         None => play(display, &mut game, &settings, options.touch),
     }
@@ -231,6 +254,7 @@ fn settings_path() -> Option<PathBuf> {
     }
 }
 
+#[derive(Clone)]
 struct Options {
     rom_path: Option<PathBuf>,
     string_id: Option<String>,
@@ -369,24 +393,17 @@ fn show(title: &str, frame: &Frame) -> Result<()> {
 /// Runs the game in `display`, the launcher's window that already has
 /// `settings`, or a new one given them; the sound plays at their volume.
 /// Escape pauses the game to ask before closing; after staying, the game
-/// sees no button until all are released.
+/// sees no button until all are released. Returns the window when the
+/// player chose to leave for the launcher, `None` when it closed.
 fn play(
     display: Option<Sdl3Display>,
     game: &mut Game<'_>,
     settings: &settings::Settings,
     touch: bool,
-) -> Result<()> {
-    let mut display = if let Some(display) = display {
-        display
-    } else {
-        let mut display = open_window(
-            front::PROJECT_NAME,
-            SCREEN_WIDTH,
-            SCREEN_HEIGHT,
-            settings.scale,
-        )?;
-        front::apply(&mut display, settings)?;
-        display
+) -> Result<Option<Sdl3Display>> {
+    let mut display = match display {
+        Some(display) => display,
+        None => game_window(settings)?,
     };
     let mut fast = fast::FastForward::default();
     let mut mute = mute::Mute::default();
@@ -414,7 +431,7 @@ fn play(
         }
         for event in display.poll_events() {
             match event {
-                Event::Quit => return Ok(()),
+                Event::Quit => return Ok(None),
                 Event::Back => {
                     quitting = match quitting {
                         Some(_) => None,
@@ -445,7 +462,7 @@ fn play(
         let input = fast.take(input, speed, quitting.is_some());
         if let Some(prompt) = &mut quitting {
             match prompt.update(input) {
-                Some(true) => return Ok(()),
+                Some(true) => return Ok(None),
                 Some(false) => {
                     quitting = None;
                     settling = true;
@@ -466,6 +483,10 @@ fn play(
                 queue_audio(audio, game.audio(), mute.volume(volume))?;
             }
         }
+        if game.wants_to_leave() {
+            display.set_touch_pad(false)?;
+            return Ok(Some(display));
+        }
         game.draw(&mut frame);
         let taken = mute.draw(&mut frame, &metrics);
         fast.draw(&mut frame, &metrics, taken);
@@ -476,6 +497,19 @@ fn play(
         }
         display.present(&frame)?;
     }
+}
+
+/// A window of its own for a game the command line named, with
+/// `settings`.
+fn game_window(settings: &settings::Settings) -> Result<Sdl3Display> {
+    let mut display = open_window(
+        front::PROJECT_NAME,
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        settings.scale,
+    )?;
+    front::apply(&mut display, settings)?;
+    Ok(display)
 }
 
 /// Queues a frame's `samples` at `volume` percent.

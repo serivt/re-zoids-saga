@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Mute.** M (or the key or gamepad button chosen for it in the options) turns the sound
   off and, pressed again, back on, in either mode; a small MUTE mark shows at the top
   right while it is off.
+- **Quit.** In the enhanced mode the pause menu ends with a Quit line that asks, with the
+  original's yes/no, whether to go back to the launcher, warning that what was not saved
+  is lost; yes closes the game and shows the launcher's screen again.
 - **Records.** In the enhanced mode the pause menu has a Records line after Config that
   opens three pages of statistics over the menu: the battles won, lost and retreated
   from, the enemy Zoids destroyed and the party's, and the money battles brought; the Zi

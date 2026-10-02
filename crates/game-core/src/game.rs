@@ -226,6 +226,9 @@ enum Screen {
     Menu(Box<PauseMenu>),
     Continuing(Continuing),
     Guide(Box<Guide>),
+    /// The player chose to leave for the launcher (see
+    /// [`Game::wants_to_leave`]); the game waits, black, to be closed.
+    Left,
 }
 
 /// Where continuing is: frames since the title's script ended (the title
@@ -473,6 +476,13 @@ impl<'rom> Game<'rom> {
         }
     }
 
+    /// Whether the player chose 終了 in the enhanced mode's pause menu, to
+    /// leave the game for the launcher; the frontend then closes it.
+    #[must_use]
+    pub fn wants_to_leave(&self) -> bool {
+        matches!(self.screen, Screen::Left)
+    }
+
     /// The game frames the frontend plays for each frame it shows (more
     /// than one while the enhanced mode's fast forward runs), so the time
     /// played counts the player's time and not the game's (see
@@ -638,7 +648,7 @@ impl<'rom> Game<'rom> {
             Screen::Logo(_) => Stage::Logo,
             Screen::Title(_) | Screen::Attract(_) => Stage::Title,
             Screen::NameEntry(_) => Stage::NameEntry,
-            Screen::Loading | Screen::LeavingNameEntry(..) => Stage::Loading,
+            Screen::Loading | Screen::LeavingNameEntry(..) | Screen::Left => Stage::Loading,
             Screen::Field | Screen::OpeningMenu(_) => Stage::Field,
             Screen::Menu(_) => Stage::Menu,
             Screen::Continuing(_) => Stage::Continuing,
@@ -774,7 +784,7 @@ impl<'rom> Game<'rom> {
             Screen::Title(_) => self.update_title(input, start)?,
             Screen::Attract(_) => self.update_attract(input)?,
             Screen::NameEntry(_) | Screen::LeavingNameEntry(..) => self.update_name_entry(input)?,
-            Screen::Loading => {}
+            Screen::Loading | Screen::Left => {}
             Screen::Field => self.update_field_screen(input, start)?,
             Screen::OpeningMenu(frames) => {
                 if let Some(field) = &mut self.field {
@@ -822,6 +832,12 @@ impl<'rom> Game<'rom> {
                         field.restart_animations(MENU_RETURN_ANIMATION);
                     }
                     Self::emit(&self.extensions, &Event::MenuClosed);
+                }
+                MenuStep::Quit => {
+                    let enhancements = menu.enhancements();
+                    self.take_enhancements(enhancements);
+                    self.windows.close_window(None);
+                    self.screen = Screen::Left;
                 }
             },
             Screen::Continuing(_) => self.update_continue(input)?,
@@ -2102,7 +2118,7 @@ impl<'rom> Game<'rom> {
                 attract.draw(frame, &self.windows, &self.skin, &self.painter);
             }
             Screen::NameEntry(entry) => entry.draw(frame, &self.windows, &self.skin, &self.painter),
-            Screen::Loading => {
+            Screen::Loading | Screen::Left => {
                 frame.fill(Rgb::default());
                 darken(frame, FADE_STEPS);
             }

@@ -136,6 +136,11 @@ const ITEM_SAVE: u16 = 5;
 /// The enhanced mode's own line of the main list, after コンフィグ (see
 /// [`PauseMenu::main_item`]); not one of the original's.
 const ITEM_STATISTICS: u16 = 6;
+/// The enhanced mode's last line of the main list, which leaves the game
+/// for the launcher; not one of the original's.
+const ITEM_QUIT: u16 = 7;
+/// The はい/いいえ window script 61 opens.
+const YES_NO_WINDOW: u8 = 7;
 const STATUS_UNIT: u16 = 0;
 const STATUS_CHARACTER: u16 = 1;
 const STATUS_WEAPONS: u16 = 2;
@@ -350,6 +355,9 @@ pub enum MenuStep {
     Save,
     /// It closed.
     Closed,
+    /// The player chose to leave the game for the launcher (the enhanced
+    /// mode's 終了, a port feature).
+    Quit,
 }
 
 /// Which list or notice the runner is on.
@@ -362,6 +370,10 @@ enum MenuState {
     Speed,
     Save,
     Saving,
+    /// The port's question before leaving for the launcher.
+    Quit,
+    /// The player confirmed leaving.
+    Quitting,
     /// The port's list of save slots before the question.
     SaveSlot,
     /// The port's list of settings, コンフィグ in the enhanced mode.
@@ -611,7 +623,7 @@ impl PauseMenu {
         windows.close_window(None);
         self.run_now(rom, SCRIPT_OPEN_MENU, windows)?;
         if self.offers_options() {
-            add_statistics_line(windows);
+            add_port_lines(windows);
         }
         self.run_now(rom, SCRIPT_PANEL_WINDOW, windows)?;
         self.print_panel(rom, windows)?;
@@ -776,6 +788,7 @@ impl PauseMenu {
         match self.state {
             MenuState::Closed => return Ok(MenuStep::Closed),
             MenuState::Saving => return Ok(MenuStep::Save),
+            MenuState::Quitting => return Ok(MenuStep::Quit),
             MenuState::SaveSlot | MenuState::Options | MenuState::Statistics => {
                 return self.port_screen_frame(rom, input, windows);
             }
@@ -815,6 +828,7 @@ impl PauseMenu {
                 return Ok(MenuStep::Save);
             }
             MenuState::Save => self.notice(SCRIPT_SAVE_CANCELED, Return::Main)?,
+            MenuState::Quit => self.quit_choice(rom, confirmed && choice == 0, windows)?,
             MenuState::Unit => self.rebuild_status(rom, windows)?,
             MenuState::Character => self.member_choice(rom, code, choice, windows)?,
             MenuState::Zoid if confirmed => self.show_arms(rom, 0, windows)?,
@@ -833,6 +847,7 @@ impl PauseMenu {
             MenuState::Notice(back) => self.return_to(rom, back, windows)?,
             MenuState::Shop(step) => self.shop_choice(rom, step, code, choice, windows)?,
             MenuState::Saving
+            | MenuState::Quitting
             | MenuState::SaveSlot
             | MenuState::Options
             | MenuState::Statistics
@@ -1386,6 +1401,7 @@ impl PauseMenu {
                 self.state = MenuState::Speed;
                 Ok(())
             }
+            ITEM_QUIT => self.ask_to_quit(windows),
             ITEM_STATISTICS => {
                 windows.clear_window(HELP_WINDOW);
                 windows.play_sound(MENU_MOVE_SOUND);
@@ -1409,16 +1425,58 @@ impl PauseMenu {
     }
 
     /// The entry of main list line `choice`: the original's, or in the
-    /// enhanced mode, whose list has the statistics after コンフィグ, those
-    /// and the original's shifted past them.
+    /// enhanced mode, whose list has the statistics after コンフィグ and
+    /// 終了 last, those and the original's shifted past them.
     fn main_item(&self, choice: u16) -> u16 {
         if !self.offers_options() || choice < ITEM_SAVE {
             choice
         } else if choice == ITEM_SAVE {
             ITEM_STATISTICS
+        } else if choice == ITEM_SAVE + 1 {
+            ITEM_SAVE
         } else {
-            choice - 1
+            ITEM_QUIT
         }
+    }
+
+    /// The answer to 終了's question: はい leaves (the next frame reports
+    /// [`MenuStep::Quit`]), いいえ or B go back to the main list.
+    fn quit_choice(
+        &mut self,
+        rom: &[u8],
+        leave: bool,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<(), ScriptError> {
+        if leave {
+            self.state = MenuState::Quitting;
+            return Ok(());
+        }
+        windows.close_window(Some(YES_NO_WINDOW));
+        self.return_to(rom, Return::Main, windows)
+    }
+
+    /// 終了: the question in the help line, and the original's はい/いいえ.
+    fn ask_to_quit(&mut self, windows: &mut ScriptWindows<'_>) -> Result<(), ScriptError> {
+        let extensions = windows.extensions().clone();
+        windows.clear_window(HELP_WINDOW);
+        for (index, key) in [
+            crate::port_text::MENU_QUIT_QUESTION,
+            crate::port_text::MENU_QUIT_UNSAVED,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if index > 0 {
+                windows.line_break(HELP_WINDOW);
+            }
+            for ch in crate::port_text::port_text(&extensions, key).chars() {
+                windows.put_char(HELP_WINDOW, ch);
+            }
+        }
+        windows.present(Some(HELP_WINDOW));
+        self.runner.start(SCRIPT_YES_NO)?;
+        self.state = MenuState::Quit;
+        Ok(())
     }
 
     fn status_choice(
@@ -1928,9 +1986,9 @@ fn print_number(windows: &mut ScriptWindows<'_>, window: u8, value: u32, cells: 
 }
 
 /// The enhanced mode's main list: the original's lines as script 46 left
-/// them, with the statistics' line after コンフィグ; the list scrolls to
-/// keep the cursor in its window.
-fn add_statistics_line(windows: &mut ScriptWindows<'_>) {
+/// them, with the statistics' line after コンフィグ and 終了 last; the list
+/// scrolls to keep the cursor in its window.
+fn add_port_lines(windows: &mut ScriptWindows<'_>) {
     let Some(lines) = windows
         .windows()
         .get(usize::from(MENU_WINDOW))
@@ -1939,11 +1997,14 @@ fn add_statistics_line(windows: &mut ScriptWindows<'_>) {
     else {
         return;
     };
-    let label = crate::port_text::port_text(windows.extensions(), crate::port_text::MENU_STATS);
+    let extensions = windows.extensions().clone();
+    let stats = crate::port_text::port_text(&extensions, crate::port_text::MENU_STATS);
+    let quit = crate::port_text::port_text(&extensions, crate::port_text::MENU_QUIT);
     windows.clear_window(MENU_WINDOW);
     let at = usize::from(ITEM_SAVE).min(lines.len());
     let mut texts: Vec<&str> = lines.iter().map(String::as_str).collect();
-    texts.insert(at, &label);
+    texts.insert(at, &stats);
+    texts.push(&quit);
     for (index, text) in texts.iter().enumerate() {
         if index > 0 {
             windows.line_break(MENU_WINDOW);

@@ -90,6 +90,13 @@ pub const OPTIONS_OFF: &str = "port/options/off";
 pub const OPTIONS_KEYS: &str = "port/options/keys";
 /// The enhanced mode's main list's line that opens the statistics.
 pub const MENU_STATS: &str = "port/menu/stats";
+/// The enhanced mode's main list's last line, which leaves the game for
+/// the launcher, and the question it asks in the help line.
+pub const MENU_QUIT: &str = "port/menu/quit";
+/// See [`MENU_QUIT`].
+pub const MENU_QUIT_QUESTION: &str = "port/menu/quit-question";
+/// See [`MENU_QUIT`].
+pub const MENU_QUIT_UNSAVED: &str = "port/menu/quit-unsaved";
 /// The statistics' pages, shown on the help line with their number.
 pub const STATS_PAGE_BATTLES: &str = "port/stats/page-battles";
 /// See [`STATS_PAGE_BATTLES`].
@@ -992,6 +999,24 @@ pub const PORT_TEXTS: &[PortText] = &[
         text: "ＯＦＦ",
         note: "A setting that is off, in the pause menu's settings; 48 pixels",
         pixels: 48,
+    },
+    PortText {
+        key: MENU_QUIT,
+        text: "終了",
+        note: "The enhanced mode's last line of the pause menu's main list, which leaves the game for the launcher (a port feature); as wide as the list's other lines, 56 pixels",
+        pixels: 56,
+    },
+    PortText {
+        key: MENU_QUIT_QUESTION,
+        text: "ランチャーにもどりますか？",
+        note: "The question on the help line's first line after choosing the quit line, over the original's yes/no window; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: MENU_QUIT_UNSAVED,
+        text: "セーブしていない進行は失われます",
+        note: "The help line's second line under that question: what was not saved is lost; 224 pixels",
+        pixels: 224,
     },
     PortText {
         key: MENU_STATS,

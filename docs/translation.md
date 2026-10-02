@@ -120,6 +120,8 @@ translated message wider than its note allows.
 | `port/options/fast-forward-value` | {count}倍 | Its value, {count} from 2 to 4, 48 pixels |
 | `port/options/on`, `port/options/off` | ＯＮ, ＯＦＦ | A setting's value, 48 pixels |
 | `port/options/keys` | 左右：変更　Ｂ：もどる | The help's second line, 224 pixels |
+| `port/menu/quit` | 終了 | The enhanced mode's last line of the pause menu's main list, which leaves for the launcher, as wide as the list's other lines |
+| `port/menu/quit-question`, `port/menu/quit-unsaved` | ランチャーにもどりますか？, セーブしていない進行は失われます | The question on the help line after choosing it, and its warning on the second line, 224 pixels each |
 | `port/menu/stats` | 記録 | The enhanced mode's line of the pause menu's main list that opens the statistics, as wide as the list's other lines (the list does not widen for it) |
 | `port/stats/page-battles`, `-collection`, `-records` | 記録　{page}／{pages}　戦い (収集, その他) | The statistics' first help line on each page, `{page}` and `{pages}` its number and 3; 224 pixels |
 | `port/stats/keys` | 左右：ページ　Ｂ：もどる | Their second help line, 224 pixels |
