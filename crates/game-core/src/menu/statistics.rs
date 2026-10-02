@@ -1,5 +1,5 @@
 //! The statistics, a port feature: the enhanced mode's main list has a
-//! line for them after コンフィグ, which opens three pages, the battles
+//! line for them after セーブ, which opens three pages, the battles
 //! fought, the collection and the other records, in a window over the
 //! menu, left and right turning the page and B going back to the list.
 //!

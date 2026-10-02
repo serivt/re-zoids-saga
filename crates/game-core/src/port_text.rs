@@ -1021,7 +1021,7 @@ pub const PORT_TEXTS: &[PortText] = &[
     PortText {
         key: MENU_STATS,
         text: "記録",
-        note: "The enhanced mode's line of the pause menu's main list, after Config, that opens the statistics of the game played (a port feature); as wide as the list's other lines, 56 pixels",
+        note: "The enhanced mode's line of the pause menu's main list, after Save, that opens the statistics of the game played (a port feature); as wide as the list's other lines, 56 pixels",
         pixels: 56,
     },
     PortText {

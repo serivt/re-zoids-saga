@@ -564,11 +564,11 @@ the next game. The port's messages are keyed `port/options/...` (see
 ### Statistics (a port feature)
 
 Source of knowledge: this project's own design; the windows and sounds are the
-original's. In the enhanced mode the main list has two lines of the port's own: 記録
-after コンフィグ and 終了 last (see Leaving for the launcher, below). Once script 46 has
+original's. In the enhanced mode the main list goes on after セーブ with two lines of
+the port's own, 記録 and 終了 (see Leaving for the launcher, below): once script 46 has
 printed the original's six, the list is printed again with them (`port/menu/stats`,
 `port/menu/quit`), and window 3, still 14 rows, scrolls to keep the cursor in sight,
-with the list's marks; セーブ moves one down. A on 記録 plays `0x40`
+with the list's marks. A on 記録 plays `0x40`
 and opens the player's statistics over the menu: window 4, across the screen (columns 0
 to 29, rows 0 to 13), no cursor, a line per statistic with its value right-aligned a
 cell before the frame. The help line names the page with its number (記録　１／３　戦い)

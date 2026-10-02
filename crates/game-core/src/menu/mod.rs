@@ -133,7 +133,7 @@ const ITEM_WEAPONS: u16 = 2;
 const ITEM_FORMATION: u16 = 3;
 const ITEM_CONFIG: u16 = 4;
 const ITEM_SAVE: u16 = 5;
-/// The enhanced mode's own line of the main list, after コンフィグ (see
+/// The enhanced mode's own line of the main list, after セーブ (see
 /// [`PauseMenu::main_item`]); not one of the original's.
 const ITEM_STATISTICS: u16 = 6;
 /// The enhanced mode's last line of the main list, which leaves the game
@@ -1425,15 +1425,13 @@ impl PauseMenu {
     }
 
     /// The entry of main list line `choice`: the original's, or in the
-    /// enhanced mode, whose list has the statistics after コンフィグ and
-    /// 終了 last, those and the original's shifted past them.
+    /// enhanced mode, whose list goes on after セーブ with the statistics
+    /// and 終了.
     fn main_item(&self, choice: u16) -> u16 {
-        if !self.offers_options() || choice < ITEM_SAVE {
+        if !self.offers_options() || choice <= ITEM_SAVE {
             choice
-        } else if choice == ITEM_SAVE {
+        } else if choice == ITEM_STATISTICS {
             ITEM_STATISTICS
-        } else if choice == ITEM_SAVE + 1 {
-            ITEM_SAVE
         } else {
             ITEM_QUIT
         }
@@ -1986,8 +1984,8 @@ fn print_number(windows: &mut ScriptWindows<'_>, window: u8, value: u32, cells: 
 }
 
 /// The enhanced mode's main list: the original's lines as script 46 left
-/// them, with the statistics' line after コンフィグ and 終了 last; the list
-/// scrolls to keep the cursor in its window.
+/// them, then the statistics' line and 終了; the list scrolls to keep the
+/// cursor in its window.
 fn add_port_lines(windows: &mut ScriptWindows<'_>) {
     let Some(lines) = windows
         .windows()
@@ -2001,9 +1999,8 @@ fn add_port_lines(windows: &mut ScriptWindows<'_>) {
     let stats = crate::port_text::port_text(&extensions, crate::port_text::MENU_STATS);
     let quit = crate::port_text::port_text(&extensions, crate::port_text::MENU_QUIT);
     windows.clear_window(MENU_WINDOW);
-    let at = usize::from(ITEM_SAVE).min(lines.len());
     let mut texts: Vec<&str> = lines.iter().map(String::as_str).collect();
-    texts.insert(at, &stats);
+    texts.push(&stats);
     texts.push(&quit);
     for (index, text) in texts.iter().enumerate() {
         if index > 0 {
