@@ -37,6 +37,7 @@ mod parts;
 mod reach;
 mod save_slots;
 mod shop;
+mod statistics;
 mod zi_data;
 
 pub use shop::Shop;
@@ -362,6 +363,8 @@ enum MenuState {
     SaveSlot,
     /// The port's list of settings, コンフィグ in the enhanced mode.
     Options,
+    /// The port's statistics, opened from its list of settings.
+    Statistics,
     Unit,
     Character,
     Zoid,
@@ -435,6 +438,7 @@ pub struct PauseMenu {
     save: save_slots::SaveSlots,
     /// コンフィグ's settings in the enhanced mode.
     options: options::Options,
+    statistics: statistics::Statistics,
     /// The weapons' reach the enhanced mode draws, and whether SELECT
     /// turned it to the other row.
     reach: Option<reach::ReachPanel>,
@@ -533,6 +537,7 @@ impl PauseMenu {
             item_menu: items::ItemMenu::default(),
             save: save_slots::SaveSlots::default(),
             options: options::Options::default(),
+            statistics: statistics::Statistics::default(),
             reach: None,
             reach_back: false,
             equipment: equipment::Equipment::default(),
@@ -719,6 +724,24 @@ impl PauseMenu {
         step
     }
 
+    /// A frame of a screen of the port's own: the save slots, the settings
+    /// or the statistics.
+    fn port_screen_frame(
+        &mut self,
+        rom: &[u8],
+        input: Input,
+        windows: &mut ScriptWindows<'_>,
+    ) -> Result<MenuStep, GuideError> {
+        match self.state {
+            MenuState::SaveSlot => self.save_slot_frame(rom, input, windows),
+            MenuState::Options => self.options_frame(rom, input, windows),
+            _ => {
+                self.statistics_frame(input, windows);
+                Ok(MenuStep::Open)
+            }
+        }
+    }
+
     fn advance(
         &mut self,
         rom: &[u8],
@@ -747,8 +770,9 @@ impl PauseMenu {
         match self.state {
             MenuState::Closed => return Ok(MenuStep::Closed),
             MenuState::Saving => return Ok(MenuStep::Save),
-            MenuState::SaveSlot => return self.save_slot_frame(rom, input, windows),
-            MenuState::Options => return self.options_frame(rom, input, windows),
+            MenuState::SaveSlot | MenuState::Options | MenuState::Statistics => {
+                return self.port_screen_frame(rom, input, windows);
+            }
             _ => {}
         }
         if !self.runner.update(rom, input, windows)? {
@@ -759,17 +783,7 @@ impl PauseMenu {
         match self.state {
             MenuState::Main => self.main_choice(rom, confirmed, choice, windows)?,
             MenuState::Status => self.status_choice(rom, confirmed, choice, windows)?,
-            MenuState::Book if confirmed => {
-                let kind = if choice == 0 {
-                    GuideKind::Zoids
-                } else {
-                    GuideKind::Characters
-                };
-                self.book_line = usize::from(choice);
-                let data = GameData::new(rom);
-                let state = self.game_state.clone();
-                self.guide = Some(Box::new(Guide::new(&data, kind, state, Cover::PauseMenu)?));
-            }
+            MenuState::Book if confirmed => self.open_book(rom, choice)?,
             MenuState::Book => {
                 windows.close_window(Some(BOOK_WINDOW));
                 self.return_to(rom, Return::Status, windows)?;
@@ -815,6 +829,7 @@ impl PauseMenu {
             MenuState::Saving
             | MenuState::SaveSlot
             | MenuState::Options
+            | MenuState::Statistics
             | MenuState::Closing(_)
             | MenuState::Closed => {}
         }
@@ -824,6 +839,21 @@ impl PauseMenu {
         } else {
             MenuStep::Open
         })
+    }
+
+    /// Opens the guide picked in 図鑑: the Zoids' (`choice` 0) or the
+    /// characters'.
+    fn open_book(&mut self, rom: &[u8], choice: u16) -> Result<(), GuideError> {
+        let kind = if choice == 0 {
+            GuideKind::Zoids
+        } else {
+            GuideKind::Characters
+        };
+        self.book_line = usize::from(choice);
+        let data = GameData::new(rom);
+        let state = self.game_state.clone();
+        self.guide = Some(Box::new(Guide::new(&data, kind, state, Cover::PauseMenu)?));
+        Ok(())
     }
 
     /// Counts down the sound waiting for the scripts before it, and plays

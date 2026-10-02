@@ -691,6 +691,8 @@ pub(super) struct Fight {
     pub(super) gone: [[bool; SLOTS]; 2],
     pub(super) experience: u32,
     pub(super) money: u32,
+    /// What the battle has seen, for the player's statistics.
+    pub(super) tally: super::BattleTally,
     /// The weapon each party slot last aimed.
     pub(super) memory: [Option<AimMemory>; SLOTS],
     /// The player gave the aim up: the screen comes back for the menu.
@@ -755,6 +757,7 @@ impl Combat {
             // its state.
             Stage::AwaitRoundMenu => None,
             Stage::RoundStart => {
+                self.fight.tally.rounds = self.fight.tally.rounds.saturating_add(1);
                 self.apply_round_rules();
                 self.task = Task::Rows(super::rows::Rows::Check(PARTY));
                 Some(Stage::AwaitRows)
@@ -1386,6 +1389,7 @@ impl Combat {
         self.fight.experience = self.fight.experience.wrapping_add(outcome.experience);
         self.fight.money = self.fight.money.wrapping_add(outcome.money);
         self.fight.blows = outcome.blows;
+        self.tally_blows(actor.0);
         self.fight
             .blows
             .iter()
@@ -1395,6 +1399,32 @@ impl Combat {
                 destroyed: blow.destroyed(),
             })
             .collect()
+    }
+
+    /// Counts the attack's blows for the player's statistics: the Zoids
+    /// destroyed on each side and, for the party's attack, its biggest
+    /// blow.
+    fn tally_blows(&mut self, attacker: usize) {
+        let tally = &mut self.fight.tally;
+        for blow in self
+            .fight
+            .blows
+            .iter()
+            .filter(|blow| blow.kind == attack::DAMAGE)
+        {
+            if attacker == PARTY && blow.side == ENEMY && blow.landed() {
+                let damage = u32::try_from(blow.damage >> 16).unwrap_or(0);
+                tally.best_hit = tally.best_hit.max(damage);
+            }
+            if blow.destroyed() {
+                let count = if blow.side == ENEMY {
+                    &mut tally.enemies_destroyed
+                } else {
+                    &mut tally.party_destroyed
+                };
+                *count = count.saturating_add(1);
+            }
+        }
     }
 
     /// One step of the fight's slot-5 task, when no script is running.

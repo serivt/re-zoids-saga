@@ -120,6 +120,11 @@ translated message wider than its note allows.
 | `port/options/fast-forward-value` | {count}倍 | Its value, {count} from 2 to 4, 48 pixels |
 | `port/options/on`, `port/options/off` | ＯＮ, ＯＦＦ | A setting's value, 48 pixels |
 | `port/options/keys` | 左右：変更　Ｂ：もどる | The help's second line, 224 pixels |
+| `port/options/stats`, `port/options/stats-help` | 記録, これまでの戦いと収集の記録を見る　Ａで開く | The line that opens the statistics (no value), 104 pixels, and its help line, 224 pixels |
+| `port/stats/page-battles`, `-collection`, `-records` | 記録　{page}／{pages}　戦い (収集, その他) | The statistics' first help line on each page, `{page}` and `{pages}` its number and 3; 224 pixels |
+| `port/stats/keys` | 左右：ページ　Ｂ：もどる | Their second help line, 224 pixels |
+| `port/stats/won` … `port/stats/story` | 勝利, 敗北, 退却, 倒した敵ゾイド, 破壊された味方, 戦闘で得たお金, Ｚｉデータ, ゾイドの種類, 人物図鑑, デッキコマンド, プレイ時間, 最大ダメージ, 最長の戦闘, ストーリー戦闘 | A statistic's label (keys `won`, `lost`, `retreated`, `enemies`, `destroyed`, `money`, `zi-data`, `zoids`, `characters`, `commands`, `time`, `best-hit`, `longest`, `story`), its value right after on the line, 120 pixels |
+| `port/stats/times`, `units`, `gold`, `of`, `hours`, `damage`, `rounds` | {count}回, {count}体, {money}Ｇ, {count}／{total}, {hours}時間{minutes}分, {count}, {count}ターン | A statistic's value, 96 pixels |
 | `port/reach/front`, `port/reach/back` | FRONT, BACK | The row over the grid of a weapon's reach, in the small capitals alone; the plate widens past 27 pixels, up to 36 |
 | `port/autosave/notice` | Autosaving | The small notice while the autosave is written, in the small capitals alone (lower case shows as capitals, characters they lack are skipped), the port adding one to three dots; 120 pixels |
 | `port/launcher/...` | English | The launcher's screens, main, options, about and the keyboard's and gamepad's buttons, and the question before closing (asked in the game too): labels and values of the panel up to 208 pixels (the pad's directions up to 40), the subtitle, status and help lines up to 232 |

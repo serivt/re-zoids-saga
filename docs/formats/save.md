@@ -168,6 +168,14 @@ game-state block it belongs to, a length byte and the name. The note is used onl
 its sum matches the block loaded, so a save rewritten by the original falls back to the
 block's own name.
 
+From byte 64 of the same bytes a second note keeps the player's statistics (see
+[menu.md](../menu.md), Statistics): `RZST`, the block's sum, a length byte (44) and the
+counts, little-endian: battles won, lost and retreated from, enemy Zoids destroyed, the
+party's Zoids destroyed, frames played, money earned, the biggest blow and the longest
+battle's rounds (four bytes each), then eight bytes with a bit for each story battle
+won. Like the name's, it counts only when its sum matches the block loaded; otherwise
+the statistics start from nothing. Every save and the autosave write it.
+
 ## Save slots (a port feature)
 
 Source of knowledge: this project's own design. The original has a single save; the port

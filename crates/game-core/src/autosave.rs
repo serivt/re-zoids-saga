@@ -15,6 +15,7 @@ use std::time::SystemTime;
 use platform::{SaveStorage, StorageError};
 
 use crate::save::SaveFile;
+use crate::stats::Stats;
 
 /// Where the autosave is kept; the worker writes it while the game plays.
 pub type SharedStorage = Arc<Mutex<Box<dyn SaveStorage + Send>>>;
@@ -24,6 +25,7 @@ pub type SharedStorage = Arc<Mutex<Box<dyn SaveStorage + Send>>>;
 struct Job {
     state: Vec<u8>,
     name: String,
+    stats: Stats,
     map: usize,
 }
 
@@ -69,10 +71,15 @@ impl Autosaver {
         }
     }
 
-    /// Queues the game `state` of `name`, saved on `map`, after the ones
-    /// already waiting.
-    pub fn queue(&self, state: Vec<u8>, name: String, map: usize) {
-        let job = Job { state, name, map };
+    /// Queues the game `state` of `name`, with its `statistics`, saved on
+    /// `map`, after the ones already waiting.
+    pub fn queue(&self, state: Vec<u8>, name: String, statistics: Stats, map: usize) {
+        let job = Job {
+            state,
+            name,
+            stats: statistics,
+            map,
+        };
         if self
             .jobs
             .as_ref()
@@ -211,7 +218,7 @@ fn write(storage: &SharedStorage, save: &SaveFile, job: &Job) -> Result<(), Stri
     let mut storage = storage.lock().unwrap_or_else(PoisonError::into_inner);
     let previous = storage.load().unwrap_or(None);
     let image = save
-        .write(previous, &job.state, &job.name)
+        .write(previous, &job.state, &job.name, &job.stats)
         .map_err(|error| error.to_string())?;
     storage.store(&image).map_err(|error| error.to_string())
 }
@@ -268,7 +275,12 @@ mod tests {
         let recorder = Recorder::default();
         let autosaver = Autosaver::new(Box::new(recorder.clone()), save());
         for map in [3, 7, 5] {
-            autosaver.queue(state(map), "アトレー".to_owned(), usize::from(map));
+            autosaver.queue(
+                state(map),
+                "アトレー".to_owned(),
+                Stats::default(),
+                usize::from(map),
+            );
         }
         assert!(autosaver.is_busy());
         autosaver.flush();
@@ -330,8 +342,8 @@ mod tests {
     fn going_away_waits_for_the_games_queued() {
         let recorder = Recorder::default();
         let autosaver = Autosaver::new(Box::new(recorder.clone()), save());
-        autosaver.queue(state(9), "アトレー".to_owned(), 9);
-        autosaver.queue(state(2), "アトレー".to_owned(), 2);
+        autosaver.queue(state(9), "アトレー".to_owned(), Stats::default(), 9);
+        autosaver.queue(state(2), "アトレー".to_owned(), Stats::default(), 2);
         drop(autosaver);
         assert_eq!(recorder.0.lock().expect("lock").len(), 2);
     }

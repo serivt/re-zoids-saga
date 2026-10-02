@@ -379,6 +379,7 @@ mod tests {
         Slot::from_found(&Found::Saved(SavedGame {
             state,
             player_name: name.to_owned(),
+            stats: crate::stats::Stats::default(),
         }))
     }
 

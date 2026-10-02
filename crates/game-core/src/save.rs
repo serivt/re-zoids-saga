@@ -7,11 +7,14 @@
 //! were. Continuing reads the first copy and falls back to the second.
 //! Because the original stores the name in Shift-JIS, a name with letters
 //! it lacks is also kept, exactly, in a note of this port's own in the
-//! bytes after the copies, which the original never touches.
+//! bytes after the copies, which the original never touches; a second note
+//! keeps the player's statistics (see [`crate::stats`]).
 
 use formats::progress::{STATE_LEN, decode_name};
 use formats::save::checksum;
 use formats::{Progress, SaveLayout, SaveMemory};
+
+use crate::stats::{STATS_LEN, Stats};
 
 /// The block of a copy that holds the game state.
 const STATE_BLOCK: usize = 0;
@@ -22,6 +25,10 @@ const NOTICE_RESTORED: usize = 12;
 const NOTE_MAGIC: &[u8; 4] = b"RZSN";
 const NOTE_SUM_LEN: usize = 4;
 const NOTE_HEADER_LEN: usize = NOTE_MAGIC.len() + NOTE_SUM_LEN + 1;
+/// The statistics' note, after the room the name's takes: a name of eight
+/// characters of four bytes and its header fit well within it.
+const STATS_MAGIC: &[u8; 4] = b"RZST";
+const STATS_NOTE_AT: usize = 64;
 
 /// A game-state block read back, with the name to use.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +38,9 @@ pub struct SavedGame {
     /// The player's name: the port's note when it belongs to this block,
     /// otherwise the block's own.
     pub player_name: String,
+    /// The player's statistics: the port's note when it belongs to this
+    /// block, otherwise none counted yet.
+    pub stats: Stats,
 }
 
 impl SavedGame {
@@ -125,7 +135,8 @@ impl SaveFile {
     }
 
     /// The image to store: `previous` (or a fresh memory when it holds no
-    /// data) with `state` in every copy and the note for `player_name`.
+    /// data) with `state` in every copy and the notes for `player_name` and
+    /// `statistics`.
     ///
     /// # Errors
     ///
@@ -135,6 +146,7 @@ impl SaveFile {
         previous: Option<Vec<u8>>,
         state: &[u8],
         player_name: &str,
+        statistics: &Stats,
     ) -> Result<Vec<u8>, SaveError> {
         let mut memory = previous
             .and_then(|bytes| SaveMemory::from_bytes(bytes, &self.layout).ok())
@@ -144,6 +156,7 @@ impl SaveFile {
             memory.set_block(&self.layout, copy, STATE_BLOCK, state)?;
         }
         write_note(memory.spare_mut(&self.layout), state, player_name);
+        write_stats(memory.spare_mut(&self.layout), state, statistics);
         Ok(memory.bytes().to_vec())
     }
 
@@ -153,9 +166,11 @@ impl SaveFile {
                 .map(|progress| decode_name(&progress.name))
                 .unwrap_or_default()
         });
+        let statistics = read_stats(memory.spare(&self.layout), state).unwrap_or_default();
         SavedGame {
             state: state.to_vec(),
             player_name,
+            stats: statistics,
         }
     }
 }
@@ -165,6 +180,9 @@ fn write_note(spare: &mut [u8], state: &[u8], player_name: &str) {
     let Ok(len) = u8::try_from(name.len()) else {
         return;
     };
+    if NOTE_HEADER_LEN + name.len() > STATS_NOTE_AT {
+        return;
+    }
     let Some(note) = spare.get_mut(..NOTE_HEADER_LEN + name.len()) else {
         return;
     };
@@ -189,6 +207,32 @@ fn read_note(spare: &[u8], state: &[u8]) -> Option<String> {
     String::from_utf8(name.to_vec()).ok()
 }
 
+fn write_stats(spare: &mut [u8], state: &[u8], statistics: &Stats) {
+    let Some(note) = spare.get_mut(STATS_NOTE_AT..STATS_NOTE_AT + NOTE_HEADER_LEN + STATS_LEN)
+    else {
+        return;
+    };
+    note[..STATS_MAGIC.len()].copy_from_slice(STATS_MAGIC);
+    note[STATS_MAGIC.len()..STATS_MAGIC.len() + NOTE_SUM_LEN]
+        .copy_from_slice(&checksum(state).to_le_bytes());
+    note[NOTE_HEADER_LEN - 1] = u8::try_from(STATS_LEN).unwrap_or(u8::MAX);
+    note[NOTE_HEADER_LEN..].copy_from_slice(&statistics.to_bytes());
+}
+
+fn read_stats(spare: &[u8], state: &[u8]) -> Option<Stats> {
+    let note = spare.get(STATS_NOTE_AT..)?;
+    let header = note.get(..NOTE_HEADER_LEN)?;
+    if &header[..STATS_MAGIC.len()] != STATS_MAGIC {
+        return None;
+    }
+    let sum = &header[STATS_MAGIC.len()..STATS_MAGIC.len() + NOTE_SUM_LEN];
+    if u32::from_le_bytes([sum[0], sum[1], sum[2], sum[3]]) != checksum(state) {
+        return None;
+    }
+    let len = usize::from(header[NOTE_HEADER_LEN - 1]);
+    Stats::from_bytes(note.get(NOTE_HEADER_LEN..NOTE_HEADER_LEN + len)?)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -201,7 +245,7 @@ mod tests {
             magic: b"TEST\0".to_vec(),
             blocks: vec![STATE_LEN, 4],
             copies: 2,
-            memory_size: 2 * (STATE_LEN + 12) + 5 + 64,
+            memory_size: 2 * (STATE_LEN + 12) + 5 + 128,
         }
     }
 
@@ -231,7 +275,7 @@ mod tests {
     fn writes_both_copies_and_reads_the_first() {
         let file = SaveFile::new(layout());
         let image = file
-            .write(None, &state("アトレー"), "アトレー")
+            .write(None, &state("アトレー"), "アトレー", &Stats::default())
             .expect("fits");
         let found = file.read(Some(image));
         assert_eq!(found.notice(), None);
@@ -243,7 +287,9 @@ mod tests {
     #[test]
     fn falls_back_to_the_second_copy_then_gives_up() {
         let file = SaveFile::new(layout());
-        let mut image = file.write(None, &state("ア"), "ア").expect("fits");
+        let mut image = file
+            .write(None, &state("ア"), "ア", &Stats::default())
+            .expect("fits");
         corrupt(&mut image, 0);
         let found = file.read(Some(image.clone()));
         assert!(matches!(found, Found::Restored(_)));
@@ -260,7 +306,12 @@ mod tests {
             .set_block(&layout(), 1, 1, &[9, 9, 9, 9])
             .expect("fits");
         let image = file
-            .write(Some(memory.bytes().to_vec()), &state("ア"), "ア")
+            .write(
+                Some(memory.bytes().to_vec()),
+                &state("ア"),
+                "ア",
+                &Stats::default(),
+            )
             .expect("fits");
         let memory = SaveMemory::from_bytes(image, &layout()).expect("image");
         assert_eq!(
@@ -272,7 +323,9 @@ mod tests {
     #[test]
     fn the_note_keeps_a_name_shift_jis_cannot_hold() {
         let file = SaveFile::new(layout());
-        let image = file.write(None, &state("Iñigo"), "Iñigo").expect("fits");
+        let image = file
+            .write(None, &state("Iñigo"), "Iñigo", &Stats::default())
+            .expect("fits");
         let found = file.read(Some(image));
         assert_eq!(found.game().expect("saved").player_name, "Iñigo");
     }
@@ -280,12 +333,36 @@ mod tests {
     #[test]
     fn a_note_left_from_another_save_is_ignored() {
         let file = SaveFile::new(layout());
-        let image = file.write(None, &state("Iñigo"), "Iñigo").expect("fits");
+        let image = file
+            .write(None, &state("Iñigo"), "Iñigo", &Stats::default())
+            .expect("fits");
         let mut memory = SaveMemory::from_bytes(image, &layout()).expect("image");
         memory
             .set_block(&layout(), 0, STATE_BLOCK, &state("アトレー"))
             .expect("fits");
         let found = file.read(Some(memory.bytes().to_vec()));
         assert_eq!(found.game().expect("saved").player_name, "アトレー");
+    }
+
+    #[test]
+    fn the_statistics_travel_with_the_save_they_belong_to() {
+        let file = SaveFile::new(layout());
+        let stats = Stats {
+            battles_won: 12,
+            best_hit: 345,
+            story_won: 1 << 41,
+            ..Stats::default()
+        };
+        let image = file
+            .write(None, &state("アトレー"), "アトレー", &stats)
+            .expect("fits");
+        let found = file.read(Some(image.clone()));
+        assert_eq!(found.game().expect("saved").stats, stats);
+        let mut memory = SaveMemory::from_bytes(image, &layout()).expect("image");
+        memory
+            .set_block(&layout(), 0, STATE_BLOCK, &state("ア"))
+            .expect("fits");
+        let found = file.read(Some(memory.bytes().to_vec()));
+        assert_eq!(found.game().expect("saved").stats, Stats::default());
     }
 }

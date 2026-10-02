@@ -88,6 +88,61 @@ pub const OPTIONS_ON: &str = "port/options/on";
 pub const OPTIONS_OFF: &str = "port/options/off";
 /// The keys, on the help line's second line.
 pub const OPTIONS_KEYS: &str = "port/options/keys";
+/// The settings' line that opens the statistics, and its help.
+pub const OPTIONS_STATS: &str = "port/options/stats";
+/// See [`OPTIONS_STATS`].
+pub const OPTIONS_STATS_HELP: &str = "port/options/stats-help";
+/// The statistics' pages, shown on the help line with their number.
+pub const STATS_PAGE_BATTLES: &str = "port/stats/page-battles";
+/// See [`STATS_PAGE_BATTLES`].
+pub const STATS_PAGE_COLLECTION: &str = "port/stats/page-collection";
+/// See [`STATS_PAGE_BATTLES`].
+pub const STATS_PAGE_RECORDS: &str = "port/stats/page-records";
+/// The statistics' keys, on the help line's second line.
+pub const STATS_KEYS: &str = "port/stats/keys";
+/// The statistics' lines.
+pub const STATS_WON: &str = "port/stats/won";
+/// See [`STATS_WON`].
+pub const STATS_LOST: &str = "port/stats/lost";
+/// See [`STATS_WON`].
+pub const STATS_RETREATED: &str = "port/stats/retreated";
+/// See [`STATS_WON`].
+pub const STATS_ENEMIES: &str = "port/stats/enemies";
+/// See [`STATS_WON`].
+pub const STATS_DESTROYED: &str = "port/stats/destroyed";
+/// See [`STATS_WON`].
+pub const STATS_MONEY: &str = "port/stats/money";
+/// See [`STATS_WON`].
+pub const STATS_ZI_DATA: &str = "port/stats/zi-data";
+/// See [`STATS_WON`].
+pub const STATS_ZOIDS: &str = "port/stats/zoids";
+/// See [`STATS_WON`].
+pub const STATS_CHARACTERS: &str = "port/stats/characters";
+/// See [`STATS_WON`].
+pub const STATS_COMMANDS: &str = "port/stats/commands";
+/// See [`STATS_WON`].
+pub const STATS_TIME: &str = "port/stats/time";
+/// See [`STATS_WON`].
+pub const STATS_BEST_HIT: &str = "port/stats/best-hit";
+/// See [`STATS_WON`].
+pub const STATS_LONGEST: &str = "port/stats/longest";
+/// See [`STATS_WON`].
+pub const STATS_STORY: &str = "port/stats/story";
+/// The statistics' values: times, Zoids, money, a count of a total, the
+/// time played, damage and rounds.
+pub const STATS_TIMES: &str = "port/stats/times";
+/// See [`STATS_TIMES`].
+pub const STATS_UNITS: &str = "port/stats/units";
+/// See [`STATS_TIMES`].
+pub const STATS_GOLD: &str = "port/stats/gold";
+/// See [`STATS_TIMES`].
+pub const STATS_OF: &str = "port/stats/of";
+/// See [`STATS_TIMES`].
+pub const STATS_HOURS: &str = "port/stats/hours";
+/// See [`STATS_TIMES`].
+pub const STATS_DAMAGE: &str = "port/stats/damage";
+/// See [`STATS_TIMES`].
+pub const STATS_ROUNDS: &str = "port/stats/rounds";
 
 /// The row the weapons' reach is drawn from: the front, and the back.
 pub const REACH_FRONT: &str = "port/reach/front";
@@ -941,6 +996,168 @@ pub const PORT_TEXTS: &[PortText] = &[
         pixels: 48,
     },
     PortText {
+        key: OPTIONS_STATS,
+        text: "記録",
+        note: "The settings' line that opens the statistics of the game played (a port feature); it has no value; 104 pixels",
+        pixels: 104,
+    },
+    PortText {
+        key: OPTIONS_STATS_HELP,
+        text: "これまでの戦いと収集の記録を見る　Ａで開く",
+        note: "The help line of the statistics' line: it shows the record of the battles fought and of the collection, A opens it; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: STATS_PAGE_BATTLES,
+        text: "記録　{page}／{pages}　戦い",
+        note: "The statistics' first help line on the battles' page, with its number of the pages; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: STATS_PAGE_COLLECTION,
+        text: "記録　{page}／{pages}　収集",
+        note: "The same on the collection's page; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: STATS_PAGE_RECORDS,
+        text: "記録　{page}／{pages}　その他",
+        note: "The same on the page of the time played and the records; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: STATS_KEYS,
+        text: "左右：ページ　Ｂ：もどる",
+        note: "The statistics' second help line: left/right turn the page, B goes back; 224 pixels",
+        pixels: 224,
+    },
+    PortText {
+        key: STATS_WON,
+        text: "勝利",
+        note: "Battles won: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_LOST,
+        text: "敗北",
+        note: "Battles lost: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_RETREATED,
+        text: "退却",
+        note: "Battles the party retreated from: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_ENEMIES,
+        text: "倒した敵ゾイド",
+        note: "Enemy Zoids destroyed: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_DESTROYED,
+        text: "破壊された味方",
+        note: "The party's Zoids destroyed: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_MONEY,
+        text: "戦闘で得たお金",
+        note: "Money the won battles brought: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_ZI_DATA,
+        text: "Ｚｉデータ",
+        note: "The Zi data held, of all the Zoids' ones: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_ZOIDS,
+        text: "ゾイドの種類",
+        note: "The kinds of Zoid the party has units of, of all the kinds: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_CHARACTERS,
+        text: "人物図鑑",
+        note: "The characters in the character guide, of all of them: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_COMMANDS,
+        text: "デッキコマンド",
+        note: "The deck commands learned, of all of them: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_TIME,
+        text: "プレイ時間",
+        note: "The time played: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_BEST_HIT,
+        text: "最大ダメージ",
+        note: "The most damage one blow of the party dealt: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_LONGEST,
+        text: "最長の戦闘",
+        note: "The most rounds a battle lasted: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_STORY,
+        text: "ストーリー戦闘",
+        note: "The story battles won, of all of them: the label of a line of the statistics, its value after it on the same line; 120 pixels",
+        pixels: 120,
+    },
+    PortText {
+        key: STATS_TIMES,
+        text: "{count}回",
+        note: "Times (battles): a value of the statistics, after its label; 96 pixels",
+        pixels: 96,
+    },
+    PortText {
+        key: STATS_UNITS,
+        text: "{count}体",
+        note: "Zoids (destroyed): a value of the statistics, after its label; 96 pixels",
+        pixels: 96,
+    },
+    PortText {
+        key: STATS_GOLD,
+        text: "{money}Ｇ",
+        note: "Money: a value of the statistics, after its label; 96 pixels",
+        pixels: 96,
+    },
+    PortText {
+        key: STATS_OF,
+        text: "{count}／{total}",
+        note: "A count of a total: a value of the statistics, after its label; 96 pixels",
+        pixels: 96,
+    },
+    PortText {
+        key: STATS_HOURS,
+        text: "{hours}時間{minutes}分",
+        note: "The time played, in hours and minutes: a value of the statistics, after its label; 96 pixels",
+        pixels: 96,
+    },
+    PortText {
+        key: STATS_DAMAGE,
+        text: "{count}",
+        note: "Damage: a value of the statistics, after its label; 96 pixels",
+        pixels: 96,
+    },
+    PortText {
+        key: STATS_ROUNDS,
+        text: "{count}ターン",
+        note: "The rounds of a battle: a value of the statistics, after its label; 96 pixels",
+        pixels: 96,
+    },
+    PortText {
         key: OPTIONS_KEYS,
         text: "左右：変更　Ｂ：もどる",
         note: "The second help line of the pause menu's settings: left/right change, B goes back; 224 pixels",
@@ -970,12 +1187,17 @@ pub const PORT_TEXTS: &[PortText] = &[
 const SMALL_TEXTS: [&str; 3] = [REACH_FRONT, REACH_BACK, AUTOSAVE_NOTICE];
 
 /// The widest value of each marker, to check a message's lines.
-const WIDEST_VALUES: [(&str, u32); 5] = [
+const WIDEST_VALUES: [(&str, u32); 10] = [
     ("level", 99),
     ("area", 10),
     ("money", 9_999_999),
     ("slot", 9),
     ("count", 4),
+    ("total", 153),
+    ("page", 3),
+    ("pages", 3),
+    ("hours", 999),
+    ("minutes", 59),
 ];
 
 /// The default text of the message `key`, if the port has one.

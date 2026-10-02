@@ -53,6 +53,7 @@ use crate::port_text::{AUTOSAVE_NOTICE, port_text};
 use crate::save::{Found, SaveFile, SavedGame};
 use crate::script::{ScriptContext, ScriptError, ScriptRunner};
 use crate::slots::{self, Pick, Purpose, Slot, SlotPicker};
+use crate::stats::Stats;
 use crate::story;
 use crate::text::TextMetrics;
 use crate::translation::{
@@ -327,6 +328,8 @@ pub struct Game<'rom> {
     /// The roaming battles won as the game was started or continued
     /// (IWRAM `0x030022DC`, which only the start and the continue write).
     started_wins: u16,
+    /// The player's statistics, kept with the saves (see [`crate::stats`]).
+    stats: Stats,
     field: Option<Field>,
     /// Whether the port's debugging mode is on (see
     /// [`Game::toggle_debug_mode`]).
@@ -559,6 +562,7 @@ impl<'rom> Game<'rom> {
             aftermath: None,
             battle_lost: false,
             started_wins: 0,
+            stats: Stats::default(),
             defeated: false,
             field: None,
             debug: false,
@@ -714,6 +718,12 @@ impl<'rom> Game<'rom> {
         let select = input.is_held(Button::Select) && !self.previous.is_held(Button::Select);
         self.previous = input;
         self.frame += 1;
+        if matches!(
+            self.screen,
+            Screen::Field | Screen::OpeningMenu(_) | Screen::Menu(_)
+        ) {
+            self.stats.tick();
+        }
         Self::emit(&self.extensions, &Event::Frame(self.frame));
         self.report_autosaves();
         self.latch_screen();
@@ -753,6 +763,7 @@ impl<'rom> Game<'rom> {
                         PlayMode::Classic => None,
                         PlayMode::Enhanced(enhancements) => Some(enhancements),
                     });
+                    menu.set_stats(self.stats);
                     menu.open(rom, &mut self.windows)?;
                     self.screen = Screen::Menu(Box::new(menu));
                     Self::emit(&self.extensions, &Event::MenuOpened);
@@ -944,6 +955,7 @@ impl<'rom> Game<'rom> {
 
     fn new_game(&mut self, input: Input) -> Result<(), GameError> {
         self.state = self.data.new_game_state()?;
+        self.stats = Stats::default();
         self.slot = None;
         self.autosave_map = None;
         self.party = Party::default();
@@ -1125,6 +1137,7 @@ impl<'rom> Game<'rom> {
         let progress = saved.progress()?;
         self.state.clone_from(&saved.state);
         self.player_name.clone_from(&saved.player_name);
+        self.stats = saved.stats;
         self.windows.set_player_name(&self.player_name);
         self.windows.set_flags(progress.set_flags());
         self.party = Party {
@@ -1262,7 +1275,10 @@ impl<'rom> Game<'rom> {
                 None
             }
         };
-        let image = match self.save.write(previous, &self.state, &self.player_name) {
+        let image = match self
+            .save
+            .write(previous, &self.state, &self.player_name, &self.stats)
+        {
             Ok(image) => image,
             Err(error) => return failed(&self.extensions, &error),
         };
@@ -1300,7 +1316,12 @@ impl<'rom> Game<'rom> {
             if self.update_state(&party)
                 && let Some(autosave) = &self.autosave
             {
-                autosave.queue(self.state.clone(), self.player_name.clone(), map);
+                autosave.queue(
+                    self.state.clone(),
+                    self.player_name.clone(),
+                    self.stats,
+                    map,
+                );
                 self.autosave_notice = Some(Notice::queued(self.autosave_notice));
             }
         }
@@ -1889,11 +1910,13 @@ impl<'rom> Game<'rom> {
         };
         let done = outcome.is_some();
         if let Some(outcome) = outcome {
-            if let Some(combat) = self.combat.take()
-                && combat.state().len() == self.state.len()
-            {
-                self.state.clone_from_slice(combat.state());
-                take_party(&self.state, &mut self.party);
+            if let Some(combat) = self.combat.take() {
+                self.stats
+                    .record_battle(outcome, &combat.tally(), combat.story_battle());
+                if combat.state().len() == self.state.len() {
+                    self.state.clone_from_slice(combat.state());
+                    take_party(&self.state, &mut self.party);
+                }
             }
             // The battle hands back as it queues the text system's reset,
             // which clears whatever its results left on the screen.

@@ -131,6 +131,23 @@ const CHOICE_RETREAT: u16 = 4;
 const REBUILD_NAMES: u32 = 3;
 const REBUILD_MESSAGE: u32 = 3;
 
+/// What a battle saw, for the player's statistics (see
+/// [`crate::stats`]): the Zoids destroyed on each side, the money the win
+/// added, the party's biggest blow and the rounds fought.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct BattleTally {
+    /// Enemy Zoids destroyed.
+    pub enemies_destroyed: u32,
+    /// The party's Zoids destroyed.
+    pub party_destroyed: u32,
+    /// The money the win added.
+    pub money: u32,
+    /// The most damage one of the party's blows dealt.
+    pub best_hit: u32,
+    /// The rounds that started.
+    pub rounds: u32,
+}
+
 /// How a battle ended, as `0x0800C3AC` tells its caller.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
@@ -611,6 +628,18 @@ impl Combat {
     #[must_use]
     pub fn state(&self) -> &[u8] {
         &self.state
+    }
+
+    /// What the battle saw, for the player's statistics.
+    #[must_use]
+    pub fn tally(&self) -> BattleTally {
+        self.fight.tally
+    }
+
+    /// The story battle's number, for one.
+    #[must_use]
+    pub fn story_battle(&self) -> Option<u8> {
+        self.lineup.story().map(|battle| battle.index)
     }
 
     /// How the battle ended, once it has handed back to the field.

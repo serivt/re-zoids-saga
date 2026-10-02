@@ -204,15 +204,13 @@ impl Combat {
                 // 調達の達人 doubles what is added, not what the message
                 // shows (`0x08035940`).
                 let doubled = self.command_state.flags & super::commands::DOUBLE_MONEY != 0;
-                add(
-                    &mut self.state,
-                    MONEY,
-                    if doubled {
-                        money.saturating_mul(2)
-                    } else {
-                        money
-                    },
-                );
+                let added = if doubled {
+                    money.saturating_mul(2)
+                } else {
+                    money
+                };
+                add(&mut self.state, MONEY, added);
+                self.fight.tally.money = added;
                 self.message_key(&[Call::Text(TEXT_WON)]);
                 let mut calls = number(i32::try_from(money).unwrap_or(i32::MAX));
                 calls.push(Call::Text(TEXT_MONEY));

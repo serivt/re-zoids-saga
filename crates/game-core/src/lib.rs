@@ -21,6 +21,7 @@ pub mod save;
 pub mod script;
 pub mod slots;
 pub mod sprite;
+pub mod stats;
 pub mod story;
 pub mod text;
 pub mod title_intro;

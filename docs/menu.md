@@ -542,7 +542,7 @@ the original's. In the classic mode コンフィグ is the original's (above). I
 mode (see [launcher.md](launcher.md)) it lists every setting the game lets the player
 change while it plays: window 4, a light menu like the save slots', takes the columns
 from the main list's right edge to the screen's, two rows a line and its frame's two,
-at least 8 to cover the status panel and at most 14, down to the help line (its seven
+at least 8 to cover the status panel and at most 14, down to the help line (its eight
 lines scroll, with the list's marks),
 a line per setting with its value from cell 13 (further left when a translation's list
 starts further right and the widest value would not fit before the cursor's right mark):
@@ -552,14 +552,36 @@ the damage numbers (ＯＮ or ＯＦＦ, see [combat.md](combat.md), Damage numb
 auto text (ＯＮ or ＯＦＦ, see [formats/script-text.md](formats/script-text.md)) and the
 autosave (ＯＮ or ＯＦＦ, see [formats/save.md](formats/save.md), The autosave), the
 weapons' reach (ＯＮ or ＯＦＦ, below) and the fast forward's speed (２倍 to ４倍,
-stopping at its ends like the message speed; see [launcher.md](launcher.md)). The
-help line says what
+stopping at its ends like the message speed; see [launcher.md](launcher.md)), and last
+記録, with no value, which opens the statistics (below). The help line says what
 the setting under the cursor does, and below it the keys. Up and down move (`0x40`);
 left and right, or A, change the value (`0x40`), the speed stopping at its ends and the
 enhancements switching; B plays `0x3F` and goes back to the main list with the cursor on
 コンフィグ. The settings hold from then on; the launcher remembers the enhancements for
 the next game. The port's messages are keyed `port/options/...` (see
 [translation.md](translation.md)). Implemented in `crates/game-core/src/menu/options.rs`.
+
+### Statistics (a port feature)
+
+Source of knowledge: this project's own design; the windows and sounds are the
+original's. On 記録, the enhanced mode's last setting, A or right plays `0x40` and opens
+the player's statistics over the menu: window 4 again, across the screen (columns 0 to
+29, rows 0 to 13), no cursor, a line per statistic with its value right-aligned a cell
+before the frame. The help line names the page with its number (記録　１／３　戦い) and
+gives the keys; left and right turn the page (`0x40`, round from the last to the first),
+B plays `0x3F` and goes back to the settings with the cursor on 記録. The three pages:
+
+| Page | Lines |
+|---|---|
+| Battles | Battles won (勝利), lost (敗北) and retreated from (退却), roaming and story alike; enemy Zoids destroyed (倒した敵ゾイド) and the party's (破壊された味方), each blow that left a unit without hit points; the money the won battles added (戦闘で得たお金, doubled by 調達の達人 as it adds) |
+| Collection | Read from the game state: the Zi data held (Ｚｉデータ, its bytes at `+0x33E2`, of 153), the kinds of Zoid the party has units of (ゾイドの種類, of the same 153), the characters in the character guide (人物図鑑, of 87) and the deck commands learned (デッキコマンド, of 33) |
+| Others | The time played (プレイ時間, in hours and minutes, the game's frames at 60 a second on the field, in its menus and in battle, so the fast forward counts the game's time, not the player's); the party's biggest blow (最大ダメージ); the most rounds a battle lasted (最長の戦闘); the story battles won (ストーリー戦闘, of the 42 the table holds) |
+
+The game counts them as it goes, in every mode, from the start of a new game, and keeps
+them with each save (see [formats/save.md](formats/save.md)); a save the port had not
+written yet, or one an emulator wrote since, starts them from nothing. The messages are
+keyed `port/stats/...` (see [translation.md](translation.md)). Implemented in
+`crates/game-core/src/stats.rs` and `crates/game-core/src/menu/statistics.rs`.
 
 ### Weapons' reach (a port feature)
 
