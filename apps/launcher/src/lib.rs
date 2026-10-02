@@ -451,6 +451,7 @@ fn play(
             }
         }
         settling &= input != Input::default();
+        game.set_time_scale(fast.frames(1));
         for _ in 0..fast.frames(due) {
             if quitting.is_some() {
                 break;

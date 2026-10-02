@@ -29,7 +29,8 @@ pub struct Stats {
     pub enemies_destroyed: u32,
     /// The party's Zoids destroyed.
     pub party_destroyed: u32,
-    /// Game frames played, on the field, in its menus and in battle.
+    /// Frames played, on the field, in its menus and in battle, at the
+    /// player's pace: the fast forward's extra frames do not count.
     pub play_frames: u32,
     /// Money the won battles added.
     pub money_earned: u32,

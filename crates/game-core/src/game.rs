@@ -330,6 +330,10 @@ pub struct Game<'rom> {
     started_wins: u16,
     /// The player's statistics, kept with the saves (see [`crate::stats`]).
     stats: Stats,
+    /// The game frames that make one shown frame (see
+    /// [`Game::set_time_scale`]), and those counted toward the next.
+    time_scale: u32,
+    time_owed: u32,
     field: Option<Field>,
     /// Whether the port's debugging mode is on (see
     /// [`Game::toggle_debug_mode`]).
@@ -452,6 +456,32 @@ impl<'rom> Game<'rom> {
         self.autosave = Some(Autosaver::new(storage, self.save.clone()));
     }
 
+    /// Counts a frame of play toward the time played, one in each
+    /// [`Game::set_time_scale`] frames: on the field, in its menus and in
+    /// battle.
+    fn count_play_time(&mut self) {
+        if !matches!(
+            self.screen,
+            Screen::Field | Screen::OpeningMenu(_) | Screen::Menu(_)
+        ) {
+            return;
+        }
+        self.time_owed += 1;
+        if self.time_owed >= self.time_scale {
+            self.time_owed = 0;
+            self.stats.tick();
+        }
+    }
+
+    /// The game frames the frontend plays for each frame it shows (more
+    /// than one while the enhanced mode's fast forward runs), so the time
+    /// played counts the player's time and not the game's (see
+    /// [`crate::stats`]); 1 by default.
+    pub fn set_time_scale(&mut self, frames: u32) {
+        self.time_scale = frames.max(1);
+        self.time_owed = self.time_owed.min(self.time_scale - 1);
+    }
+
     /// Plays as the original, or with the port's enhancements (see
     /// [`crate::play_mode`]). The launcher sets it before the game starts;
     /// by default the game plays as the original.
@@ -563,6 +593,8 @@ impl<'rom> Game<'rom> {
             battle_lost: false,
             started_wins: 0,
             stats: Stats::default(),
+            time_scale: 1,
+            time_owed: 0,
             defeated: false,
             field: None,
             debug: false,
@@ -718,12 +750,7 @@ impl<'rom> Game<'rom> {
         let select = input.is_held(Button::Select) && !self.previous.is_held(Button::Select);
         self.previous = input;
         self.frame += 1;
-        if matches!(
-            self.screen,
-            Screen::Field | Screen::OpeningMenu(_) | Screen::Menu(_)
-        ) {
-            self.stats.tick();
-        }
+        self.count_play_time();
         Self::emit(&self.extensions, &Event::Frame(self.frame));
         self.report_autosaves();
         self.latch_screen();

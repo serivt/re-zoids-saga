@@ -579,7 +579,7 @@ pages:
 |---|---|
 | Battles | Battles won (勝利), lost (敗北) and retreated from (退却), roaming and story alike; enemy Zoids destroyed (倒した敵ゾイド) and the party's (破壊された味方), each blow that left a unit without hit points; the money the won battles added (戦闘で得たお金, doubled by 調達の達人 as it adds) |
 | Collection | Read from the game state: the Zi data held (Ｚｉデータ, its bytes at `+0x33E2`, of 153), the kinds of Zoid the party has units of (ゾイドの種類, of the same 153), the characters in the character guide (人物図鑑, of 87) and the deck commands learned (デッキコマンド, of 33) |
-| Others | The time played (プレイ時間, in hours and minutes, the game's frames at 60 a second on the field, in its menus and in battle, so the fast forward counts the game's time, not the player's); the party's biggest blow (最大ダメージ); the most rounds a battle lasted (最長の戦闘); the story battles won (ストーリー戦闘, of the 42 the table holds) |
+| Others | The time played (プレイ時間, in hours and minutes, the frames shown at 60 a second on the field, in its menus and in battle; while the fast forward plays several of the game's frames for each one shown, only the one shown counts, so the time is the player's, not the game's); the party's biggest blow (最大ダメージ); the most rounds a battle lasted (最長の戦闘); the story battles won (ストーリー戦闘, of the 42 the table holds) |
 
 The game counts them as it goes, in every mode, from the start of a new game, and keeps
 them with each save (see [formats/save.md](formats/save.md)); a save the port had not
