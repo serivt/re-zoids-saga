@@ -66,6 +66,11 @@ Game mode chooses how the game plays, on a screen of its own:
     frames the audio queue has no room for is dropped, so it keeps its pitch and skips
     ahead (`apps/launcher/src/fast.rs`).
 
+The enhanced mode also counts 31 achievements, from the chapters cleared to the
+collection and the battles' records, announced at the field's top as they unlock and
+listed in the pause menu's 実績; they are shared by every save of the ROM, in
+`game.achievements` beside them (see [achievements.md](achievements.md)).
+
 The mode is set before the game starts (`Game::set_play_mode`, see
 `crates/game-core/src/play_mode.rs`) and does not change while it plays; saves are the
 original's in either mode, the autosave's too. In the enhanced mode the pause menu's コンフィグ lists the
@@ -165,7 +170,8 @@ A ROM on the command line skips the launcher's screen and plays from the publish
 Saves use the original's format, so they move between this port, emulators and the
 cartridge; slot 1 is the `.sav` and slot n the same name with `.n` before the extension
 (`game.2.sav`). The enhanced mode's autosave is the same name with `.auto`
-(`game.auto.sav`).
+(`game.auto.sav`), and its achievements the same name with `.achievements`
+(`game.achievements`).
 
 ## The extractor
 

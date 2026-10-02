@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Achievements.** The enhanced mode counts 31 achievements: one for each chapter
+  cleared (the last for beating Vega), optional story moments, the collection (Zi data,
+  chests, characters, deck commands, Zoid cores, units), the level and money, the
+  battles' records, a few met only as they happen (a flawless story battle, a first-round
+  win, a Zoid developed, the ending within 15 hours) and one for all the others. Most
+  read the game state, so a game saved before, here or in an emulator, unlocks them as
+  soon as it is continued. Each unlock slides a window down at the field's top, and the
+  pause menu has an Achievements line before Quit that lists them in pages, unlocked or
+  not. They are shared by every save of the ROM, in a `.achievements` file beside them.
 - **Mute.** M (or the key or gamepad button chosen for it in the options) turns the sound
   off and, pressed again, back on, in either mode; a small MUTE mark shows at the top
   right while it is off.

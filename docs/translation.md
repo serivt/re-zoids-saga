@@ -127,6 +127,10 @@ translated message wider than its note allows.
 | `port/stats/keys` | 左右：ページ　Ｂ：もどる | Their second help line, 224 pixels |
 | `port/stats/won` … `port/stats/story` | 勝利, 敗北, 退却, 倒した敵ゾイド, 破壊された味方, 戦闘で得たお金, Ｚｉデータ, ゾイドの種類, 人物図鑑, デッキコマンド, プレイ時間, 最大ダメージ, 最長の戦闘, ストーリー戦闘 | A statistic's label (keys `won`, `lost`, `retreated`, `enemies`, `destroyed`, `money`, `zi-data`, `zoids`, `characters`, `commands`, `time`, `best-hit`, `longest`, `story`), its value right after on the line, 120 pixels |
 | `port/stats/times`, `units`, `gold`, `of`, `hours`, `damage`, `rounds` | {count}回, {count}体, {money}Ｇ, {count}／{total}, {hours}時間{minutes}分, {count}, {count}ターン | A statistic's value, 96 pixels |
+| `port/menu/achievements` | 実績 | The enhanced mode's line of the pause menu's main list that opens the achievements, as wide as the list's other lines |
+| `port/achievements/page` | 実績　{page}／{pages}　達成　{count}／{total} | The achievements' first help line, `{page}` of `{pages}` (11), `{count}` unlocked of `{total}` (31); 224 pixels |
+| `port/achievements/unlocked`, `port/achievements/many` | 実績解除！, {count}件の実績 | The window announcing an unlock: its first line, and its second when several unlocked at once; 224 pixels |
+| `port/achievement/<key>`, `port/achievement/<key>-help` | 赤い川の彼方へ, 第１章をクリアする … | Each achievement's name, after its star, 184 pixels, and what it asks for, under it, 192 pixels (the keys are listed in [achievements.md](achievements.md)) |
 | `port/reach/front`, `port/reach/back` | FRONT, BACK | The row over the grid of a weapon's reach, in the small capitals alone; the plate widens past 27 pixels, up to 36 |
 | `port/autosave/notice` | Autosaving | The small notice while the autosave is written, in the small capitals alone (lower case shows as capitals, characters they lack are skipped), the port adding one to three dots; 120 pixels |
 | `port/launcher/...` | English | The launcher's screens, main, options, about and the keyboard's and gamepad's buttons, and the question before closing (asked in the game too): labels and values of the panel up to 208 pixels (the pad's directions up to 40), the subtitle, status and help lines up to 232 |
