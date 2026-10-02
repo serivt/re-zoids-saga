@@ -106,11 +106,14 @@ pub enum Button {
     /// Not the console's: the enhanced mode's fast forward, which the
     /// launcher turns on and off and the game never sees.
     FastForward,
+    /// Not the console's: turns the sound off and on again, in the
+    /// launcher; the game never sees it.
+    Mute,
 }
 
 impl Button {
     /// Every button, in the order the settings list them.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Up,
         Self::Down,
         Self::Left,
@@ -122,6 +125,7 @@ impl Button {
         Self::Start,
         Self::Select,
         Self::FastForward,
+        Self::Mute,
     ];
 
     const fn bit(self) -> u16 {
@@ -143,6 +147,7 @@ impl Button {
             Self::L => "l",
             Self::R => "r",
             Self::FastForward => "fast-forward",
+            Self::Mute => "mute",
         }
     }
 

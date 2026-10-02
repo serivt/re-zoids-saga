@@ -121,9 +121,18 @@ pad and the saves' export and import in place of the window's and the keyboard's
 | SELECT | Backspace | Back |
 | L, R | A, S | Shoulders |
 | Fast forward (`>>`, enhanced mode) | Space | Right stick click |
+| Mute (`MUTE`) | M | None |
 
-The binding screens list the fast forward as `>>` after the console's buttons, in two
-columns of six.
+The binding screens list the fast forward as `>>` and the mute as `MUTE` after the
+console's buttons, in two columns of six.
+
+The mute, a port feature, works in either mode: a press turns the sound off and the
+next turns it on again, at the volume chosen in the options. While it is off, `MUTE`
+shows in the port's small capitals at the frame's top right, white over a black shadow,
+four pixels from the edge (the fast forward's mark then moves to its left). The game
+never sees the button and goes on making its sound, which is only not heard, so its
+timing does not change. It lasts until the launcher closes. Implemented in
+`apps/launcher/src/mute.rs`.
 
 In a build with the `debug-mode` feature (`cargo run -p launcher --features debug-mode`),
 F10 turns a debugging mode on and off: the roaming enemies are intangible, so the player

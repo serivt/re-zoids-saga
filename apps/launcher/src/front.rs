@@ -269,8 +269,10 @@ enum Device {
 /// The fast forward's button on the binding screens, as the on-screen pad
 /// marks it.
 const FAST_FORWARD_MARK: &str = ">>";
-/// A binding screen's entries: the buttons in two columns of six (the
-/// second one short), then a row with the defaults and the way back.
+/// The mute's button on the binding screens, as its mark shows it.
+const MUTE_MARK: &str = crate::mute::MARK;
+/// A binding screen's entries: the buttons in two columns of six, then a
+/// row with the defaults and the way back.
 const BUTTON_ROWS: usize = 6;
 const DEFAULTS_ENTRY: usize = Button::ALL.len();
 const BACK_ENTRY: usize = DEFAULTS_ENTRY + 1;
@@ -1789,6 +1791,7 @@ impl Front {
             Button::Start => "START".to_owned(),
             Button::Select => "SELECT".to_owned(),
             Button::FastForward => FAST_FORWARD_MARK.to_owned(),
+            Button::Mute => MUTE_MARK.to_owned(),
         }
     }
 

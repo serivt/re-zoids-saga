@@ -6,6 +6,7 @@
 mod download;
 mod fast;
 mod front;
+mod mute;
 mod pacing;
 mod quit;
 mod saves;
@@ -30,7 +31,7 @@ use platform_sdl3::{FileStorage, Sdl3Display, autosave_path, preferences_dir, sl
 /// build with the `debug-mode` feature.
 #[cfg(feature = "debug-mode")]
 const DEBUG_KEY: u8 = 10;
-const USAGE: &str = "usage: launcher [<rom-path> [string-id]] [--version] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--slots <n>] [--translation <file.po>] [--touch] [--export-template <file.pot> [table[:first-last]...]]\n  without a ROM the launcher shows its own screen to choose the ROM, a translation and the options (keys, gamepad buttons, window size, fullscreen, filter, volume), remembered in the user's settings folder, which the game given a ROM here plays with too; without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R and Space = the enhanced mode's fast forward by default, or the keys chosen in the launcher's options, and any gamepad: its D-pad or left stick moves, its right face button is A, the bottom one B, Start, Back = Select, the shoulders L and R and the right stick's click the fast forward, unless chosen otherwise; Esc asks whether to quit; in a build with the debug-mode feature, F10 turns a debugging mode on and off: the roaming enemies are intangible, to walk through them without battles, and the protagonist's attacks beat what they hit); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --slots sets the save slots (4 by default, 1 for the original's single save): slot 1 is that .sav and slot n the same name with .n before the extension, each a save an emulator can load; --version prints the port's version; --translation shows the messages of a PO file; --touch shows the on-screen pad for touch screens, as Android always does (with SDL_MOUSE_TOUCH_EVENTS=1 the mouse plays the fingers); --export-template writes the PO template of the given tables (title, name-entry, pause-menu, dialogue, battle, battle-text, battle-menu, battle-label, item, name, part, system, zoid-guide, character-guide), and the port's own messages (port), by default the title, the name entry, dialogue 30-41 and the port's messages";
+const USAGE: &str = "usage: launcher [<rom-path> [string-id]] [--version] [--room] [--dump <frame.ppm>] [--save <file.sav>] [--slots <n>] [--translation <file.po>] [--touch] [--export-template <file.pot> [table[:first-last]...]]\n  without a ROM the launcher shows its own screen to choose the ROM, a translation and the options (keys, gamepad buttons, window size, fullscreen, filter, volume), remembered in the user's settings folder, which the game given a ROM here plays with too; without a string id the launcher boots the game (arrows move, X = A, Z = B, Return = Start, Backspace = Select, A = L, S = R, Space = the enhanced mode's fast forward and M = mute (a press turns the sound off or on again) by default, or the keys chosen in the launcher's options, and any gamepad: its D-pad or left stick moves, its right face button is A, the bottom one B, Start, Back = Select, the shoulders L and R and the right stick's click the fast forward, unless chosen otherwise; Esc asks whether to quit; in a build with the debug-mode feature, F10 turns a debugging mode on and off: the roaming enemies are intangible, to walk through them without battles, and the protagonist's attacks beat what they hit); --room skips to the first room; --save keeps the save in that file instead of next to the ROM with the extension .sav, the way emulators do; --slots sets the save slots (4 by default, 1 for the original's single save): slot 1 is that .sav and slot n the same name with .n before the extension, each a save an emulator can load; --version prints the port's version; --translation shows the messages of a PO file; --touch shows the on-screen pad for touch screens, as Android always does (with SDL_MOUSE_TOUCH_EVENTS=1 the mouse plays the fingers); --export-template writes the PO template of the given tables (title, name-entry, pause-menu, dialogue, battle, battle-text, battle-menu, battle-label, item, name, part, system, zoid-guide, character-guide), and the port's own messages (port), by default the title, the name entry, dialogue 30-41 and the port's messages";
 const DEFAULT_TEMPLATE_SCOPES: [&str; 4] = ["title", "name-entry", "dialogue:30-41", "port"];
 const WINDOW_SCALE: u32 = 3;
 const FIRST_ROOM_MAP: usize = extraction::saga::FIRST_ROOM_MAP;
@@ -388,6 +389,7 @@ fn play(
         display
     };
     let mut fast = fast::FastForward::default();
+    let mut mute = mute::Mute::default();
     display.set_touch_fast_forward(settings.mode.enhanced);
     display.set_touch_pad(touch)?;
     let volume = i32::from(settings.volume);
@@ -439,7 +441,8 @@ fn play(
             PlayMode::Classic => 1,
             PlayMode::Enhanced(enhancements) => u32::from(enhancements.fast_forward),
         };
-        let input = fast.take(display.input(), speed, quitting.is_some());
+        let input = mute.take(display.input());
+        let input = fast.take(input, speed, quitting.is_some());
         if let Some(prompt) = &mut quitting {
             match prompt.update(input) {
                 Some(true) => return Ok(()),
@@ -460,11 +463,12 @@ fn play(
             if let Some(audio) = &mut audio
                 && audio.queued_pairs() < SAMPLES_PER_FRAME * AUDIO_QUEUE_FRAMES
             {
-                queue_audio(audio, game.audio(), volume)?;
+                queue_audio(audio, game.audio(), mute.volume(volume))?;
             }
         }
         game.draw(&mut frame);
-        fast.draw(&mut frame, &metrics);
+        let taken = mute.draw(&mut frame, &metrics);
+        fast.draw(&mut frame, &metrics, taken);
         if let Some(prompt) = quitting {
             prompt.draw(&mut frame, &metrics, &|key| {
                 game_core::port_text::port_text(game.extensions(), key)

@@ -43,14 +43,15 @@ impl FastForward {
     }
 
     /// Draws the mark while on: `>>` and the speed in the port's small
-    /// capitals, white over a black shadow.
-    pub fn draw(self, frame: &mut Frame, metrics: &TextMetrics) {
+    /// capitals, white over a black shadow, `taken` pixels left of its
+    /// place for the marks drawn at the right already.
+    pub fn draw(self, frame: &mut Frame, metrics: &TextMetrics, taken: usize) {
         if !self.on {
             return;
         }
         let text = format!(">>{}X", self.speed);
         let width = metrics.small_width(&text);
-        let x = SCREEN_WIDTH.saturating_sub(MARK_MARGIN + width + 1);
+        let x = SCREEN_WIDTH.saturating_sub(MARK_MARGIN + taken + width + 1);
         metrics.draw_small(frame, (x + 1, 1), &text, MARK_SHADOW);
         metrics.draw_small(frame, (x, 0), &text, MARK_INK);
     }
@@ -93,10 +94,10 @@ mod tests {
         let mut frame = Frame::new(240, 160, Rgb::default());
         let mut fast = FastForward::default();
         fast.take(Input::default(), 4, false);
-        fast.draw(&mut frame, &metrics);
+        fast.draw(&mut frame, &metrics, 0);
         assert_eq!(frame, Frame::new(240, 160, Rgb::default()));
         fast.take(held(), 4, false);
-        fast.draw(&mut frame, &metrics);
+        fast.draw(&mut frame, &metrics, 0);
         let lit = (200..240).any(|x| (0..12).any(|y| frame.pixel(x, y) == Some(MARK_INK)));
         assert!(lit);
     }

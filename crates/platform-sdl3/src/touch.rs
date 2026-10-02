@@ -355,7 +355,7 @@ fn label(button: Button) -> &'static str {
         Button::Start => "START",
         Button::Select => "SELECT",
         Button::FastForward => ">>",
-        Button::Up | Button::Down | Button::Left | Button::Right => "",
+        Button::Mute | Button::Up | Button::Down | Button::Left | Button::Right => "",
     }
 }
 

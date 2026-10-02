@@ -33,7 +33,7 @@ const AUDIO_CHANNELS: i32 = 2;
 const BYTES_PER_PAIR: usize = 4;
 const BYTES_PER_PIXEL: usize = 3;
 /// The keys the buttons have unless the player chose others.
-const DEFAULT_KEYS: [(Scancode, Button); 11] = [
+const DEFAULT_KEYS: [(Scancode, Button); 12] = [
     (Scancode::Up, Button::Up),
     (Scancode::Down, Button::Down),
     (Scancode::Left, Button::Left),
@@ -45,6 +45,7 @@ const DEFAULT_KEYS: [(Scancode, Button); 11] = [
     (Scancode::A, Button::L),
     (Scancode::S, Button::R),
     (Scancode::Space, Button::FastForward),
+    (Scancode::M, Button::Mute),
 ];
 
 /// How a frame is scaled up to the window.
