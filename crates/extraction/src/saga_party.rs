@@ -47,6 +47,9 @@ const DEVELOPMENT_ZOID: usize = 0x2C;
 const DEVELOPMENT_ITEMS: usize = 0x2D;
 /// The Zi-data items' counts in the game-state block.
 const ZI_ITEMS: usize = 0x330C;
+/// The kinds of Zi-data item (Zoid cores) the counts cover, the ones the
+/// lists read (`0x0804E308`: ids 0–63).
+pub const ZI_ITEM_KINDS: usize = 64;
 /// The lists of Zoids a development's special kinds take, from `0xFA`.
 const SPECIAL_KINDS: usize = 0x0075_C018;
 const SPECIAL_KINDS_FROM: u8 = 0xFA;
@@ -724,6 +727,17 @@ pub fn zi_data_count(state: &[u8]) -> usize {
     state
         .get(ZI_DATA..ZI_DATA + ZI_DATA_COUNT)
         .map_or(0, |bytes| bytes.iter().filter(|&&byte| byte != 0).count())
+}
+
+/// How many kinds of Zi-data item (Zoid cores) the party holds at least
+/// one of (the counts at `+0x330C`).
+#[must_use]
+pub fn zi_item_kinds(state: &[u8]) -> usize {
+    state
+        .get(ZI_ITEMS..ZI_ITEMS + ZI_ITEM_KINDS)
+        .map_or(0, |counts| {
+            counts.iter().filter(|&&count| count != 0).count()
+        })
 }
 
 /// The units the party has (`+0x3304`).
@@ -2112,5 +2126,17 @@ mod tests {
         assert_eq!((unit.zoid, unit.hp), (5, (50, 50)));
         assert_eq!(half(&state, base + 2), IN_USE);
         assert_eq!((state[UNIT_COUNT], state[ZI_ITEMS + 7]), (1, 1));
+    }
+
+    #[test]
+    fn the_core_kinds_count_those_held() {
+        let mut state = state();
+        assert_eq!(zi_item_kinds(&state), 0);
+        state[ZI_ITEMS] = 3;
+        state[ZI_ITEMS + 20] = 1;
+        state[ZI_ITEMS + ZI_ITEM_KINDS - 1] = 99;
+        state[ZI_ITEMS + ZI_ITEM_KINDS] = 9;
+        assert_eq!(zi_item_kinds(&state), 3);
+        assert_eq!(zi_item_kinds(&[]), 0);
     }
 }

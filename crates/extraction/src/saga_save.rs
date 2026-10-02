@@ -158,6 +158,20 @@ pub fn meet_characters(rom: &[u8], state: &mut [u8], list: usize) -> Option<()> 
     Some(())
 }
 
+/// The characters the first `lists` lists put in the character guide,
+/// each once, in the character table's order; `None` when a list cannot be
+/// read.
+#[must_use]
+pub fn listed_characters(rom: &[u8], lists: usize) -> Option<Vec<u8>> {
+    let mut characters = Vec::new();
+    for list in 0..lists {
+        characters.extend(character_list(rom, list)?);
+    }
+    characters.sort_unstable();
+    characters.dedup();
+    Some(characters)
+}
+
 fn character_list(rom: &[u8], list: usize) -> Option<Vec<u8>> {
     let at = CHARACTER_LISTS + list * 4;
     let pointer = rom.get(at..at + 4)?;
@@ -252,5 +266,20 @@ mod tests {
         assert_eq!(state[CHARACTER_TABLE + 0x57 * 4 + 2], 0);
         assert_eq!(&state[0x3600..0x3602], &[EMPTY, EMPTY]);
         assert_eq!(&state[0x349C..0x34A2], &[EMPTY; 6]);
+    }
+
+    #[test]
+    fn the_lists_name_each_character_once() {
+        let mut rom = synthetic_rom();
+        put(
+            &mut rom,
+            CHARACTER_LISTS + 4,
+            &[ROM_BASE + 0x0066_C010, ROM_BASE + 0x0066_C020],
+        );
+        rom[0x0066_C010..0x0066_C014].copy_from_slice(&[5, 2, 9, LIST_END]);
+        rom[0x0066_C020] = LIST_END;
+        assert_eq!(listed_characters(&rom, 3), Some(vec![1, 2, 5, 9]));
+        assert_eq!(listed_characters(&rom, 1), Some(vec![1, 2]));
+        assert_eq!(listed_characters(&rom, 4), None, "list 3 has no pointer");
     }
 }

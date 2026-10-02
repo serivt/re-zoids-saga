@@ -264,6 +264,65 @@ pub fn spoils_record(
     rom.get(start..start + ENEMY_RECORD_LEN)?.try_into().ok()
 }
 
+/// The bit of a map record's id that keeps its objects' states, which the
+/// rebuild draws the map Zoids' formations for (`0x08006E4C`).
+const PERSISTENT: u16 = 0x8000;
+/// The behavior of a map Zoid among a map's objects.
+const MAP_ZOID: u16 = 1;
+const RARITY_CLASSES: u8 = 3;
+
+/// The Zi data the roaming enemies can leave, each once in order: for
+/// every map Zoid of the maps that keep their objects, the formations its
+/// column may stand for in the map's area that a rarity class can pick
+/// (`0x080328FC`), and of each the Zi data of its leader's and its
+/// members' records (`0x0803666C`).
+#[must_use]
+pub fn roaming_zi_data(rom: &[u8]) -> Vec<u8> {
+    let mut found = Vec::new();
+    for map in 0..crate::saga::MAP_COUNT {
+        let Ok(record) = crate::saga::map_record(rom, map) else {
+            continue;
+        };
+        if record.id & PERSISTENT == 0 {
+            continue;
+        }
+        let Ok(objects) = crate::saga::map_objects(rom, map) else {
+            continue;
+        };
+        let area = record.id.to_le_bytes()[0];
+        for object in objects.iter().skip(1) {
+            if object.behavior != MAP_ZOID {
+                continue;
+            }
+            let column = object.sprite.to_le_bytes()[0];
+            let Some(candidates) = formations(rom, area, column) else {
+                continue;
+            };
+            for class in 0..RARITY_CLASSES {
+                for index in of_class(&candidates, class) {
+                    found.extend(formation_zi_data(rom, &candidates[index]));
+                }
+            }
+        }
+    }
+    found.sort_unstable();
+    found.dedup();
+    found
+}
+
+/// The Zi data the units of `formation` hold: its leader's, and its
+/// members' with a record.
+fn formation_zi_data(rom: &[u8], formation: &Formation) -> Vec<u8> {
+    let members = (0..SLOTS)
+        .filter(|member| formation.get(MEMBERS + member * MEMBER_LEN + 1) != Some(&NO_RECORD));
+    std::iter::once(None)
+        .chain(members.map(Some))
+        .filter_map(|member| spoils_record(rom, formation, member))
+        .map(|record| record[0])
+        .filter(|&zoid| zoid != NO_RECORD)
+        .collect()
+}
+
 /// The sprite a map Zoid standing for `formation` shows: the first byte of
 /// its leader's record (`0x080328FC`); `0xFF` when it cannot be read.
 #[must_use]
@@ -342,6 +401,26 @@ mod tests {
         rom[table + MEMBERS + 1] = 3;
         rom[LEADER_RECORDS + 2 * ENEMY_RECORD_LEN] = 0x27;
         rom
+    }
+
+    #[test]
+    fn the_roaming_zi_data_are_those_the_map_zoids_formations_hold() {
+        let mut rom = rom();
+        let table = 0x0070_0000;
+        rom[table + MEMBERS + 1] = 3;
+        rom[MEMBER_RECORDS + 3 * ENEMY_RECORD_LEN] = 0x31;
+        rom[table + 7 * FORMATION_LEN + 1] = 4;
+        rom[table + 7 * FORMATION_LEN + RARITY] = RARITY_CLASSES;
+        rom[LEADER_RECORDS + 4 * ENEMY_RECORD_LEN] = 0x55;
+        crate::saga::put_test_map(&mut rom, 4, 0x8002, 0x0060_0000, &[(1, MAP_ZOID, 0)]);
+        crate::saga::put_test_map(&mut rom, 6, 2, 0x0060_1000, &[(1, MAP_ZOID, 0)]);
+        assert_eq!(
+            roaming_zi_data(&rom),
+            vec![0x27, 0x31],
+            "no class picks formation 7; map 6 keeps no objects"
+        );
+        rom[table + 7 * FORMATION_LEN + RARITY] = 2;
+        assert_eq!(roaming_zi_data(&rom), vec![0x27, 0x31, 0x55]);
     }
 
     #[test]

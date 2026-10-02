@@ -1585,6 +1585,46 @@ pub fn treasure(rom: &[u8], chest: usize) -> Option<Treasure> {
     })
 }
 
+/// The chests the maps hold, by number, each once: the objects of
+/// behavior 4 in every map's list (a few maps share their chests).
+#[must_use]
+pub fn map_chests(rom: &[u8]) -> Vec<u16> {
+    let mut chests: Vec<u16> = (0..MAP_COUNT)
+        .filter_map(|map| map_objects(rom, map).ok())
+        .flatten()
+        .filter_map(|object| object.chest())
+        .collect();
+    chests.sort_unstable();
+    chests.dedup();
+    chests
+}
+
+/// Writes map `map` into `rom` for the tests: its record's id, and its
+/// objects (sprite, behavior and script reference each) in a list at ROM
+/// offset `list`, after the player's entry.
+#[cfg(test)]
+pub(crate) fn put_test_map(
+    rom: &mut [u8],
+    map: usize,
+    id: u16,
+    list: usize,
+    objects: &[(u16, u16, u32)],
+) {
+    let record = MAP_TABLE_OFFSET + map * MAP_RECORD_LEN;
+    rom[record + 2..record + 4].copy_from_slice(&id.to_le_bytes());
+    let entry = OBJECT_TABLE_OFFSET + map * OBJECT_TABLE_ENTRY_LEN;
+    let count = u16::try_from(objects.len() + 1).unwrap_or(u16::MAX);
+    rom[entry..entry + 2].copy_from_slice(&count.to_le_bytes());
+    let pointer = ROM_BASE + u32::try_from(list).unwrap_or(0);
+    rom[entry + 4..entry + 8].copy_from_slice(&pointer.to_le_bytes());
+    for (index, &(sprite, behavior, script)) in objects.iter().enumerate() {
+        let at = list + (index + 1) * OBJECT_LEN;
+        rom[at..at + 2].copy_from_slice(&sprite.to_le_bytes());
+        rom[at + 8..at + 12].copy_from_slice(&script.to_le_bytes());
+        rom[at + 18..at + 20].copy_from_slice(&behavior.to_le_bytes());
+    }
+}
+
 /// What an object runs when the player speaks to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjectScript {
@@ -1943,6 +1983,29 @@ mod tests {
             map_objects(&rom, 5),
             Err(MapError::TooShort { .. })
         ));
+    }
+
+    #[test]
+    fn the_maps_chests_count_once_each() {
+        let mut rom = vec![0; 0x0040_0000];
+        put_test_map(
+            &mut rom,
+            4,
+            1,
+            0x0038_0000,
+            &[(0, CHEST_BEHAVIOR, 0x8000_0007), (0, 2, 0x8000_0003)],
+        );
+        put_test_map(
+            &mut rom,
+            9,
+            2,
+            0x0038_1000,
+            &[
+                (0, CHEST_BEHAVIOR, 0x8000_0002),
+                (0, CHEST_BEHAVIOR, 0x8000_0007),
+            ],
+        );
+        assert_eq!(map_chests(&rom), vec![2, 7]);
     }
 
     /// A ROM holding map record 4 and its two warps.
