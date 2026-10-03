@@ -23,29 +23,35 @@ use game_core::FAST_FORWARD_SPEEDS;
 use game_core::port_text::{
     LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_AUTO_TEXT, LAUNCHER_AUTOSAVE, LAUNCHER_BACK,
     LAUNCHER_BATTLE_ANIMATIONS, LAUNCHER_CHOOSE_TRANSLATION, LAUNCHER_CLASSIC,
-    LAUNCHER_CLASSIC_NOTE, LAUNCHER_COLOR_GBA, LAUNCHER_COLOR_GBA_SP, LAUNCHER_COLOR_ORIGINAL,
-    LAUNCHER_COLORS, LAUNCHER_CONTROLS_HELP, LAUNCHER_COPY_FAILED, LAUNCHER_DAMAGE_NUMBERS,
+    LAUNCHER_CLASSIC_NOTE, LAUNCHER_COLOR_DS, LAUNCHER_COLOR_GBA, LAUNCHER_COLOR_GBA_SP,
+    LAUNCHER_COLOR_GBA_SP_FRONTLIT, LAUNCHER_COLOR_MICRO, LAUNCHER_COLOR_ORIGINAL, LAUNCHER_COLORS,
+    LAUNCHER_CONTROLS_HELP, LAUNCHER_COPY_FAILED, LAUNCHER_CUSTOM, LAUNCHER_DAMAGE_NUMBERS,
     LAUNCHER_DEFAULT_KEYS, LAUNCHER_DISPLAY, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED,
     LAUNCHER_DOWNLOADED, LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS, LAUNCHER_ENHANCED,
     LAUNCHER_ENHANCED_NOTE, LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED,
     LAUNCHER_FAST_FORWARD, LAUNCHER_FILTER, LAUNCHER_FROM_FILE, LAUNCHER_FULLSCREEN,
     LAUNCHER_GAMEPAD, LAUNCHER_HELP, LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP, LAUNCHER_IMPORTED,
-    LAUNCHER_KEYBOARD, LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LCD, LAUNCHER_LEFT,
-    LAUNCHER_LICENSE, LAUNCHER_LOOKING_UP, LAUNCHER_MODE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM,
-    LAUNCHER_NO_TRANSLATION, LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON,
-    LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED,
-    LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_MODE, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM,
-    LAUNCHER_PICK_TOUCH_OPTIONS, LAUNCHER_PICK_TRANSLATION, LAUNCHER_PIXEL_ART, LAUNCHER_PLAY,
-    LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY,
-    LAUNCHER_RIGHT, LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE,
-    LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED,
-    LAUNCHER_SAVES, LAUNCHER_SAVES_HELP, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY,
+    LAUNCHER_KEYBOARD, LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LCD,
+    LAUNCHER_LCD_FINE, LAUNCHER_LCD_SOFT, LAUNCHER_LEFT, LAUNCHER_LICENSE, LAUNCHER_LOOKING_UP,
+    LAUNCHER_MODE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM, LAUNCHER_NO_TRANSLATION,
+    LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON, LAUNCHER_OPENS_PAGE,
+    LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED, LAUNCHER_PICK_ABOUT,
+    LAUNCHER_PICK_MODE, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM, LAUNCHER_PICK_TOUCH_OPTIONS,
+    LAUNCHER_PICK_TRANSLATION, LAUNCHER_PIXEL_ART, LAUNCHER_PLAY, LAUNCHER_PRESET,
+    LAUNCHER_PRESET_DS, LAUNCHER_PRESET_GBA, LAUNCHER_PRESET_GBA_SP,
+    LAUNCHER_PRESET_GBA_SP_FRONTLIT, LAUNCHER_PRESET_MICRO, LAUNCHER_PRESET_MODERN,
+    LAUNCHER_PRESET_PLAYER, LAUNCHER_PRESET_SMOOTH_PIXEL_ART, LAUNCHER_PRESS_KEY,
+    LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT,
+    LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER,
+    LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SAVES,
+    LAUNCHER_SAVES_HELP, LAUNCHER_SCANLINES, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY,
     LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP,
     LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY,
-    LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRAIL, LAUNCHER_TRANSLATION,
-    LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE,
-    LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_UPDATE, LAUNCHER_UPDATE_HELP,
-    LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
+    LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRAIL, LAUNCHER_TRAIL_FADE,
+    LAUNCHER_TRAIL_MIX, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ,
+    LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_UPDATE,
+    LAUNCHER_UPDATE_HELP, LAUNCHER_UPSCALER, LAUNCHER_VERSION, LAUNCHER_VOLUME,
+    LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
 };
 use game_core::{Enhancement, TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -53,7 +59,7 @@ use platform_sdl3::{
     FileChoice, Filter, KeyMap, Sdl3Display, default_keys, default_pad_buttons, key_name, open_url,
     pad_button_label, pad_button_name,
 };
-use screen_filters::ColorProfile;
+use screen_filters::{ColorProfile, TrailMode, Upscaler};
 
 use crate::download::{Answer, Download, Language};
 use crate::quit::QuitPrompt;
@@ -196,7 +202,10 @@ enum Setting {
     Fullscreen,
     /// Opens the display's own screen.
     Display,
+    /// The handheld whose screen the display's options imitate together.
+    Preset,
     Filter,
+    Upscaler,
     Colors,
     Trail,
     Volume,
@@ -232,8 +241,10 @@ const ANDROID_SETTINGS: [Setting; 7] = [
 
 /// The display's screen: how the picture is scaled, its colors and its
 /// trail.
-const DISPLAY_SETTINGS: [Setting; 4] = [
+const DISPLAY_SETTINGS: [Setting; 6] = [
+    Setting::Preset,
     Setting::Filter,
+    Setting::Upscaler,
     Setting::Colors,
     Setting::Trail,
     Setting::Back,
@@ -388,8 +399,143 @@ enum Step {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Picture {
     filter: Filter,
+    upscaler: Upscaler,
     color: ColorProfile,
-    trail: bool,
+    trail: TrailMode,
+}
+
+impl Picture {
+    /// The handheld whose screen this picture imitates, if it is one of
+    /// the presets exactly.
+    fn preset(self) -> Option<Preset> {
+        Preset::ALL
+            .into_iter()
+            .find(|preset| preset.picture() == self)
+    }
+}
+
+/// The display's options set together: a screen the game was played on,
+/// its grid, its colors and the trail of its panel, or a way of showing
+/// it today.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Preset {
+    /// The original Game Boy Advance, unlit: a marked grid, its colors, a
+    /// fading trail.
+    Gba,
+    /// The first Game Boy Advance SP, front-lit (AGS-001).
+    GbaSpFrontlit,
+    /// The later Game Boy Advance SP, backlit (AGS-101).
+    GbaSp,
+    /// The Game Boy Micro: a fine grid, vivid colors.
+    Micro,
+    /// The Nintendo DS's slot: no grid, bright colors.
+    Ds,
+    /// The Game Boy Player, on a television: scan lines, the original
+    /// colors.
+    Player,
+    /// Today's screen: the window filled, sharp, the original colors.
+    Modern,
+    /// Today's screen with Scale3x's rounded edges.
+    SmoothPixelArt,
+}
+
+impl Preset {
+    const ALL: [Self; 8] = [
+        Self::Gba,
+        Self::GbaSpFrontlit,
+        Self::GbaSp,
+        Self::Micro,
+        Self::Ds,
+        Self::Player,
+        Self::Modern,
+        Self::SmoothPixelArt,
+    ];
+
+    /// The display's options the preset sets.
+    const fn picture(self) -> Picture {
+        let (filter, upscaler, color, trail) = match self {
+            Self::Gba => (
+                Filter::Lcd,
+                Upscaler::None,
+                ColorProfile::Gba,
+                TrailMode::Fade,
+            ),
+            Self::GbaSpFrontlit => (
+                Filter::LcdSoft,
+                Upscaler::None,
+                ColorProfile::GbaSpFrontlit,
+                TrailMode::Mix,
+            ),
+            Self::GbaSp => (
+                Filter::LcdSoft,
+                Upscaler::None,
+                ColorProfile::GbaSp,
+                TrailMode::Mix,
+            ),
+            Self::Micro => (
+                Filter::LcdFine,
+                Upscaler::None,
+                ColorProfile::Micro,
+                TrailMode::Off,
+            ),
+            Self::Ds => (
+                Filter::PixelArt,
+                Upscaler::None,
+                ColorProfile::Ds,
+                TrailMode::Off,
+            ),
+            Self::Player => (
+                Filter::Scanlines,
+                Upscaler::None,
+                ColorProfile::Original,
+                TrailMode::Off,
+            ),
+            Self::Modern => (
+                Filter::PixelArt,
+                Upscaler::None,
+                ColorProfile::Original,
+                TrailMode::Off,
+            ),
+            Self::SmoothPixelArt => (
+                Filter::PixelArt,
+                Upscaler::Scale3x,
+                ColorProfile::Original,
+                TrailMode::Off,
+            ),
+        };
+        Picture {
+            filter,
+            upscaler,
+            color,
+            trail,
+        }
+    }
+
+    /// The preset's name.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Gba => LAUNCHER_PRESET_GBA,
+            Self::GbaSpFrontlit => LAUNCHER_PRESET_GBA_SP_FRONTLIT,
+            Self::GbaSp => LAUNCHER_PRESET_GBA_SP,
+            Self::Micro => LAUNCHER_PRESET_MICRO,
+            Self::Ds => LAUNCHER_PRESET_DS,
+            Self::Player => LAUNCHER_PRESET_PLAYER,
+            Self::Modern => LAUNCHER_PRESET_MODERN,
+            Self::SmoothPixelArt => LAUNCHER_PRESET_SMOOTH_PIXEL_ART,
+        }
+    }
+
+    /// The preset after `current` (or before it, when not `forward`),
+    /// round; from no preset, the first or the last.
+    fn step(current: Option<Self>, forward: bool) -> Self {
+        let count = Self::ALL.len();
+        match current.and_then(|preset| Self::ALL.iter().position(|&shown| shown == preset)) {
+            Some(at) if forward => Self::ALL[(at + 1) % count],
+            Some(at) => Self::ALL[(at + count - 1) % count],
+            None if forward => Self::ALL[0],
+            None => Self::ALL[count - 1],
+        }
+    }
 }
 
 /// The launcher's screen.
@@ -474,6 +620,7 @@ impl Front {
             fullscreen: settings.fullscreen,
             picture: Picture {
                 filter: settings.filter,
+                upscaler: settings.upscaler,
                 color: settings.color,
                 trail: settings.trail,
             },
@@ -525,6 +672,7 @@ impl Front {
             filter: self.picture.filter,
             color: self.picture.color,
             trail: self.picture.trail,
+            upscaler: self.picture.upscaler,
             volume: self.volume,
             touch_size: self.touch_size,
             touch_opacity: self.touch_opacity,
@@ -1161,13 +1309,21 @@ impl Front {
             Setting::Window if more && self.scale < *SCALES.end() => self.scale += 1,
             Setting::Fullscreen if less || more || chosen => self.fullscreen = !self.fullscreen,
             Setting::Display if chosen => self.screen = Screen::Display(0),
+            Setting::Preset if less || more || chosen => {
+                self.picture = Preset::step(self.picture.preset(), !less).picture();
+            }
             Setting::Filter if less || more || chosen => {
                 self.picture.filter = self.picture.filter.step(!less);
             }
             Setting::Colors if less || more || chosen => {
                 self.picture.color = self.picture.color.step(!less);
             }
-            Setting::Trail if less || more || chosen => self.picture.trail = !self.picture.trail,
+            Setting::Trail if less || more || chosen => {
+                self.picture.trail = self.picture.trail.step(!less);
+            }
+            Setting::Upscaler if less || more || chosen => {
+                self.picture.upscaler = self.picture.upscaler.step(!less);
+            }
             Setting::Volume if less => self.volume = self.volume.saturating_sub(VOLUME_STEP),
             Setting::Volume if more => {
                 self.volume = self.volume.saturating_add(VOLUME_STEP).min(FULL_VOLUME);
@@ -1745,14 +1901,14 @@ impl Front {
                 None => (self.text(LAUNCHER_NO_GAMEPAD), DIM),
             },
             Setting::Window => (format!("x{}", self.scale), TEXT),
-            Setting::Trail => {
-                let key = if self.picture.trail {
-                    LAUNCHER_ON
-                } else {
-                    LAUNCHER_OFF
-                };
-                (self.text(key), TEXT)
-            }
+            Setting::Trail => (
+                self.text(match self.picture.trail {
+                    TrailMode::Off => LAUNCHER_OFF,
+                    TrailMode::Mix => LAUNCHER_TRAIL_MIX,
+                    TrailMode::Fade => LAUNCHER_TRAIL_FADE,
+                }),
+                TEXT,
+            ),
             Setting::Fullscreen => {
                 let key = if self.fullscreen {
                     LAUNCHER_ON
@@ -1762,11 +1918,23 @@ impl Front {
                 (self.text(key), TEXT)
             }
             Setting::Display => (
-                format!("{}, {}", self.filter_name(), self.color_name()),
+                match self.picture.preset() {
+                    Some(preset) => self.preset_name(Some(preset)),
+                    None => format!("{}, {}", self.filter_name(), self.color_name()),
+                },
                 DIM,
             ),
+            Setting::Preset => (self.preset_name(self.picture.preset()), TEXT),
             Setting::Filter => (self.filter_name(), TEXT),
             Setting::Colors => (self.color_name(), TEXT),
+            Setting::Upscaler => (
+                match self.picture.upscaler {
+                    Upscaler::None => self.text(LAUNCHER_OFF),
+                    Upscaler::Scale2x => "Scale2x".to_owned(),
+                    Upscaler::Scale3x => "Scale3x".to_owned(),
+                },
+                TEXT,
+            ),
             Setting::Volume => (format!("{}%", self.volume), TEXT),
             Setting::TouchSize => (format!("{}%", self.touch_size), TEXT),
             Setting::TouchOpacity => (format!("{}%", self.touch_opacity), TEXT),
@@ -1775,11 +1943,18 @@ impl Front {
         Some(value)
     }
 
+    fn preset_name(&self, preset: Option<Preset>) -> String {
+        self.text(preset.map_or(LAUNCHER_CUSTOM, Preset::name))
+    }
+
     fn color_name(&self) -> String {
         self.text(match self.picture.color {
             ColorProfile::Original => LAUNCHER_COLOR_ORIGINAL,
             ColorProfile::Gba => LAUNCHER_COLOR_GBA,
+            ColorProfile::GbaSpFrontlit => LAUNCHER_COLOR_GBA_SP_FRONTLIT,
             ColorProfile::GbaSp => LAUNCHER_COLOR_GBA_SP,
+            ColorProfile::Micro => LAUNCHER_COLOR_MICRO,
+            ColorProfile::Ds => LAUNCHER_COLOR_DS,
         })
     }
 
@@ -1789,6 +1964,9 @@ impl Front {
             Filter::PixelArt => LAUNCHER_PIXEL_ART,
             Filter::Smooth => LAUNCHER_SMOOTH,
             Filter::Lcd => LAUNCHER_LCD,
+            Filter::LcdSoft => LAUNCHER_LCD_SOFT,
+            Filter::LcdFine => LAUNCHER_LCD_FINE,
+            Filter::Scanlines => LAUNCHER_SCANLINES,
         })
     }
 
@@ -1994,9 +2172,11 @@ impl Setting {
             Self::Window => LAUNCHER_WINDOW,
             Self::Fullscreen => LAUNCHER_FULLSCREEN,
             Self::Display => LAUNCHER_DISPLAY,
+            Self::Preset => LAUNCHER_PRESET,
             Self::Filter => LAUNCHER_FILTER,
             Self::Colors => LAUNCHER_COLORS,
             Self::Trail => LAUNCHER_TRAIL,
+            Self::Upscaler => LAUNCHER_UPSCALER,
             Self::Volume => LAUNCHER_VOLUME,
             Self::TouchSize => LAUNCHER_TOUCH_SIZE,
             Self::TouchOpacity => LAUNCHER_TOUCH_OPACITY,
@@ -2602,6 +2782,7 @@ mod tests {
         front.update_display(display(Setting::Filter), press(Button::Right));
         front.update_display(display(Setting::Colors), press(Button::Left));
         front.update_display(display(Setting::Trail), press(Button::A));
+        front.update_display(display(Setting::Upscaler), press(Button::Left));
         front.update_display(display(Setting::Back), press(Button::A));
         assert_eq!(front.screen, display_option());
         front.update_options(line_of(Setting::Fullscreen), press(Button::Left));
@@ -2613,10 +2794,57 @@ mod tests {
             (settings.filter, settings.fullscreen, settings.volume),
             (Filter::Lcd, true, 80)
         );
-        assert_eq!(settings.color, ColorProfile::GbaSp);
-        assert!(settings.trail);
+        assert_eq!(settings.color, ColorProfile::Ds);
+        assert_eq!(settings.trail, TrailMode::Mix);
+        assert_eq!(settings.upscaler, Upscaler::Scale3x);
         front.update_options(volume, press(Button::B));
         assert_eq!(front.screen, Screen::Main);
+    }
+
+    #[test]
+    fn a_preset_sets_the_display_and_a_change_makes_it_custom() {
+        let mut front = Front::new(&Settings::default());
+        let line = |setting| {
+            DISPLAY_SETTINGS
+                .iter()
+                .position(|shown| *shown == setting)
+                .expect("listed")
+        };
+        assert_eq!(front.picture.preset(), None);
+        front.update_display(line(Setting::Preset), press(Button::Right));
+        assert_eq!(front.picture.preset(), Some(Preset::Gba));
+        let settings = front.settings();
+        assert_eq!(
+            (
+                settings.filter,
+                settings.color,
+                settings.trail,
+                settings.upscaler
+            ),
+            (
+                Filter::Lcd,
+                ColorProfile::Gba,
+                TrailMode::Fade,
+                Upscaler::None
+            )
+        );
+        front.update_display(line(Setting::Preset), press(Button::Right));
+        assert_eq!(front.picture.preset(), Some(Preset::GbaSpFrontlit));
+        front.update_display(line(Setting::Preset), press(Button::Left));
+        front.update_display(line(Setting::Preset), press(Button::Left));
+        assert_eq!(
+            front.picture.preset(),
+            Some(Preset::SmoothPixelArt),
+            "round"
+        );
+        front.update_display(line(Setting::Trail), press(Button::A));
+        assert_eq!(front.picture.preset(), None);
+        front.update_display(line(Setting::Preset), press(Button::Left));
+        assert_eq!(front.picture.preset(), Some(Preset::SmoothPixelArt));
+        let pictures: Vec<Picture> = Preset::ALL.iter().map(|preset| preset.picture()).collect();
+        for (index, picture) in pictures.iter().enumerate() {
+            assert!(!pictures[..index].contains(picture), "each preset differs");
+        }
     }
 
     #[test]

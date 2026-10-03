@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use game_core::{Enhancements, FAST_FORWARD_SPEEDS, PlayMode};
 use platform::Button;
 use platform_sdl3::Filter;
-use screen_filters::ColorProfile;
+use screen_filters::{ColorProfile, TrailMode, Upscaler};
 
 const ROM_KEY: &str = "rom";
 const TRANSLATION_KEY: &str = "translation";
@@ -44,8 +44,13 @@ const SHARP: &str = "sharp";
 const PIXEL_ART: &str = "pixel-art";
 const SMOOTH: &str = "smooth";
 const LCD: &str = "lcd";
-/// The LCD trail, `1` on or `0` off.
+const LCD_SOFT: &str = "lcd-soft";
+const LCD_FINE: &str = "lcd-fine";
+const SCANLINES: &str = "scanlines";
+/// The LCD trail: `0` off, `1` the mix or `fade`.
 const TRAIL_KEY: &str = "trail";
+/// The pixel-art magnification: `none`, `scale2x` or `scale3x`.
+const UPSCALE_KEY: &str = "upscale";
 /// The colors the game is shown with: `original`, `gba` or `gba-sp`.
 const COLOR_KEY: &str = "color";
 /// The window's size in multiples of the screen, its default and the
@@ -89,9 +94,11 @@ pub struct Settings {
     pub filter: Filter,
     /// The colors the game is shown with.
     pub color: ColorProfile,
-    /// Whether each picture keeps a trail of the one before, as the
-    /// handheld's slow panel did.
-    pub trail: bool,
+    /// The trail each picture keeps of the one before, as the handheld's
+    /// slow panel did.
+    pub trail: TrailMode,
+    /// How the picture is magnified before it is fitted to the window.
+    pub upscaler: Upscaler,
     /// The sound's volume, in percent.
     pub volume: u8,
     /// The on-screen pad's size, in percent of its usual one.
@@ -136,7 +143,8 @@ impl Default for Settings {
             fullscreen: false,
             filter: Filter::Sharp,
             color: ColorProfile::Original,
-            trail: false,
+            trail: TrailMode::Off,
+            upscaler: Upscaler::None,
             volume: FULL_VOLUME,
             touch_size: USUAL_TOUCH,
             touch_opacity: USUAL_TOUCH,
@@ -184,9 +192,13 @@ impl Settings {
                 FILTER_KEY if value == SMOOTH => settings.filter = Filter::Smooth,
                 FILTER_KEY if value == PIXEL_ART => settings.filter = Filter::PixelArt,
                 FILTER_KEY if value == LCD => settings.filter = Filter::Lcd,
+                FILTER_KEY if value == LCD_SOFT => settings.filter = Filter::LcdSoft,
+                FILTER_KEY if value == LCD_FINE => settings.filter = Filter::LcdFine,
+                FILTER_KEY if value == SCANLINES => settings.filter = Filter::Scanlines,
                 FILTER_KEY => settings.filter = Filter::Sharp,
                 COLOR_KEY => settings.color = ColorProfile::from_key(value).unwrap_or_default(),
-                TRAIL_KEY => settings.trail = value == "1",
+                TRAIL_KEY => settings.trail = TrailMode::from_key(value).unwrap_or_default(),
+                UPSCALE_KEY => settings.upscaler = Upscaler::from_key(value).unwrap_or_default(),
                 VOLUME_KEY => {
                     if let Ok(volume) = value.parse::<u8>() {
                         settings.volume = volume.min(FULL_VOLUME);
@@ -249,6 +261,9 @@ impl Settings {
             Filter::PixelArt => PIXEL_ART,
             Filter::Smooth => SMOOTH,
             Filter::Lcd => LCD,
+            Filter::LcdSoft => LCD_SOFT,
+            Filter::LcdFine => LCD_FINE,
+            Filter::Scanlines => SCANLINES,
         };
         let _ = writeln!(
             text,
@@ -256,9 +271,10 @@ impl Settings {
             self.scale,
             u8::from(self.fullscreen),
             self.color.key(),
-            u8::from(self.trail),
+            self.trail.key(),
             self.volume
         );
+        let _ = writeln!(text, "{UPSCALE_KEY}={}", self.upscaler.key());
         let _ = writeln!(
             text,
             "{TOUCH_SIZE_KEY}={}\n{TOUCH_OPACITY_KEY}={}",
@@ -322,9 +338,10 @@ mod tests {
             pad_buttons: vec![(Button::B, "a".to_owned())],
             scale: 4,
             fullscreen: true,
-            filter: Filter::Lcd,
-            color: ColorProfile::GbaSp,
-            trail: true,
+            filter: Filter::LcdSoft,
+            color: ColorProfile::GbaSpFrontlit,
+            trail: TrailMode::Fade,
+            upscaler: Upscaler::Scale3x,
             volume: 70,
             touch_size: 120,
             touch_opacity: 40,
@@ -359,7 +376,13 @@ mod tests {
             (DEFAULT_SCALE, FULL_VOLUME, Filter::Sharp, false)
         );
         assert_eq!(odd.color, ColorProfile::Original);
-        assert!(!odd.trail);
+        assert_eq!(odd.trail, TrailMode::Off);
+        assert_eq!(Settings::parse("trail=1\n").trail, TrailMode::Mix);
+        assert_eq!(
+            Settings::parse("filter=scanlines\n").filter,
+            Filter::Scanlines
+        );
+        assert_eq!(Settings::parse("upscale=hq9x\n").upscaler, Upscaler::None);
         assert_eq!(
             Settings::parse("filter=pixel-art\n").filter,
             Filter::PixelArt

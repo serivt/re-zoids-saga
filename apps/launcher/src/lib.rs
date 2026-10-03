@@ -414,7 +414,8 @@ fn play(
     };
     let mut fast = fast::FastForward::default();
     let mut mute = mute::Mute::default();
-    let mut filters = screen_filters::ScreenFilters::new(settings.color, settings.trail);
+    let mut filters =
+        screen_filters::ScreenFilters::new(settings.color, settings.trail, settings.upscaler);
     display.set_touch_fast_forward(settings.mode.enhanced);
     display.set_touch_pad(touch)?;
     let volume = i32::from(settings.volume);
@@ -504,7 +505,8 @@ fn play(
                 game_core::port_text::port_text(game.extensions(), key)
             });
         }
-        display.present(&frame)?;
+        let magnified = filters.magnify(&frame);
+        display.present(magnified.as_ref().unwrap_or(&frame))?;
     }
 }
 

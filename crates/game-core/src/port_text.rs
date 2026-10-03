@@ -310,6 +310,10 @@ pub const LAUNCHER_FULLSCREEN: &str = "port/launcher/fullscreen";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_DISPLAY: &str = "port/launcher/display";
 /// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PRESET: &str = "port/launcher/preset";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_CUSTOM: &str = "port/launcher/custom";
+/// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_FILTER: &str = "port/launcher/filter";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_SHARP: &str = "port/launcher/sharp";
@@ -329,6 +333,40 @@ pub const LAUNCHER_COLOR_GBA: &str = "port/launcher/color-gba";
 pub const LAUNCHER_COLOR_GBA_SP: &str = "port/launcher/color-gba-sp";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_TRAIL: &str = "port/launcher/trail";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_UPSCALER: &str = "port/launcher/upscaler";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_LCD_SOFT: &str = "port/launcher/lcd-soft";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_LCD_FINE: &str = "port/launcher/lcd-fine";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_SCANLINES: &str = "port/launcher/scanlines";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_COLOR_GBA_SP_FRONTLIT: &str = "port/launcher/color-gba-sp-frontlit";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_COLOR_MICRO: &str = "port/launcher/color-micro";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_COLOR_DS: &str = "port/launcher/color-ds";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_TRAIL_MIX: &str = "port/launcher/trail-mix";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_TRAIL_FADE: &str = "port/launcher/trail-fade";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PRESET_GBA: &str = "port/launcher/preset-gba";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PRESET_GBA_SP_FRONTLIT: &str = "port/launcher/preset-gba-sp-frontlit";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PRESET_GBA_SP: &str = "port/launcher/preset-gba-sp";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PRESET_MICRO: &str = "port/launcher/preset-micro";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PRESET_DS: &str = "port/launcher/preset-ds";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PRESET_PLAYER: &str = "port/launcher/preset-player";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PRESET_MODERN: &str = "port/launcher/preset-modern";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PRESET_SMOOTH_PIXEL_ART: &str = "port/launcher/preset-smooth-pixel-art";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_ON: &str = "port/launcher/on";
 /// See [`LAUNCHER_KEYBOARD`].
@@ -438,6 +476,16 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         "The line that opens the display's options (the filter, the colors, the LCD trail), and that screen's heading; their summary follows",
     ),
     launcher(
+        LAUNCHER_PRESET,
+        "Preset",
+        "The line that sets the display's options together as a handheld's screen showed the game (GBA or GBA SP, the names of the colors' line), or shows they are custom",
+    ),
+    launcher(
+        LAUNCHER_CUSTOM,
+        "custom",
+        "The preset line's value when the display's options are not one of the handhelds'",
+    ),
+    launcher(
         LAUNCHER_FILTER,
         "Filter",
         "The line of how the picture is scaled",
@@ -475,8 +523,93 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
     ),
     launcher(
         LAUNCHER_COLOR_GBA_SP,
-        "GBA SP",
-        "The colors of the Game Boy Advance SP's lit screen: a little paler",
+        "GBA SP AGS-101",
+        "The colors of the later Game Boy Advance SP's backlit screen: a little paler",
+    ),
+    launcher(
+        LAUNCHER_LCD_SOFT,
+        "LCD soft",
+        "The filter's value: the LCD grid with lighter lines, as on a lit screen",
+    ),
+    launcher(
+        LAUNCHER_LCD_FINE,
+        "LCD fine",
+        "The filter's value: the LCD grid with thin, light lines, as on a small dense screen",
+    ),
+    launcher(
+        LAUNCHER_SCANLINES,
+        "scan lines",
+        "The filter's value: whole multiples with a dark band under each row, as on a television",
+    ),
+    launcher(
+        LAUNCHER_COLOR_GBA_SP_FRONTLIT,
+        "GBA SP AGS-001",
+        "The colors of the first Game Boy Advance SP's front-lit screen: washed out and cool",
+    ),
+    launcher(
+        LAUNCHER_COLOR_MICRO,
+        "Micro",
+        "The colors of the Game Boy Micro's backlit screen: vivid",
+    ),
+    launcher(
+        LAUNCHER_COLOR_DS,
+        "DS",
+        "The colors of the Nintendo DS's screens, which play the cartridges in their slot: bright",
+    ),
+    launcher(
+        LAUNCHER_TRAIL_MIX,
+        "mix",
+        "The LCD trail's value: each picture mixed with the one before",
+    ),
+    launcher(
+        LAUNCHER_TRAIL_FADE,
+        "fade",
+        "The LCD trail's value: a trail that fades over two or three frames",
+    ),
+    launcher(
+        LAUNCHER_PRESET_GBA,
+        "GBA",
+        "The preset of the original Game Boy Advance's screen",
+    ),
+    launcher(
+        LAUNCHER_PRESET_GBA_SP_FRONTLIT,
+        "GBA SP AGS-001",
+        "The preset of the first, front-lit Game Boy Advance SP's screen",
+    ),
+    launcher(
+        LAUNCHER_PRESET_GBA_SP,
+        "GBA SP AGS-101",
+        "The preset of the later, backlit Game Boy Advance SP's screen",
+    ),
+    launcher(
+        LAUNCHER_PRESET_MICRO,
+        "Game Boy Micro",
+        "The preset of the Game Boy Micro's screen",
+    ),
+    launcher(
+        LAUNCHER_PRESET_DS,
+        "Nintendo DS",
+        "The preset of the Nintendo DS's screen, which plays the cartridges in its slot",
+    ),
+    launcher(
+        LAUNCHER_PRESET_PLAYER,
+        "Game Boy Player",
+        "The preset of the Game Boy Player, which showed the game on a television",
+    ),
+    launcher(
+        LAUNCHER_PRESET_MODERN,
+        "modern",
+        "The preset of today's screens: the window filled, sharp, the original colors",
+    ),
+    launcher(
+        LAUNCHER_PRESET_SMOOTH_PIXEL_ART,
+        "smooth pixel art",
+        "The preset of today's screens with the Scale3x upscaler's rounded edges",
+    ),
+    launcher(
+        LAUNCHER_UPSCALER,
+        "Upscaler",
+        "The line of the pixel-art magnification (Scale2x, Scale3x, or off), which rounds diagonal edges without blurring",
     ),
     launcher(
         LAUNCHER_TRAIL,

@@ -4,18 +4,22 @@
 //! picture's colors into what such a panel showed.
 //!
 //! Each profile is a model of a panel: the GBA's colors are 5 bits a
-//! channel, which the panel turns into light along a steeper curve than a
-//! modern display's (its gamma); the channels bleed into each other (a
-//! mix that keeps greys grey); the panel is dimmer than white and its
-//! black lets some light through. The light is then written back for a
-//! display of gamma 2.2. The picture's colors are the GBA's own (each
+//! channel, which the panel turns into light along its own curve (its
+//! gamma: steeper than a modern display's on the unlit panels, darkening
+//! the middle tones); the channels bleed into each other through a mix
+//! (rows summing to 1 keep greys grey, negative bleeds saturate); the
+//! panel's white is dimmer than a display's, its black lets some light
+//! through, and its light may lean warm or cool (a gain per channel). The
+//! light is then written back for a display of gamma 2.2. The picture's colors are the GBA's own (each
 //! channel `c × 8 + c / 4`), so a table of the 32,768 colors does the
 //! whole work, built once when the profile is chosen.
 //!
 //! Source of knowledge: this project's own design; the profiles' values
 //! were chosen by eye against the panels' well-known look (the original
-//! GBA's unlit reflective panel, darker and pale; the GBA SP's lit one,
-//! closer to a modern screen), not taken from any other emulator.
+//! GBA's unlit reflective panel, darker and pale; the first GBA SP's
+//! front light, washed out and cool; the later SP's backlight, closer to
+//! a modern screen; the Game Boy Micro's small backlit screen, vivid; the
+//! Nintendo DS's, bright), not taken from any other emulator.
 
 use platform::{Frame, Rgb};
 
@@ -38,14 +42,29 @@ pub enum ColorProfile {
     Original,
     /// The original Game Boy Advance's unlit panel: darker, paler.
     Gba,
-    /// The Game Boy Advance SP's lit panel: a little paler than the
-    /// original colors.
+    /// The first Game Boy Advance SP's front-lit panel (AGS-001): washed
+    /// out and cool, its black lit.
+    GbaSpFrontlit,
+    /// The later Game Boy Advance SP's backlit panel (AGS-101): a little
+    /// paler than the original colors.
     GbaSp,
+    /// The Game Boy Micro's backlit screen: vivid.
+    Micro,
+    /// The Nintendo DS's screens, which play the cartridges in their own
+    /// slot: bright, a little vivid and cool.
+    Ds,
 }
 
 impl ColorProfile {
     /// Every profile, in the options' order.
-    pub const ALL: [Self; 3] = [Self::Original, Self::Gba, Self::GbaSp];
+    pub const ALL: [Self; 6] = [
+        Self::Original,
+        Self::Gba,
+        Self::GbaSpFrontlit,
+        Self::GbaSp,
+        Self::Micro,
+        Self::Ds,
+    ];
 
     /// The name the settings keep it under.
     #[must_use]
@@ -53,7 +72,10 @@ impl ColorProfile {
         match self {
             Self::Original => "original",
             Self::Gba => "gba",
+            Self::GbaSpFrontlit => "gba-sp-frontlit",
             Self::GbaSp => "gba-sp",
+            Self::Micro => "micro",
+            Self::Ds => "ds",
         }
     }
 
@@ -89,12 +111,43 @@ impl ColorProfile {
                 brightness: 0.93,
                 black: 0.004,
                 mix: [[0.80, 0.14, 0.06], [0.10, 0.80, 0.10], [0.06, 0.14, 0.80]],
+                gain: NEUTRAL,
+            }),
+            Self::GbaSpFrontlit => Some(Panel {
+                gamma: 2.6,
+                brightness: 0.95,
+                black: 0.015,
+                mix: [[0.84, 0.10, 0.06], [0.08, 0.84, 0.08], [0.06, 0.10, 0.84]],
+                gain: [0.97, 1.0, 1.04],
             }),
             Self::GbaSp => Some(Panel {
                 gamma: 2.4,
                 brightness: 0.98,
                 black: 0.002,
                 mix: [[0.90, 0.07, 0.03], [0.05, 0.90, 0.05], [0.03, 0.07, 0.90]],
+                gain: NEUTRAL,
+            }),
+            Self::Micro => Some(Panel {
+                gamma: 2.2,
+                brightness: 1.0,
+                black: 0.0,
+                mix: [
+                    [1.08, -0.05, -0.03],
+                    [-0.03, 1.06, -0.03],
+                    [-0.03, -0.05, 1.08],
+                ],
+                gain: NEUTRAL,
+            }),
+            Self::Ds => Some(Panel {
+                gamma: 2.0,
+                brightness: 1.0,
+                black: 0.002,
+                mix: [
+                    [1.04, -0.02, -0.02],
+                    [-0.02, 1.04, -0.02],
+                    [-0.02, -0.02, 1.04],
+                ],
+                gain: [0.98, 1.0, 1.03],
             }),
         }
     }
@@ -109,19 +162,26 @@ struct Panel {
     brightness: f32,
     /// The light of black.
     black: f32,
-    /// The light of each channel, out of the three's (rows sum to 1).
+    /// The light of each channel, out of the three's.
     mix: [[f32; 3]; 3],
+    /// The light's lean, each channel's gain.
+    gain: [f32; 3],
 }
+
+/// A gain that leaves the light as it is.
+const NEUTRAL: [f32; 3] = [1.0, 1.0, 1.0];
 
 impl Panel {
     /// The color the panel shows for the GBA color `levels` (0–31 each).
     fn show(&self, levels: [usize; 3]) -> Rgb {
         let light = levels.map(|level| (f32_of(level) / LEVEL_MAX).powf(self.gamma));
-        let [r, g, b] = self.mix.map(|row| {
-            let mixed = row[0] * light[0] + row[1] * light[1] + row[2] * light[2];
-            let shown = self.black + (1.0 - self.black) * self.brightness * mixed;
-            channel(shown.clamp(0.0, 1.0).powf(1.0 / DISPLAY_GAMMA))
-        });
+        let mut shown = [0.0; 3];
+        for (out, (row, gain)) in shown.iter_mut().zip(self.mix.iter().zip(self.gain)) {
+            let mixed = (row[0] * light[0] + row[1] * light[1] + row[2] * light[2]).max(0.0);
+            let lit = self.black + (1.0 - self.black) * self.brightness * mixed;
+            *out = (lit * gain).clamp(0.0, 1.0);
+        }
+        let [r, g, b] = shown.map(|light| channel(light.powf(1.0 / DISPLAY_GAMMA)));
         Rgb::new(r, g, b)
     }
 }
@@ -223,10 +283,28 @@ mod tests {
     }
 
     #[test]
+    fn the_backlit_screens_are_vivid_and_the_front_lit_one_washed_out() {
+        let color = gba(24, 8, 6);
+        for profile in [ColorProfile::Micro, ColorProfile::Ds] {
+            assert!(
+                spread(shown(profile, color)) >= spread(color),
+                "{profile:?}"
+            );
+        }
+        let washed = shown(ColorProfile::GbaSpFrontlit, gba(0, 0, 0));
+        assert!(
+            washed.r > shown(ColorProfile::GbaSp, gba(0, 0, 0)).r,
+            "its black is lit"
+        );
+        assert!(washed.b > washed.r, "and cool");
+    }
+
+    #[test]
     fn the_profiles_go_round_and_keep_their_keys() {
         assert_eq!(ColorProfile::Original.step(true), ColorProfile::Gba);
-        assert_eq!(ColorProfile::GbaSp.step(true), ColorProfile::Original);
-        assert_eq!(ColorProfile::Original.step(false), ColorProfile::GbaSp);
+        assert_eq!(ColorProfile::GbaSp.step(true), ColorProfile::Micro);
+        assert_eq!(ColorProfile::Ds.step(true), ColorProfile::Original);
+        assert_eq!(ColorProfile::Original.step(false), ColorProfile::Ds);
         for profile in ColorProfile::ALL {
             assert_eq!(ColorProfile::from_key(profile.key()), Some(profile));
         }
