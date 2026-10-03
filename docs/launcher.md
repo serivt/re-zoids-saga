@@ -100,6 +100,7 @@ Options holds:
     or DS;
   - the LCD trail (see The LCD trail, below): off, mix or fade;
 - the volume;
+- Saves, to export and import the saves (see Saves, below);
 - the buttons: Keyboard and Gamepad list the pad's ten buttons, where you choose one and
   press its new key or button (Esc cancels; a button that had it swaps with it), or take
   the defaults back.
@@ -228,6 +229,33 @@ lining the game's own pixels.
 
 The game's font is shaded, so on text the rules see some shading as diagonals and leave
 small specks along the strokes.
+
+### Saves
+
+Source of knowledge: this project's own design; what a save holds is read as continuing
+reads it (see [formats/save.md](formats/save.md)). Implemented in
+`apps/launcher/src/saves.rs` and `apps/launcher/src/front.rs`.
+
+Options › Saves lists the four slots and the enhanced mode's autosave, each with whether
+it holds a save; it needs the ROM chosen, since the saves live beside it. On Android the
+app's own folder is out of reach, so this is the only way in or out. Choosing a slot
+offers:
+
+- **Export .sav...:** a copy for an emulator or a flash cart. The dialog proposes the ROM's
+  name with `.sav`, which mGBA, VBA-M and the like load by themselves beside the ROM.
+- **Export .srm...:** the same bytes under RetroArch's extension, `<rom>.srm`.
+- **Export as the cartridge...:** the save without the port's notes (the name in full and
+  the records, see [formats/save.md](formats/save.md)), their bytes erased as the
+  original leaves them: the memory the cartridge itself would hold. The game in it is
+  the same; the name falls back to the one the block holds, and the records start over.
+- **Import...:** reads a `.sav` or `.srm` chosen in the dialog. A file that is not a save
+  of the game, with a game to continue, is refused. Otherwise a confirmation shows what
+  it holds against what the slot holds: the level and area, the money and, when the port
+  counted it, the time played (or empty). Replace the slot's save puts it in the slot,
+  keeping the one it replaces beside it as `.bak`; Cancel, or Z, leaves the slot as it
+  is.
+
+The autosave offers the three exports alone: it is the game's own to write.
 
 About shows the version and the license, and the project's pages: the port's repository
 and the translations' ([re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations)),

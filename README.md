@@ -47,7 +47,8 @@ original and translations.
    [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations) or
    opens a `.po` file you already have. Then Play. Saves are kept next to the ROM, in the
    original's `.sav` format, with the enhanced mode's achievements in a `.achievements`
-   file beside them.
+   file beside them; Options › Saves exports them for an emulator, RetroArch or a flash
+   cart, and imports theirs.
 
 Default keys: arrows move, X = A, Z = B, Return = START, Backspace = SELECT, A = L,
 S = R, holding Space fast-forwards in the enhanced mode, M mutes the sound and turns it

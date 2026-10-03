@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   soon as it is continued. Each unlock slides a window down at the field's top, and the
   pause menu has an Achievements line before Quit that lists them in pages, unlocked or
   not. They are shared by every save of the ROM, in a `.achievements` file beside them.
+- **Saves on every platform.** Options › Saves, until now Android's alone, is on the
+  desktop too, and lists the autosave besides the slots. A save is exported as `.sav`
+  for an emulator or a flash cart, as `.srm` for RetroArch, or as the cartridge would
+  hold it, without the port's notes, under the ROM's name so an emulator finds it by
+  itself. An import shows what the file holds against what the slot holds (level, area,
+  money, time played) before it replaces the slot's save.
 - **Display filters.** Options has a Display screen with new ways to show the picture:
   - **Presets.** Eight set the screen up at once: GBA, GBA SP AGS-001 and AGS-101, Game
     Boy Micro, Nintendo DS and Game Boy Player as those showed the game (their grid,

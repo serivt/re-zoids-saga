@@ -65,18 +65,12 @@ fills the screen.
 ## Saves
 
 The saves are kept in the app's own folder, beside the ROM's copy, in the original's
-format (slot 1 `rom.sav`, slot n `rom.n.sav`). Options › Saves lists the four slots and
-whether each holds a save; choosing one offers:
-
-- **Export...:** writes a copy of the slot where you choose in Android's dialog (the
-  Download folder, a cloud drive...), to load it in an emulator or keep a backup.
-  Android's dialog opens without a name: type one ending in `.sav`.
-- **Import...:** reads a `.sav` chosen in the dialog, from an emulator or an export, and
-  puts it in the slot. It must read as a save of the game, with a game to continue;
-  the save it replaces is kept beside it as `rom.bak` (`rom.n.bak`).
-
-The enhanced mode's autosave is kept beside them as `rom.auto.sav`; the Saves list
-leaves it out.
+format (slot 1 `rom.sav`, slot n `rom.n.sav`, the autosave `rom.auto.sav`), out of reach
+of other apps. Options › Saves exports them through Android's dialog (the Download
+folder, a cloud drive...) as `.sav` for an emulator, `.srm` for RetroArch or as the
+cartridge would hold them, and imports a `.sav` or `.srm` after showing what it holds
+against what the slot holds; see [launcher.md](launcher.md), Saves. Android's dialog
+opens without a name: type one ending in the kind's extension.
 
 ## Building
 
