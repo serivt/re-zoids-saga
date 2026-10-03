@@ -109,6 +109,8 @@ re-zoids-saga/
 │   ├── platform/                # platform abstraction traits only (window, input,
 │   │                            # audio output, filesystem, timing) — zero SDL code
 │   ├── platform-sdl3/           # SDL3 implementation of the platform traits
+│   ├── platform-web/            # the platform traits in a web browser (canvas,
+│   │                            # Web Audio, keys and gamepads, browser storage)
 │   ├── screen-filters/          # what the frontends do to the picture before the
 │   │                            # screen (the panels' colors, the LCD trail,
 │   │                            # pixel-art magnification), pure and backend-free
@@ -139,6 +141,8 @@ re-zoids-saga/
 │   │                            # selection
 │   ├── android/                 # the Android app: libmain.so runs the launcher, and its
 │   │                            # Gradle project (docs/android.md)
+│   ├── web/                     # the game in a web browser: its WebAssembly and the
+│   │                            # page around it (docs/web.md)
 │   └── extractor-cli/           # thin CLI over crates/extraction for development and
 │                                # debugging (inspect/dump extracted data)
 │

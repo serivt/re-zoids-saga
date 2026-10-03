@@ -33,6 +33,7 @@ whichever the player's desktop has.
 | Windows | `tools/package/windows.ps1 [version]` | `re-zoids-saga-<version>-windows-x86_64.zip`: `re-zoids-saga.exe`, `README.txt`, `LICENSE.txt` |
 | Linux (glibc 2.34+) | `tools/package/linux.sh [version]` | `re-zoids-saga-<version>-linux-x86_64.tar.gz`: `re-zoids-saga`, `README.txt`, `LICENSE.txt` |
 | Android 5.0+ | `tools/package/android.sh [version] [debug\|release]` | `re-zoids-saga-<version>-android.apk`, for `arm64-v8a` and `x86_64` (see [android.md](android.md)) |
+| Web browsers | `tools/package/web.sh [version]` | `dist/web/`, the whole site for any static web server: the page, the game's WebAssembly and its JavaScript glue (see [web.md](web.md)); not yet attached to releases |
 
 Each script runs from the repository's root, builds with `--locked`, and writes to
 `dist/` (gitignored). The version defaults to `git describe`. `README.txt` is

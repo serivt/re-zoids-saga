@@ -215,7 +215,9 @@ the map the scene leaves them on. The classic mode never writes it.
 
 Each autosave joins a queue (`crates/game-core/src/autosave.rs`) that a worker thread
 empties in the order the saves were asked for, so the field never waits for the disk
-and quick changes of map are all written, the last one last. Reading the autosave (the
+and quick changes of map are all written, the last one last. Where the platform starts
+no threads (WebAssembly in a browser, see [../web.md](../web.md)), each is written as it
+is queued instead and reported the same way. Reading the autosave (the
 title's list, continuing) first waits for the queue, and so does leaving the game.
 `Event::Autosaved` reports each save once written, `Event::StorageFailed` one that
 could not be.
