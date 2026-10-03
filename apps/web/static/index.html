@@ -64,6 +64,15 @@
         </select>
       </label>
       <label>Volume <input id="volume" type="range" min="0" max="100" step="10" value="100"></label>
+      <label>Touch pad
+        <select id="touch">
+          <option value="auto">On touch screens</option>
+          <option value="on">Always</option>
+          <option value="off">Never</option>
+        </select>
+      </label>
+      <label>Pad size <input id="touch-size" type="range" min="60" max="140" step="10" value="100"></label>
+      <label>Pad opacity <input id="touch-opacity" type="range" min="20" max="100" step="10" value="100"></label>
     </section>
     <p id="translation-status" class="status" role="status"></p>
 
@@ -103,7 +112,8 @@
     </section>
 
     <p class="keys">Arrows move, X = A, Z = B, Return = START, Backspace = SELECT, A = L, S = R,
-      M mutes, Space holds the enhanced mode's fast forward; gamepads work too.</p>
+      M mutes, Space holds the enhanced mode's fast forward; gamepads work too. On a touch
+      screen an on-screen pad surrounds the game; it hides while a gamepad is connected.</p>
     <p class="note">Works offline once loaded, and can be installed from the browser's menu.
       Free software under the GPL-3.0: <a href="https://github.com/serivt/re-zoids-saga">source
       code</a>. Not affiliated with the game's owners. <span id="version">Version __VERSION__.</span></p>
@@ -111,6 +121,7 @@
 
   <div id="stage" hidden>
     <canvas id="screen" width="240" height="160"></canvas>
+    <canvas id="pad" hidden></canvas>
   </div>
 
   <script type="module" src="main.js"></script>

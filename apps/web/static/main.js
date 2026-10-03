@@ -1,7 +1,8 @@
 // The page around the game: the ROM (read here, kept in this browser and
 // never sent), the translation (downloaded from the translations'
 // repository or chosen as a file, and kept), the options, the saves, then
-// the canvas scaled to the window.
+// the game on its canvas, which the game places in the window itself, with
+// the on-screen pad on touch screens.
 import init, { check_rom, save_summary, start } from './pkg/re_zoids_saga_web.js';
 import * as store from './store.js';
 import * as saves from './saves.js';
@@ -11,18 +12,20 @@ import * as sync from './sync.js';
 const OPTIONS_KEY = 're-zoids-saga/page-options';
 const TRANSLATIONS = 'https://raw.githubusercontent.com/serivt/re-zoids-saga-translations/main/';
 const INDEX = 'po/languages.json';
-const SCREEN = { width: 240, height: 160 };
 
 const $ = (id) => document.getElementById(id);
 const menu = $('menu');
 const stage = $('stage');
 const canvas = $('screen');
+const pad = $('pad');
 const play = $('play');
 const romStatus = $('rom-status');
 const translationStatus = $('translation-status');
 const saveStatus = $('save-status');
 const cloudStatus = $('cloud-status');
-const fields = ['language', 'mode', 'scaling', 'color', 'trail', 'volume'];
+const fields = [
+  'language', 'mode', 'scaling', 'color', 'trail', 'volume', 'touch', 'touch-size', 'touch-opacity',
+];
 const SYNC_EVERY_MS = 60_000;
 
 let rom = null;
@@ -65,7 +68,6 @@ $('cloud-sync').addEventListener('click', () => runSync());
 $('cloud-sign-out').addEventListener('click', signOut);
 $('cloud-delete').addEventListener('click', deleteAccount);
 play.addEventListener('click', begin);
-window.addEventListener('resize', fit);
 window.addEventListener('re-zoids-saga:left', () => window.location.reload());
 
 // The ROM ------------------------------------------------------------------
@@ -338,13 +340,18 @@ async function begin() {
     `color=${$('color').value}`,
     `trail=${$('trail').value}`,
     `volume=${$('volume').value}`,
+    `scaling=${$('scaling').value}`,
+    `touch=${$('touch').value}`,
+    `touch-size=${$('touch-size').value}`,
+    `touch-opacity=${$('touch-opacity').value}`,
   ].join('\n');
   menu.hidden = true;
   stage.hidden = false;
   canvas.classList.toggle('smooth', $('scaling').value === 'smooth');
-  fit();
+  if (padLikely()) fillScreen();
   try {
-    start(rom, settings, $('language').value === '' ? undefined : translation ?? undefined, canvas);
+    const chosen = $('language').value === '' ? undefined : translation ?? undefined;
+    start(rom, settings, chosen, canvas, pad);
     if (signedIn) {
       setInterval(() => runSync(true), SYNC_EVERY_MS);
       document.addEventListener('visibilitychange', () => {
@@ -359,13 +366,19 @@ async function begin() {
   }
 }
 
-// The canvas as large as the window allows: whole multiples of the
-// screen for the sharp scaling, the whole window otherwise.
-function fit() {
-  const scale = Math.min(window.innerWidth / SCREEN.width, window.innerHeight / SCREEN.height);
-  const whole = $('scaling').value === 'sharp' && scale >= 1 ? Math.floor(scale) : scale;
-  canvas.style.width = `${SCREEN.width * whole}px`;
-  canvas.style.height = `${SCREEN.height * whole}px`;
+// Whether the on-screen pad will likely show: chosen always, or a touch
+// screen with the automatic choice.
+function padLikely() {
+  const touch = $('touch').value;
+  return touch === 'on' || (touch === 'auto' && window.matchMedia('(pointer: coarse)').matches);
+}
+
+// The whole screen for the game and its pad, where the browser allows a
+// page to take it (not every phone's browser does).
+function fillScreen() {
+  const page = document.documentElement;
+  if (!page.requestFullscreen || document.fullscreenElement) return;
+  page.requestFullscreen({ navigationUI: 'hide' }).catch(() => {});
 }
 
 function saveOptions() {

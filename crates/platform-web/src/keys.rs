@@ -131,6 +131,17 @@ impl WebInput {
         self.keys.get().union(self.pads())
     }
 
+    /// Whether a gamepad is connected (the browser shows one once a
+    /// button of it has been pressed).
+    #[must_use]
+    pub fn has_gamepad(&self) -> bool {
+        self.window.navigator().get_gamepads().is_ok_and(|pads| {
+            pads.iter()
+                .filter_map(|pad| pad.dyn_into::<Gamepad>().ok())
+                .any(|pad| pad.connected())
+        })
+    }
+
     /// The buttons the gamepads hold now.
     fn pads(&self) -> Input {
         let Ok(pads) = self.window.navigator().get_gamepads() else {

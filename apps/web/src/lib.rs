@@ -2,8 +2,9 @@
 //! the ROM the player chose (it never leaves the browser), the options and
 //! a translation if one was chosen, and a canvas; the game then runs on the
 //! canvas at the hardware's pace, its sound through Web Audio, its buttons
-//! from the keyboard and gamepads, its saves (the slots, the autosave, the
-//! achievements) in the browser's storage. The page's menu comes back when
+//! from the keyboard, gamepads and, on touch screens, an on-screen pad, its
+//! saves (the slots, the autosave, the achievements) in the browser's
+//! storage. The page's menu comes back when
 //! the player leaves the game from the pause menu's 終了.
 //!
 //! As in the launcher, M mutes the sound, and in the enhanced mode holding
@@ -29,11 +30,11 @@ use game_core::{Game, PlayMode, Translation};
 use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{AudioOut, Button, Frame, Input, Rgb, SaveStorage};
-use platform_web::{LocalStorage, WebAudio, WebCanvas, WebInput};
+use platform_web::{LocalStorage, PadStyle, WebAudio, WebCanvas, WebInput, WebStage};
 use screen_filters::ScreenFilters;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::{Closure, JsValue, wasm_bindgen};
-use web_sys::{CustomEvent, HtmlCanvasElement, Window};
+use web_sys::{CustomEvent, HtmlCanvasElement, HtmlElement, Window};
 
 pub use options::Options;
 pub use pacing::Pacer;
@@ -125,12 +126,14 @@ pub fn cartridge_save(rom: &[u8], bytes: Vec<u8>) -> Vec<u8> {
 }
 
 /// Starts the game of `rom` on `canvas` with the options `settings` (see
-/// [`Options`]) and the PO file `translation`, if any. Call it from the
-/// player's click, so the browser lets the sound play.
+/// [`Options`]) and the PO file `translation`, if any, the on-screen pad
+/// drawn on `pad`. Both canvases sit in one element over the whole window,
+/// which takes the fingers. Call it from the player's click, so the browser
+/// lets the sound play.
 ///
 /// # Errors
 ///
-/// Returns the reason when the ROM, the translation, the canvas or the
+/// Returns the reason when the ROM, the translation, the canvases or the
 /// sound cannot be used.
 #[wasm_bindgen]
 pub fn start(
@@ -138,6 +141,7 @@ pub fn start(
     settings: &str,
     translation: Option<String>,
     canvas: HtmlCanvasElement,
+    pad: HtmlCanvasElement,
 ) -> Result<(), JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
     let options = Options::parse(settings);
@@ -151,7 +155,28 @@ pub fn start(
     game.set_play_mode(options.mode);
     let audio = WebAudio::new(SAMPLE_RATE).map_err(error)?;
     audio.resume();
+    let stage = canvas
+        .parent_element()
+        .and_then(|element| element.dyn_into::<HtmlElement>().ok())
+        .ok_or_else(|| JsValue::from_str("the canvas has no stage"))?;
+    let style = PadStyle {
+        mode: options.touch,
+        size: f32::from(options.touch_size) / f32::from(options::USUAL_TOUCH),
+        opacity: f32::from(options.touch_opacity) / f32::from(options::USUAL_TOUCH),
+        fast_forward: matches!(options.mode, PlayMode::Enhanced(_)),
+    };
+    let stage = WebStage::new(
+        window.clone(),
+        stage,
+        canvas.clone(),
+        pad,
+        (SCREEN_WIDTH, SCREEN_HEIGHT),
+        options.scaling,
+        style,
+    )
+    .map_err(error)?;
     let runner = Runner {
+        stage,
         filters: ScreenFilters::new(options.color, options.trail, options.upscaler),
         canvas: WebCanvas::new(canvas).map_err(error)?,
         input: WebInput::listen(window.clone()).map_err(error)?,
@@ -182,6 +207,7 @@ fn keep_saves(game: &mut Game<'static>) {
 struct Runner {
     game: Game<'static>,
     canvas: WebCanvas,
+    stage: WebStage,
     input: WebInput,
     audio: WebAudio,
     filters: ScreenFilters,
@@ -201,7 +227,9 @@ impl Runner {
         if due == 0 {
             return true;
         }
-        let input = self.input.input();
+        self.stage.fit(self.input.has_gamepad());
+        let touch = self.stage.input();
+        let input = self.input.input().union(touch);
         if input.is_held(Button::Mute) && !self.held.is_held(Button::Mute) {
             self.muted = !self.muted;
         }
@@ -228,6 +256,7 @@ impl Runner {
         self.filters.apply(&mut self.frame);
         let magnified = self.filters.magnify(&self.frame);
         let _ = self.canvas.draw(magnified.as_ref().unwrap_or(&self.frame));
+        self.stage.draw(touch);
         true
     }
 }

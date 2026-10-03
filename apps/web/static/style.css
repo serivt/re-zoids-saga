@@ -67,13 +67,22 @@ button:disabled { opacity: 0.4; cursor: default; }
 #stage {
   position: fixed;
   inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  overflow: hidden;
   background: #000;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
-#screen { image-rendering: pixelated; }
+#screen { position: absolute; image-rendering: pixelated; }
+#pad {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
 #screen.smooth { image-rendering: auto; }
 
 button.small {
