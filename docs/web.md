@@ -80,20 +80,27 @@ WebAssembly and the page in `apps/web/static/`).
   the launcher's do: the right face button A, the bottom one B, the shoulders L and R,
   Back SELECT, Start START, the D-pad or the left stick the arrows, the right stick's
   click the fast forward.
-- **On-screen pad:** on a touch screen the controls surround the game's screen as on
-  Android, laid out by the same `platform::touch` (see [android.md](android.md)): the
-  screen in the middle and the controls on its sides when the window is wider than
-  tall, the screen on top and the controls below it otherwise, the fast forward in the
-  enhanced mode alone. They are drawn on a canvas over the window in Android's style,
-  translucent and brighter while held, and the fingers come from the page's pointer
-  events, so several press at once and a quick tap still counts. The page then neither
-  scrolls nor zooms nor opens a menu. The pad shows when the screen's pointer is coarse
-  (a phone or a tablet) or once the screen is touched, and hides while a gamepad is
-  connected; the options can show it always or never, and make it 60 % to 140 % as
-  large and 20 % to 100 % as opaque, as Android's. Checked in a browser emulating a
-  phone's touch screen: upright, the screen took the top and the pad the rest, and
-  START held on it opened the title's menu; sideways, the screen sat between the
-  controls, and two fingers held the cross's right and A at once.
+- **On-screen pad** (`platform-web/src/pad.rs`): on a touch screen the controls surround
+  the game's screen in the web page's own design, not Android's. Held upright, the
+  screen fills the width at the top; under it L and R sit at the sides with the page's
+  pause button between them, then the cross on the left and A over B on the right, and
+  last a row of the fast forward (the enhanced mode's alone), SELECT, START and mute.
+  Held sideways, the screen is in the middle, L, the cross, SELECT and the fast forward
+  on its left, R, A and B, mute and START on its right, the pause button above it. The
+  cross and the face buttons shrink to fit a narrow phone. The controls are drawn on a
+  canvas over the window: translucent with a thin white edge, amber while held, their
+  letters in the system's monospaced bold, the cross three cells by three with a
+  triangle on each arm. Which buttons the fingers hold is still `platform::touch`'s:
+  the fingers come from the page's pointer events, so several press at once, a finger
+  slides from one control to the next and a quick tap still counts. The page then
+  neither scrolls nor zooms nor opens a menu. The pad shows when the screen's pointer
+  is coarse (a phone or a tablet) or once the screen is touched, and hides while a
+  gamepad is connected; the options can show it always or never, and make it 60 % to
+  140 % as large and 20 % to 100 % as opaque. Checked in a browser emulating a phone's
+  touch screen: upright, START and the cross's right held at once turned amber and
+  opened the title's menu; sideways, the screen sat between the controls and a tap on
+  the pause button opened the pause menu; no control overlaps the screen or another,
+  from a 360 by 740 phone to a 1024 by 768 tablet (tested).
 - **Saves:** each one is kept in the browser's `localStorage` under
   `re-zoids-saga/<name>`, as Base64 text with the time it was stored: `slot-1` to
   `slot-4`, `autosave` and `achievements`. The storage answers at once, as the game's

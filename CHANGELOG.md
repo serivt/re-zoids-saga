@@ -16,10 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   settings, the display presets, scaling, LCD grid, colors, trail, upscaler, volume); the keyboard and gamepads play as on the desktop, and a gamepad
   also moves through the page. Esc or a button over the game pauses it under a menu
   with the volume, the scaling, the touch pad and the way back to the page.
-  - **Touch screens.** On a phone or a tablet an on-screen pad surrounds the game as on
-    Android, beside the screen held sideways and below it held upright, with several
-    fingers at once; it hides while a gamepad is connected, and its size and opacity
-    are options.
+  - **Touch screens.** On a phone or a tablet an on-screen pad surrounds the game,
+    beside the screen held sideways and below it held upright, with a mute button and
+    the pause button among the controls and several fingers at once; it hides while a
+    gamepad is connected, and its size and opacity are options.
   - **Kept in the browser.** The ROM, the translation, the saves and the achievements
     stay in the browser, so the next visit needs nothing chosen. The Saves tab shows
     what each slot and the autosave hold, exports them for an emulator, RetroArch or
