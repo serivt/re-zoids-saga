@@ -411,6 +411,7 @@ version = "0.6.0"
 dependencies = [
  "js-sys",
  "platform",
+ "screen-filters",
  "wasm-bindgen",
  "web-sys",
 ]

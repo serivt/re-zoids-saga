@@ -4,14 +4,16 @@
 //! `autosave`, `weapon-reach` (`1` or `0`) and `fast-forward` (2 to 4), as
 //! the launcher's, `color`,
 //! `trail` and `upscale` (the display's, as the launcher's), `volume` (0 to
-//! 100), `muted` (`1` to start without sound), `scaling` (`sharp`, `fill`
+//! 100), `filter` (the launcher's `lcd`, `lcd-soft`, `lcd-fine` or
+//! `scanlines` draw its grid; anything else none), `muted` (`1` to start
+//! without sound), `scaling` (`sharp`, `fill`
 //! or `smooth`), and the on-screen pad's
 //! `touch` (`auto`, `on` or `off`), `touch-size` (60 to 140, percent) and
 //! `touch-opacity` (20 to 100, percent), as Android's. Unknown keys and
 //! values keep the defaults: the classic mode (as the launcher's), the
 //! enhanced mode's own defaults, the original colors, no trail, no
-//! upscaler, full volume, sharp whole multiples, and the pad on touch
-//! screens at its usual size and opacity.
+//! upscaler, full volume, the window filled sharp (the page's Modern
+//! preset), and the pad on touch screens at its usual size and opacity.
 //!
 //! Source of knowledge: this project's own design (see
 //! `apps/launcher/src/settings.rs`).
@@ -19,7 +21,7 @@
 use game_core::play_mode::FAST_FORWARD_SPEEDS;
 use game_core::{Enhancements, PlayMode};
 use platform_web::{PadMode, Scaling};
-use screen_filters::{ColorProfile, TrailMode, Upscaler};
+use screen_filters::{ColorProfile, Grid, TrailMode, Upscaler};
 
 /// The volume at its fullest, in percent.
 pub const FULL_VOLUME: u8 = 100;
@@ -32,7 +34,7 @@ pub const TOUCH_OPACITIES: std::ops::RangeInclusive<u8> = 20..=100;
 pub const USUAL_TOUCH: u8 = 100;
 
 /// What the page chose.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Options {
     /// How the game plays.
     pub mode: PlayMode,
@@ -42,6 +44,8 @@ pub struct Options {
     pub trail: TrailMode,
     /// How the picture is magnified.
     pub upscaler: Upscaler,
+    /// The grid drawn over the picture, if any.
+    pub grid: Option<Grid>,
     /// The sound's volume, in percent.
     pub volume: u8,
     /// Whether the game starts without sound.
@@ -63,9 +67,10 @@ impl Default for Options {
             color: ColorProfile::Original,
             trail: TrailMode::Off,
             upscaler: Upscaler::None,
+            grid: None,
             volume: FULL_VOLUME,
             muted: false,
-            scaling: Scaling::Sharp,
+            scaling: Scaling::Fill,
             touch: PadMode::Auto,
             touch_size: USUAL_TOUCH,
             touch_opacity: USUAL_TOUCH,
@@ -104,6 +109,7 @@ impl Options {
                 "color" => options.color = ColorProfile::from_key(value).unwrap_or_default(),
                 "trail" => options.trail = TrailMode::from_key(value).unwrap_or_default(),
                 "upscale" => options.upscaler = Upscaler::from_key(value).unwrap_or_default(),
+                "filter" => options.grid = Grid::from_key(value),
                 "volume" => {
                     if let Ok(volume) = value.parse::<u8>() {
                         options.volume = volume.min(FULL_VOLUME);
@@ -206,6 +212,8 @@ mod tests {
         );
         assert_eq!((options.touch_size, options.touch_opacity), (120, 40));
         assert!(Options::parse("muted=1").muted && !Options::parse("muted=0").muted);
+        assert_eq!(Options::parse("filter=lcd-soft").grid, Some(Grid::LCD_SOFT));
+        assert_eq!(Options::parse("filter=pixel-art").grid, None);
         let wrong = Options::parse("touch=maybe\ntouch-size=200\ntouch-opacity=5\n");
         assert_eq!(wrong.touch, PadMode::Auto);
         assert_eq!(

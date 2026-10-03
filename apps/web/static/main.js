@@ -15,6 +15,18 @@ const PICTURE_OPEN_KEY = 're-zoids-saga/page-picture-open';
 const TRANSLATIONS = 'https://raw.githubusercontent.com/serivt/re-zoids-saga-translations/main/';
 const INDEX = 'po/languages.json';
 const SYNC_EVERY_MS = 60_000;
+// The display presets, as the launcher's: a screen the game was played on
+// (its grid, colors and trail) or a way of showing it today.
+const PRESETS = {
+  gba: { filter: 'lcd', scaling: 'sharp', upscale: 'none', color: 'gba', trail: 'fade' },
+  'gba-sp-frontlit': { filter: 'lcd-soft', scaling: 'sharp', upscale: 'none', color: 'gba-sp-frontlit', trail: '1' },
+  'gba-sp': { filter: 'lcd-soft', scaling: 'sharp', upscale: 'none', color: 'gba-sp', trail: '1' },
+  micro: { filter: 'lcd-fine', scaling: 'sharp', upscale: 'none', color: 'micro', trail: '0' },
+  ds: { filter: 'off', scaling: 'fill', upscale: 'none', color: 'ds', trail: '0' },
+  player: { filter: 'scanlines', scaling: 'sharp', upscale: 'none', color: 'original', trail: '0' },
+  modern: { filter: 'off', scaling: 'fill', upscale: 'none', color: 'original', trail: '0' },
+  'smooth-pixel-art': { filter: 'off', scaling: 'fill', upscale: 'scale3x', color: 'original', trail: '0' },
+};
 // The enhanced mode's settings, by the launcher's names.
 const ENHANCEMENTS = [
   'battle-animations', 'damage-numbers', 'auto-text', 'autosave', 'weapon-reach', 'fast-forward',
@@ -22,7 +34,7 @@ const ENHANCEMENTS = [
 // The options the page keeps, by the form fields' names; `muted` is the
 // Mute button's.
 const OPTIONS = [
-  'language', 'mode', 'scaling', 'color', 'trail', 'upscale', 'volume',
+  'language', 'mode', 'scaling', 'color', 'trail', 'upscale', 'filter', 'volume',
   'touch', 'touch-size', 'touch-opacity', ...ENHANCEMENTS,
 ];
 
@@ -282,12 +294,30 @@ function saveOptions() {
   $('#playbar-summary').textContent = line;
   const trail = picked('trail');
   const upscaler = picked('upscale');
-  $('#picture-summary').textContent = [
-    picked('scaling'),
-    colors === 'Original' ? 'Original colors' : `${colors} colors`,
-    trail === 'Off' ? 'No trail' : `${trail} trail`,
-    upscaler === 'Off' ? 'No upscaler' : upscaler,
-  ].join(' · ');
+  const preset = currentPreset();
+  for (const chip of $$('[data-preset]')) chip.setAttribute('aria-pressed', chip.dataset.preset === preset);
+  const filter = $('#filter').selectedOptions[0].textContent;
+  $('#picture-summary').textContent = preset
+    ? `${$(`[data-preset="${preset}"]`).textContent} preset`
+    : [
+      picked('scaling'),
+      colors === 'Original' ? 'Original colors' : `${colors} colors`,
+      trail === 'Off' ? 'No trail' : `${trail} trail`,
+      upscaler === 'Off' ? 'No upscaler' : upscaler,
+      filter === 'Off' ? 'No filter' : filter,
+    ].join(' · ');
+}
+
+// The preset the picture's options match, if any.
+function currentPreset() {
+  return Object.keys(PRESETS).find((name) => Object.entries(PRESETS[name]).every(([key, value]) => option(key) === value));
+}
+
+for (const chip of $$('[data-preset]')) {
+  chip.addEventListener('click', () => {
+    for (const [key, value] of Object.entries(PRESETS[chip.dataset.preset])) setOption(key, value);
+    saveOptions();
+  });
 }
 
 function restoreOptions() {
@@ -827,6 +857,7 @@ function begin() {
     `color=${option('color')}`,
     `trail=${option('trail')}`,
     `upscale=${option('upscale')}`,
+    `filter=${option('filter')}`,
     `volume=${option('volume')}`,
     `muted=${muted() ? 1 : 0}`,
     `scaling=${option('scaling')}`,
@@ -841,7 +872,7 @@ function begin() {
   if (padLikely()) fillScreen();
   try {
     const chosen = language.value === '' ? undefined : translation ?? undefined;
-    session = start(rom, settings, chosen, canvas, $('#pad'), $('#game-menu'));
+    session = start(rom, settings, chosen, canvas, $('#pad'), $('#game-menu'), $('#grid'));
     if (signedIn) {
       setInterval(() => runSync(true), SYNC_EVERY_MS);
       document.addEventListener('visibilitychange', () => {

@@ -37,7 +37,7 @@ use platform_web::{
     LocalStorage, PadMode, PadStyle, Scaling, StageElements, WebAudio, WebCanvas, WebInput,
     WebStage,
 };
-use screen_filters::ScreenFilters;
+use screen_filters::{Grid, ScreenFilters};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::{Closure, JsValue, wasm_bindgen};
 use web_sys::{CustomEvent, CustomEventInit, HtmlCanvasElement, HtmlElement, Window};
@@ -197,9 +197,9 @@ pub fn cartridge_save(rom: &[u8], bytes: Vec<u8>) -> Vec<u8> {
 
 /// Starts the game of `rom` on `canvas` with the options `settings` (see
 /// [`Options`]) and the PO file `translation`, if any, the on-screen pad
-/// drawn on `pad` and the page's `menu` button, if any, kept at the game
-/// screen's top left corner. They all sit in one element over the whole
-/// window, which takes the fingers. Call it from the player's click, so the
+/// drawn on `pad`, the LCD grid on `grid`, if any, and the page's `menu`
+/// button, if any, kept at the game screen's top left corner. They all
+/// sit in one element over the whole window, which takes the fingers. Call it from the player's click, so the
 /// browser lets the sound play.
 ///
 /// # Errors
@@ -214,6 +214,7 @@ pub fn start(
     canvas: HtmlCanvasElement,
     pad: HtmlCanvasElement,
     menu: Option<HtmlElement>,
+    grid: Option<HtmlCanvasElement>,
 ) -> Result<Session, JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
     let options = Options::parse(settings);
@@ -245,8 +246,9 @@ pub fn start(
         screen: canvas.clone(),
         pad,
         menu,
+        grid,
     };
-    let stage = WebStage::new(
+    let mut stage = WebStage::new(
         window.clone(),
         elements,
         (SCREEN_WIDTH, SCREEN_HEIGHT),
@@ -254,6 +256,7 @@ pub fn start(
         style,
     )
     .map_err(error)?;
+    stage.set_grid(options.grid);
     let runner = Runner {
         stage,
         filters: ScreenFilters::new(options.color, options.trail, options.upscaler),
@@ -309,6 +312,11 @@ impl Session {
     pub fn set_scaling(&self, key: &str) {
         let scaling = Scaling::from_key(key).unwrap_or_default();
         self.runner.borrow_mut().stage.set_scaling(scaling);
+    }
+
+    /// Draws the grid the settings' `filter` line names, or none.
+    pub fn set_filter(&self, key: &str) {
+        self.runner.borrow_mut().stage.set_grid(Grid::from_key(key));
     }
 
     /// Shows the pad as the settings' `touch` line names it.

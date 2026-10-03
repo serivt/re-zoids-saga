@@ -13,6 +13,12 @@
 //! touched) and hides while a gamepad is connected; the page can also
 //! always show it or never. The page's own menu button, if it has one, is
 //! kept at the screen's top left corner, wherever the screen goes.
+//!
+//! An LCD's grid or a television's scan lines, when chosen, are drawn on a
+//! canvas of their own over the screen, at the device's pixels, which the
+//! page's style multiplies with the picture (white leaves it, the lines'
+//! gray darkens it); the screen then takes whole multiples, as the
+//! launcher's.
 
 use std::cell::{Cell, RefCell};
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
@@ -23,6 +29,8 @@ use platform::touch::{
     IDLE_OPACITY, LETTER_HEIGHT, MARK_OPACITY, Shape, label, label_cells,
 };
 use platform::{Button, Input, PlatformError, TouchLayout};
+use screen_filters::Grid;
+use screen_filters::grid::Rect;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use web_sys::{
@@ -152,6 +160,8 @@ pub struct StageElements {
     pub pad: HtmlCanvasElement,
     /// The page's menu button, kept at the screen's top left corner.
     pub menu: Option<HtmlElement>,
+    /// The canvas the grid is drawn on, over the screen.
+    pub grid: Option<HtmlCanvasElement>,
 }
 
 /// The window the screen and the pad were laid out for.
@@ -171,6 +181,9 @@ pub struct WebStage {
     pad: HtmlCanvasElement,
     menu: Option<HtmlElement>,
     context: CanvasRenderingContext2d,
+    /// The grid's canvas and its context, and the grid drawn, if any.
+    lines: Option<(HtmlCanvasElement, CanvasRenderingContext2d)>,
+    grid: Option<Grid>,
     fingers: Rc<RefCell<Fingers>>,
     /// Whether the screen is a touch screen: a coarse pointer, or a touch
     /// seen.
@@ -178,6 +191,7 @@ pub struct WebStage {
     scaling: Scaling,
     style: PadStyle,
     frame: (f32, f32),
+    pixels: (usize, usize),
     /// The controls while the pad shows.
     layout: Option<TouchLayout>,
     laid: Option<Laid>,
@@ -206,13 +220,16 @@ impl WebStage {
             screen,
             pad,
             menu,
+            grid,
         } = elements;
-        let context = pad
-            .get_context("2d")
-            .map_err(web_error)?
-            .ok_or_else(|| web_error("no 2D context"))?
-            .dyn_into::<CanvasRenderingContext2d>()
-            .map_err(web_error)?;
+        let context = context_2d(&pad)?;
+        let lines = match grid {
+            Some(canvas) => {
+                let context = context_2d(&canvas)?;
+                Some((canvas, context))
+            }
+            None => None,
+        };
         let coarse = window
             .match_media("(pointer: coarse)")
             .ok()
@@ -228,11 +245,14 @@ impl WebStage {
             pad,
             menu,
             context,
+            lines,
+            grid: None,
             fingers,
             touch,
             scaling,
             style,
             frame: (to_f32(frame.0), to_f32(frame.1)),
+            pixels: frame,
             layout: None,
             laid: None,
             drawn: None,
@@ -242,6 +262,12 @@ impl WebStage {
     /// Fills the window as `scaling` asks while the pad is hidden.
     pub fn set_scaling(&mut self, scaling: Scaling) {
         self.scaling = scaling;
+        self.laid = None;
+    }
+
+    /// Draws `grid` over the screen, or none.
+    pub fn set_grid(&mut self, grid: Option<Grid>) {
+        self.grid = grid;
         self.laid = None;
     }
 
@@ -287,9 +313,11 @@ impl WebStage {
         } else {
             self.layout = None;
             self.fingers.borrow_mut().release();
-            fit_screen(window, self.frame, self.scaling == Scaling::Sharp)
+            let whole = self.scaling == Scaling::Sharp || self.grid.is_some();
+            fit_screen(window, self.frame, whole)
         };
         place(&self.screen, area);
+        self.draw_grid(area, laid.density);
         if let Some(menu) = &self.menu {
             let style = menu.style();
             let _ = style.set_property("left", &format!("{}px", area.x + MENU_INSET));
@@ -299,6 +327,42 @@ impl WebStage {
         if laid.shown {
             self.pad.set_width(pixels(laid.width * laid.density));
             self.pad.set_height(pixels(laid.height * laid.density));
+        }
+    }
+
+    /// Draws the grid over the screen at `area`, the device having
+    /// `density` pixels for each of the page's, or hides its canvas.
+    fn draw_grid(&self, area: Area, density: f64) {
+        let Some((canvas, context)) = &self.lines else {
+            return;
+        };
+        let Some(grid) = self.grid else {
+            canvas.set_hidden(true);
+            return;
+        };
+        canvas.set_hidden(false);
+        place(canvas, area);
+        let (width, height) = (f64::from(area.width), f64::from(area.height));
+        canvas.set_width(pixels(width * density));
+        canvas.set_height(pixels(height * density));
+        let _ = context.set_transform(density, 0.0, 0.0, density, 0.0, 0.0);
+        context.set_fill_style_str("#fff");
+        context.fill_rect(0.0, 0.0, width, height);
+        let shade = grid.shade;
+        context.set_fill_style_str(&format!("rgb({shade}, {shade}, {shade})"));
+        let whole = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: area.width,
+            height: area.height,
+        };
+        for line in grid.lines(whole, self.pixels, to_f32_f64(density)) {
+            context.fill_rect(
+                f64::from(line.x),
+                f64::from(line.y),
+                f64::from(line.width),
+                f64::from(line.height),
+            );
         }
     }
 
@@ -398,6 +462,16 @@ fn listen(
         .map_err(web_error)?;
     menu.forget();
     Ok(())
+}
+
+/// `canvas`'s 2D context.
+fn context_2d(canvas: &HtmlCanvasElement) -> Result<CanvasRenderingContext2d, PlatformError> {
+    canvas
+        .get_context("2d")
+        .map_err(web_error)?
+        .ok_or_else(|| web_error("no 2D context"))?
+        .dyn_into::<CanvasRenderingContext2d>()
+        .map_err(web_error)
 }
 
 /// Puts `canvas` over `area` of the window.

@@ -162,17 +162,18 @@
           </summary>
           <div class="fold-body">
             <div class="field">
-              <div class="row-tight"><span class="lbl" id="presets-l">Display presets</span><span class="soon">Soon</span></div>
+              <span class="lbl" id="presets-l">Display presets</span>
               <div class="chips" role="group" aria-labelledby="presets-l">
-                <button class="chip" type="button" disabled>GBA</button><button class="chip" type="button" disabled>GBA SP</button><button class="chip" type="button" disabled>Micro</button><button class="chip" type="button" disabled>DS</button><button class="chip" type="button" disabled>Game Boy Player</button><button class="chip" type="button" disabled>Modern</button><button class="chip" type="button" disabled>Smooth pixel art</button>
+                <button class="chip" type="button" data-preset="modern" aria-pressed="false">Modern</button><button class="chip" type="button" data-preset="gba" aria-pressed="false">GBA</button><button class="chip" type="button" data-preset="gba-sp-frontlit" aria-pressed="false">GBA SP AGS-001</button><button class="chip" type="button" data-preset="gba-sp" aria-pressed="false">GBA SP AGS-101</button><button class="chip" type="button" data-preset="micro" aria-pressed="false">Game Boy Micro</button><button class="chip" type="button" data-preset="ds" aria-pressed="false">Nintendo DS</button><button class="chip" type="button" data-preset="player" aria-pressed="false">Game Boy Player</button><button class="chip" type="button" data-preset="smooth-pixel-art" aria-pressed="false">Smooth pixel art</button>
               </div>
+              <p class="hint">Each sets the options below as a screen showed the game: its grid, colors and trail, or a way of showing it today.</p>
             </div>
             <div class="grid2">
               <fieldset class="field">
                 <legend class="lbl">Scaling</legend>
                 <div class="seg">
-                  <label><input type="radio" name="scaling" value="sharp" checked><span>Sharp</span></label>
-                  <label><input type="radio" name="scaling" value="fill"><span>Fill</span></label>
+                  <label><input type="radio" name="scaling" value="sharp"><span>Sharp</span></label>
+                  <label><input type="radio" name="scaling" value="fill" checked><span>Fill</span></label>
                   <label><input type="radio" name="scaling" value="smooth"><span>Smooth</span></label>
                 </div>
                 <p class="hint">Sharp uses whole multiples. Fill stays sharp and fills the window.</p>
@@ -209,14 +210,20 @@
                 </div>
                 <p class="hint">Rounds diagonal edges off without blurring.</p>
               </fieldset>
-              <fieldset class="field" disabled>
-                <legend class="lbl">Screen filter <span class="soon">Soon</span></legend>
-                <div class="seg">
-                  <label><input type="radio" name="filter" value="off" checked><span>Off</span></label>
-                  <label><input type="radio" name="filter" value="grid"><span>LCD grid</span></label>
-                  <label><input type="radio" name="filter" value="scanlines"><span>Scan lines</span></label>
+              <div class="field">
+                <label class="lbl" for="filter">Screen filter</label>
+                <div class="sel">
+                  <select id="filter" name="filter">
+                    <option value="off">Off</option>
+                    <option value="lcd">LCD grid</option>
+                    <option value="lcd-soft">LCD grid, soft</option>
+                    <option value="lcd-fine">LCD grid, fine</option>
+                    <option value="scanlines">Scan lines</option>
+                  </select>
+                  <svg width="16" height="16" aria-hidden="true"><use href="#i-chev"/></svg>
                 </div>
-              </fieldset>
+                <p class="hint">Lines between the pixels, as a handheld or a television showed them. The picture then scales by whole multiples.</p>
+              </div>
             </div>
           </div>
         </details>
@@ -367,6 +374,7 @@
 
 <div id="stage" class="game" hidden>
   <canvas id="screen" width="240" height="160" aria-label="Game screen"></canvas>
+  <canvas id="grid" hidden></canvas>
   <canvas id="pad" hidden></canvas>
   <button class="pause-btn" type="button" id="game-menu" aria-label="Pause and menu" aria-haspopup="dialog"><svg width="18" height="18" aria-hidden="true"><use href="#i-pause"/></svg></button>
 </div>
