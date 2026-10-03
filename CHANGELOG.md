@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same rule as everywhere else: the player chooses the ROM, which is checked to be the
   supported dump and never leaves the browser. The page takes a translation (from the
   translations' repository or a PO file) and the options (mode and the enhanced mode's
-  settings, scaling, colors, trail, upscaler, volume); the keyboard and gamepads play as on the desktop, and a gamepad
+  settings, the display presets, scaling, LCD grid, colors, trail, upscaler, volume); the keyboard and gamepads play as on the desktop, and a gamepad
   also moves through the page. Esc or a button over the game pauses it under a menu
   with the volume, the scaling, the touch pad and the way back to the page.
   - **Touch screens.** On a phone or a tablet an on-screen pad surrounds the game as on

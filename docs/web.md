@@ -13,8 +13,7 @@ desktop and on Android. The plan, in phases:
 2. **The browser's backend and page** (done, below): the picture on a canvas, the sound
    through Web Audio, the keyboard, gamepads and an on-screen pad for touch screens, the
    saves in the browser's storage, and an HTML page to choose the ROM, a translation and
-   the options. Still to come in the page: the filters that need more than the
-   browser's scaling (the LCD grid, the scan lines) through WebGL.
+   the options, the launcher's display presets and LCD grids among them.
 3. **Kept in the browser** (done, below):
    - the ROM, kept in the browser's database so it is chosen once, and never sent
      anywhere;
@@ -63,8 +62,13 @@ WebAssembly and the page in `apps/web/static/`).
 
 - **Picture:** each frame's pixels are written into a canvas as large as the frame,
   which the game places in the window itself: centered, as large as it fits, in whole
-  multiples for the sharp scaling, and around the on-screen pad while it shows. The
-  page's style draws it sharp (`image-rendering: pixelated`) or smooth.
+  multiples for the sharp scaling and the LCD grids, and around the on-screen pad while
+  it shows. The page's style draws it sharp (`image-rendering: pixelated`) or smooth.
+- **LCD grid:** the launcher's LCD grids and scan lines (see
+  [launcher.md](launcher.md), The LCD grid), where `screen-filters` puts their lines,
+  drawn on a canvas of their own over the screen at the device's pixels: white where
+  the picture stays, the lines' gray where it darkens, which the page's style multiplies
+  with the picture (`mix-blend-mode: multiply`). No WebGL is needed.
 - **Sound:** each frame's samples become a Web Audio buffer at the game's own rate
   (31 536 Hz), which the browser converts to the device's. Each buffer is played right
   after the one before, 50 ms ahead at first, so they follow without gaps; as many
@@ -102,21 +106,23 @@ WebAssembly and the page in `apps/web/static/`).
   level, the area, the money and, when the port counted it, the time played), apart or
   in a line, read as continuing reads it; `cartridge_save(rom, bytes)`: the save
   without the port's notes.
-- `start(rom, settings, translation, canvas, pad, menu)`: plays the game, the on-screen
-  pad drawn on `pad`, a canvas beside the game's in the element over the window, which
-  takes the fingers; the page's `menu` button is kept at the game screen's top left
-  corner, wherever the screen goes.
+- `start(rom, settings, translation, canvas, pad, menu, grid)`: plays the game, the
+  on-screen pad drawn on `pad` and the LCD grid on `grid`, canvases beside the game's in
+  the element over the window, which takes the fingers; the page's `menu` button is
+  kept at the game screen's top left corner, wherever the screen goes.
   - The options are given as the launcher's settings lines: `mode` and the enhanced
     mode's `battle-animations`, `damage-numbers`, `auto-text`, `autosave`,
-    `weapon-reach` and `fast-forward`, `color`, `trail`, `upscale`, `volume`, `muted`
+    `weapon-reach` and `fast-forward`, `color`, `trail`, `upscale`, `filter` (`lcd`,
+    `lcd-soft`, `lcd-fine`, `scanlines`, or none), `volume`, `muted`
     (`1` to start without sound), `scaling` (`sharp`, `fill` or `smooth`), and the
     pad's `touch` (`auto`, `on` or `off`), `touch-size` and `touch-opacity`.
   - When the game's pause menu changes the enhanced mode's settings, the page hears
     `re-zoids-saga:enhancements`, the settings' lines as its detail, and remembers them
     for the next game, as the launcher does.
   - It gives the page the game's session: `pause()`, `resume()`, `quit()` (the page
-    then hears `re-zoids-saga:left`), and `set_volume`, `set_scaling`, `set_touch` and
-    `set_touch_opacity`, which change those options while the game plays.
+    then hears `re-zoids-saga:left`), and `set_volume`, `set_scaling`, `set_filter`,
+    `set_touch` and `set_touch_opacity`, which change those options while the game
+    plays.
   - The loop runs once for each picture the screen shows (`requestAnimationFrame`) and
     plays the frames due at the hardware's pace, whatever the screen's refresh (at most
     four after a hold up, which is skipped rather than caught up).
@@ -130,17 +136,18 @@ sent anywhere, and played only when it is the supported dump. Play sits under it
 line of what the options choose; on a phone a bar keeps Play in reach once the button
 scrolls away. The rest is in tabs: Options (the translation, the mode, classic at first,
 and, while it is the enhanced one, its settings, the picture, folded under a line of
-what it chooses, the sound and the touch pad; the display presets and the LCD grid and
-scan lines are marked to come), Saves, Cloud (when the build has a cloud project) and
-Help (the keys, the gamepad, offline and installing). The options are remembered. A
-gamepad moves through the page too: the D-pad or the stick moves, A chooses, B goes
-back. The sound starts on Play, since a browser lets a page make sound only after the
-player has pressed something; when the pad will show, Play also asks the browser for the
-whole screen, where the browser lets a page take it (not every phone's does). While the
-game plays, Esc or the button at the screen's corner pauses it under a menu: resume, the
-volume, the scaling, the pad's opacity and whether it shows, and the way back to the
-launcher, which loses what was not saved. It links to the source code, as the GPL asks
-of a program handed to the browser.
+what it chooses, with the launcher's eight display presets (Modern first, and chosen at
+first), which set the screen filter, the scaling, the upscaler, the colors and the trail
+together and show which one the options match, the sound and the touch pad), Saves,
+Cloud (when the build has a cloud project) and Help (the keys, the gamepad, offline and
+installing). The options are remembered. A gamepad moves through the page too: the D-pad
+or the stick moves, A chooses, B goes back. The sound starts on Play, since a browser
+lets a page make sound only after the player has pressed something; when the pad will
+show, Play also asks the browser for the whole screen, where the browser lets a page
+take it (not every phone's does). While the game plays, Esc or the button at the
+screen's corner pauses it under a menu: resume, the volume, the scaling, the pad's
+opacity and whether it shows, and the way back to the launcher, which loses what was not
+saved. It links to the source code, as the GPL asks of a program handed to the browser.
 
 To build it and play it locally:
 

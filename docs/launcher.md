@@ -172,8 +172,9 @@ custom to the first or the last.
 
 ### The LCD grid
 
-Source of knowledge: this project's own design. Implemented in
-`crates/platform-sdl3/src/lib.rs`.
+Source of knowledge: this project's own design. Where the lines go is
+`crates/screen-filters/src/grid.rs`, which the web version shares (see
+[web.md](web.md)); drawing them is `crates/platform-sdl3/src/lib.rs`.
 
 The LCD filters scale the picture by whole multiples, as sharp does, then darken a line
 at the right and the bottom of every pixel of the game. The scan lines filter darkens
