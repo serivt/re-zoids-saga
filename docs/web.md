@@ -108,12 +108,14 @@ tools/package/web.sh
 python3 -m http.server -d dist/web
 ```
 
-`dist/web` is the whole site: any static web server serves it. Checked in a browser: the
-page identified the ROM, the game ran from the publisher's logo to the title and its
-attract demo, continued a chapter 10 save from the slot list (which read the browser's
-storage), and played on the field from the keyboard at 60 frames a second, writing the
-achievements to the browser's storage. A browser slows a page it does not show (to a
-few calls a second), and the game slows with it; a hidden tab pauses it.
+`dist/web` is the whole site: any static web server serves it. The script also zips it
+as `dist/re-zoids-saga-<version>-web.zip`, which each release carries (see
+[packaging.md](packaging.md)). Checked in a browser: the page identified the ROM, the
+game ran from the publisher's logo to the title and its attract demo, continued a
+chapter 10 save from the slot list (which read the browser's storage), and played on the
+field from the keyboard at 60 frames a second, writing the achievements to the browser's
+storage. A browser slows a page it does not show (to a few calls a second), and the game
+slows with it; a hidden tab pauses it.
 
 ## Kept in the browser, and offline
 

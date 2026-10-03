@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Web version.** The game plays in a web browser, compiled to WebAssembly, with the
+  same rule as everywhere else: the player chooses the ROM, which is checked to be the
+  supported dump and never leaves the browser. The page takes a translation (from the
+  translations' repository or a PO file) and the options (mode, colors, trail,
+  upscaler, scaling, volume); the keyboard and gamepads play as on the desktop.
+  - **Kept in the browser.** The ROM, the translation, the saves and the achievements
+    stay in the browser, so the next visit needs nothing chosen. The Saves list shows
+    what each slot and the autosave hold, exports them for an emulator, RetroArch or
+    the cartridge, and imports a save after asking.
+  - **Offline and installable.** Once loaded, the page plays with no connection, and
+    the browser can install it as an app.
+  - **Saves in the cloud.** Optional: signed in by a link sent by email, with no
+    password, the saves and the achievements follow the player's account from one
+    browser to another; the last ten versions of each are kept, and the account and
+    everything in it can be deleted from the page. The ROM is never sent, only its
+    SHA-1.
+  - Each release carries the whole site as `re-zoids-saga-<version>-web.zip`, for any
+    static web server.
+
 ## [0.6.0] - 2026-10-03
 
 ### Added
