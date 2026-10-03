@@ -1,8 +1,8 @@
 # The web version
 
 Source of knowledge: this project's own design. The browser's side is the public
-WebAssembly and Web APIs (canvas, Web Audio, Gamepad, IndexedDB, the Origin Private File
-System); no other emulator's or port's code was consulted.
+WebAssembly and Web APIs (canvas, Web Audio, Gamepad, Web Storage, IndexedDB, service
+workers, the web app manifest); no other emulator's or port's code was consulted.
 
 The aim is the same game in a browser, with the same rule as everywhere else: the player
 provides the ROM. The game's code is compiled to WebAssembly (`wasm32-unknown-unknown`),
@@ -15,11 +15,12 @@ desktop and on Android. The plan, in phases:
    an HTML page to choose the ROM, a translation and the options. Still to come in the
    page: the filters that need more than the browser's scaling (the LCD grid, the scan
    lines) through WebGL, and the on-screen pad for touch screens.
-3. **Kept in the browser:**
-   - the ROM, cached in the Origin Private File System so it is chosen once, and never
-     sent anywhere;
-   - the saves, the autosave and the achievements, in IndexedDB, exported and imported
-     as `.sav` as the launcher does;
+3. **Kept in the browser** (done, below):
+   - the ROM, kept in the browser's database so it is chosen once, and never sent
+     anywhere;
+   - the translation, downloaded from the translations' repository or chosen as a
+     file, kept the same way;
+   - the saves exported and imported as the launcher does;
    - the page installable and playable offline, a progressive web app.
 4. **Saves in the cloud,** optional, with an account: the `.sav` files and the
    achievements kept by the player's account, never the ROM.
@@ -112,4 +113,54 @@ attract demo, continued a chapter 10 save from the slot list (which read the bro
 storage), and played on the field from the keyboard at 60 frames a second, writing the
 achievements to the browser's storage. A browser slows a page it does not show (to a
 few calls a second), and the game slows with it; a hidden tab pauses it.
+
+## Kept in the browser, and offline
+
+Implemented in `apps/web/static/` (`store.js`, `saves.js`, `main.js`, `sw.js`,
+`manifest.webmanifest`) and the game's WebAssembly's `save_summary` and `cartridge_save`.
+
+**The ROM.** Once the page has identified it as the supported dump, it keeps the file
+in the browser's database (IndexedDB, under `re-zoids-saga`), since it is too large for
+the page's storage. It also asks the browser not to clear the page's data when space runs
+low. The next visit finds it there and needs nothing chosen: the status line says it is
+remembered, and Forget the ROM removes it (the saves stay). It is never sent anywhere.
+
+**The translation.** The list offers the languages of the translations' repository
+(`po/languages.json`, read from GitHub as the launcher does) and a PO file of the
+player's own. The one chosen is kept in the same database with its name, so it needs no
+connection afterwards. Offline, its line is offered again from what is kept.
+
+**The saves.** They stay in the page's storage as the game keeps them. Once the ROM is
+known, the Saves list shows each slot and the autosave with what it holds: the level,
+area and money and, when the port counted it, the time played (`save_summary`, read as
+continuing reads it). Each one exports, under the ROM's name:
+
+- `.sav` for an emulator or a flash cart;
+- `.srm` for RetroArch, the same bytes;
+- **Cartridge:** without the port's notes (`cartridge_save`, see
+  [formats/save.md](formats/save.md)).
+
+A slot imports a `.sav` or `.srm`, which must read as a save of the game. The browser
+asks first whether to replace the slot's save (what it holds, against what the file
+holds), and the slot's is kept as `<slot>.bak`. The autosave only exports.
+
+**Offline and installed.** A service worker keeps the page, its scripts and style, the
+manifest, the icon and the game's WebAssembly in the browser's cache. It caches them
+under the build's version, which `tools/package/web.sh` writes in, and a new build
+clears the caches of the builds before. The page's own files come from the cache first;
+anything else (the translations' repository) from the network. With the ROM and the
+translation kept, the game then plays with no connection at all. The manifest lets the
+browser install the page as an app, standalone, with the project's icon. A service
+worker needs a secure page: HTTPS, or `localhost` while testing.
+
+Checked in a browser:
+
+- the ROM chosen and Spanish downloaded from the repository were both remembered on the
+  next visit;
+- the Saves list read a chapter 10 save (Lv 31, area 10, 4698050 G, 87:23 played);
+- its cartridge export differed from it in the 70 bytes after the copies (from
+  `0x7E43`) alone, all erased, as on the desktop;
+- an `.srm` imported into an empty slot after the browser's question;
+- with the server stopped, the page loaded from its cache with the ROM and the
+  translation remembered, and the game started.
 
