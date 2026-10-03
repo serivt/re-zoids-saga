@@ -25,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     what each slot and the autosave hold, exports them for an emulator, RetroArch or
     the cartridge, and imports a save after asking.
   - **Offline and installable.** Once loaded, the page plays with no connection, and
-    the browser can install it as an app.
+    the browser can install it as an app. It tells when a newer version is out and
+    updates with one button, keeping the ROM, the saves and the options.
   - **Saves in the cloud.** Optional: signed in by a link sent by email, with no
     password, the saves and the achievements follow the player's account from one
     browser to another; the last ten versions of each are kept, and the account and

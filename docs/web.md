@@ -210,6 +210,23 @@ translation kept, the game then plays with no connection at all. The manifest le
 browser install the page as an app, standalone, with the project's icon. A service
 worker needs a secure page: HTTPS, or `localhost` while testing.
 
+**Is it the latest?** A page kept offline could stay on an old version without the
+player knowing. The build writes its version in the page (`<meta name="version">`), in
+the service worker and in `version.json`, which the worker never keeps. The page asks
+the site for `version.json` when it opens, when it is shown again and every half hour
+(not while the game plays, and not offline): the footer then says up to date or update
+available, and a newer version shows a bar over the page with Update now. That button
+asks the worker which version it keeps; when it is not the latest, it updates the worker
+and waits for the new one to take the page over; when even that leaves the old one, it
+drops the site's caches, so the reload asks the site for every file anew, and the worker
+keeps each again as it comes, so offline play comes back by itself. The ROM, the saves
+and the options are elsewhere and stay.
+
+Checked in a browser with two builds: a page of the first, reopened once the second was
+served, showed the bar and update available, and Update now left it on the second, up to
+date; with the site's worker left at the first, the button dropped the caches and the
+reload brought the second just the same.
+
 Checked in a browser:
 
 - the ROM chosen and Spanish downloaded from the repository were both remembered on the
