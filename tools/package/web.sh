@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds the web version: dist/web/, a folder any static web server can
-# serve (the page, its script and style, the game's WebAssembly and its
-# JavaScript glue).
+# serve (the page, its scripts and style, the game's WebAssembly and its
+# JavaScript glue, the manifest and the service worker that caches them
+# under this version, so the page installs and plays offline).
 # Usage: tools/package/web.sh [version]
 #
 # Needs the wasm32-unknown-unknown Rust target and wasm-bindgen-cli at the
@@ -17,6 +18,10 @@ mkdir -p "$OUT/pkg"
 cargo build --release --locked --target wasm32-unknown-unknown -p re-zoids-saga-web
 wasm-bindgen --target web --no-typescript --out-dir "$OUT/pkg" "$WASM"
 cp apps/web/static/* "$OUT/"
+for FILE in sw.js index.html; do
+    sed -i.bak "s/__VERSION__/$VERSION/" "$OUT/$FILE"
+    rm "$OUT/$FILE.bak"
+done
 cp assets/icons/re-zoids-saga.png "$OUT/icon.png"
 cp LICENSE "$OUT/LICENSE.txt"
 echo "Built $OUT ($VERSION); serve it with, for example: python3 -m http.server -d $OUT"

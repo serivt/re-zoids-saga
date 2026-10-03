@@ -1,0 +1,13 @@
+{
+  "name": "Re:Zoids Saga",
+  "short_name": "Re:Zoids Saga",
+  "description": "An unofficial port of Zoids Saga (Game Boy Advance); bring your own ROM.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#0d1430",
+  "theme_color": "#0d1430",
+  "icons": [
+    { "src": "icon.png", "sizes": "681x681", "type": "image/png", "purpose": "any" }
+  ]
+}

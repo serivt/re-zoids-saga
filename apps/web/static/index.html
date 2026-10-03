@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d1430">
   <title>Re:Zoids Saga</title>
   <link rel="icon" href="icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -14,14 +16,22 @@
 
     <section id="drop" class="drop" tabindex="0">
       <p><strong>Choose your Zoids Saga ROM</strong> (Japan, Rev 1), or drop it here.</p>
-      <p class="note">It is read in this browser and never sent anywhere.</p>
+      <p class="note">It is read in this browser and kept only here, so you choose it once;
+        it is never sent anywhere.</p>
       <input id="rom" type="file" accept=".gba,.bin,application/octet-stream">
       <p id="rom-status" class="status" role="status"></p>
+      <button id="forget-rom" class="small" hidden>Forget the ROM</button>
     </section>
 
     <section class="options">
-      <label>Translation <span class="note">(optional .po file)</span>
-        <input id="translation" type="file" accept=".po,text/plain">
+      <label>Translation
+        <select id="language">
+          <option value="">None (Japanese)</option>
+          <option value="file">From a .po file…</option>
+        </select>
+      </label>
+      <label id="translation-file-line" hidden>PO file
+        <input id="translation-file" type="file" accept=".po,text/plain">
       </label>
       <label>Game mode
         <select id="mode">
@@ -55,14 +65,26 @@
       </label>
       <label>Volume <input id="volume" type="range" min="0" max="100" step="10" value="100"></label>
     </section>
+    <p id="translation-status" class="status" role="status"></p>
 
     <button id="play" disabled>Play</button>
 
+    <section id="saves" class="saves" hidden>
+      <h2>Saves</h2>
+      <p class="note">Kept in this browser. Export one for an emulator (.sav), RetroArch
+        (.srm) or as the cartridge would hold it, or import one from them.</p>
+      <table>
+        <tbody id="save-rows"></tbody>
+      </table>
+      <input id="import-file" type="file" accept=".sav,.srm,application/octet-stream" hidden>
+      <p id="save-status" class="status" role="status"></p>
+    </section>
+
     <p class="keys">Arrows move, X = A, Z = B, Return = START, Backspace = SELECT, A = L, S = R,
       M mutes, Space holds the enhanced mode's fast forward; gamepads work too.</p>
-    <p class="note">Saves stay in this browser. Free software under the GPL-3.0:
-      <a href="https://github.com/serivt/re-zoids-saga">source code</a>. Not affiliated with
-      the game's owners.</p>
+    <p class="note">Works offline once loaded, and can be installed from the browser's menu.
+      Free software under the GPL-3.0: <a href="https://github.com/serivt/re-zoids-saga">source
+      code</a>. Not affiliated with the game's owners. <span id="version">Version __VERSION__.</span></p>
   </main>
 
   <div id="stage" hidden>

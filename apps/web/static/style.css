@@ -75,3 +75,19 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 #screen { image-rendering: pixelated; }
 #screen.smooth { image-rendering: auto; }
+
+button.small {
+  padding: 0.2rem 0.6rem;
+  margin: 0 0.25rem 0.25rem 0;
+  font-weight: normal;
+  font-size: 0.85rem;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--dim);
+}
+
+.saves { margin-top: 2rem; }
+.saves h2 { margin: 0 0 0.25rem; font-size: 1.2rem; }
+.saves table { width: 100%; border-collapse: collapse; }
+.saves td { padding: 0.35rem 0.5rem 0.35rem 0; vertical-align: top; border-top: 1px solid var(--panel); }
+.saves td:first-child { white-space: nowrap; color: var(--dim); }

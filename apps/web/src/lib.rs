@@ -15,6 +15,7 @@ mod options;
 mod pacing;
 
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::rc::Rc;
 
 use extraction::{IdentifyError, Title};
@@ -22,6 +23,8 @@ use game_core::port_text::{
     LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
     LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, default_text,
 };
+use game_core::save::{Found, SaveFile};
+use game_core::slots::Slot;
 use game_core::{Game, PlayMode, Translation};
 use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
@@ -83,6 +86,41 @@ pub fn check_rom(rom: &[u8]) -> RomCheck {
     RomCheck {
         playable,
         message: default_text(key).unwrap_or_default().to_owned(),
+    }
+}
+
+/// What the save `bytes` of the game whose ROM is `rom` holds, for the
+/// page's list and an import's question: `Lv 31, area 10, 4698050 G` and,
+/// when the port counted it, `, 87:23 played`; `None` when it holds no game
+/// to continue.
+#[wasm_bindgen]
+#[must_use]
+pub fn save_summary(rom: &[u8], bytes: &[u8]) -> Option<String> {
+    let layout = extraction::saga_save::save_layout(rom).ok()?;
+    let found = SaveFile::new(layout).read(Some(bytes.to_vec()));
+    let Slot::Game(game) = Slot::from_found(&found) else {
+        return None;
+    };
+    let mut summary = format!("Lv {}, area {}, {} G", game.level, game.area, game.money);
+    if let Found::Saved(saved) | Found::Restored(saved) = &found
+        && saved.stats.play_frames > 0
+    {
+        let (hours, minutes, _) = saved.stats.play_time();
+        let _ = write!(summary, ", {hours}:{minutes:02} played");
+    }
+    Some(summary)
+}
+
+/// The save `bytes` of the game whose ROM is `rom` without the port's
+/// notes, as the cartridge itself would hold it (see
+/// `SaveFile::without_port_notes`); as they are when the ROM has no save
+/// layout.
+#[wasm_bindgen]
+#[must_use]
+pub fn cartridge_save(rom: &[u8], bytes: Vec<u8>) -> Vec<u8> {
+    match extraction::saga_save::save_layout(rom) {
+        Ok(layout) => SaveFile::new(layout).without_port_notes(bytes),
+        Err(_) => bytes,
     }
 }
 
@@ -247,6 +285,12 @@ mod tests {
             check.message(),
             default_text(LAUNCHER_ROM_UNREADABLE).unwrap_or_default()
         );
+    }
+
+    #[test]
+    fn a_rom_without_a_save_layout_has_no_saves() {
+        assert_eq!(save_summary(&[0; 64], &[0; 64]), None);
+        assert_eq!(cartridge_save(&[0; 64], vec![7, 8]), vec![7, 8]);
     }
 
     #[test]
