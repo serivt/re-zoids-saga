@@ -296,6 +296,11 @@ fieldset.group > legend { width: 100%; padding: 0; margin-bottom: 16px; }
 .update-in { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding-block: 10px; }
 .update .btn-primary { background: var(--accent-ink); border-color: var(--accent-ink); color: var(--accent); box-shadow: none; }
 .update-note { opacity: .8; }
+.legal { gap: 12px; }
+.legal h3 { font-size: 16px; font-weight: 700; margin-top: 8px; }
+.legal p, .legal li { color: var(--text-2); }
+.legal ul { list-style: disc; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+@media (min-width: 641px) { #privacy-dialog { width: min(680px, calc(100vw - 32px)); } }
 .note-inline { margin-left: 8px; text-transform: none; letter-spacing: 0; }
 
 /* ---------- Mobile ---------- */

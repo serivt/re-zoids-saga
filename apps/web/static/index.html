@@ -296,7 +296,7 @@
             </div>
             <p class="line-status" id="cloud-form-status" role="status"></p>
           </form>
-          <p class="hint"><a href="privacy.html">What is kept, and how to delete it</a></p>
+          <p class="hint"><a href="#privacy" data-privacy>What is kept, and how to delete it</a></p>
         </div>
 
         <div class="group" data-when="link-sent" hidden>
@@ -334,7 +334,7 @@
               <button class="btn" type="button" id="cloud-sync"><svg class="icon" aria-hidden="true"><use href="#i-sync"/></svg>Sync now</button>
             </div>
             <p class="status" id="cloud-status" role="status"></p>
-            <p class="hint"><a href="privacy.html">What is kept, and how to delete it</a></p>
+            <p class="hint"><a href="#privacy" data-privacy>What is kept, and how to delete it</a></p>
           </div>
           <div class="group">
             <h3 class="eyebrow group-h">Danger zone</h3>
@@ -384,7 +384,7 @@
 
   <footer class="wrap foot">
     <p>Re:Zoids Saga is an unofficial fan port. Not affiliated with the game's owners.</p>
-    <p>Free software under the GPL-3.0 · <a href="https://github.com/serivt/re-zoids-saga">Source code</a> · <a href="privacy.html">Privacy</a> · <span class="mono" id="version">__VERSION__</span><span id="version-state"></span></p>
+    <p>Free software under the GPL-3.0 · <a href="https://github.com/serivt/re-zoids-saga">Source code</a> · <a href="#privacy" data-privacy>Privacy</a> · <span class="mono" id="version">__VERSION__</span><span id="version-state"></span></p>
   </footer>
 
   <div class="playbar" id="playbar">
@@ -459,6 +459,56 @@
   </form>
 </dialog>
 
+<dialog id="privacy-dialog" aria-labelledby="privacy-title">
+  <form method="dialog" class="dlg legal">
+    <div class="dlg-head">
+      <div><p class="eyebrow">Re:Zoids Saga</p><h2 class="dlg-title" id="privacy-title">Privacy</h2></div>
+      <button class="btn btn-ghost btn-sm icon-only" value="close" aria-label="Close" autofocus><svg width="20" height="20" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <p class="muted">What this page keeps, where, and how to delete it.</p>
+
+    <h3>In your browser</h3>
+    <p>The ROM you choose is read and kept in this browser alone (its database), so you
+      choose it once. It is never sent anywhere: not to this site, not to the cloud. The
+      saves, the achievements, the translation you chose and the page's options are kept in
+      this browser too. Forget the ROM removes the ROM; clearing the site's data in the
+      browser removes everything.</p>
+
+    <h3>In the cloud, only if you sign in</h3>
+    <p>Signing in is optional. If you do, the cloud keeps:</p>
+    <ul>
+      <li>your email address, to send you the sign-in link and tell your account apart;</li>
+      <li>your saves and achievements, each with what it holds (level, area, money, time
+        played) and when it was stored, and the last ten versions of each save, so one can
+        be taken back;</li>
+      <li>the ROM's fingerprint (its SHA-1), to keep the saves of each ROM apart. It is a
+        number computed from the ROM, not the ROM itself.</li>
+    </ul>
+    <p>The data is used for the cloud saves, and the project's maintainer may look at what
+      the saves hold (level, area, money, time played, achievements unlocked) to see how far
+      the players get. It is never sold or shared, and no other player can reach your
+      saves.</p>
+
+    <h3>Visits</h3>
+    <p>The site counts its visits with Cloudflare Web Analytics, which uses no cookies and
+      keeps nothing in your browser: it counts page views, and the country, browser and
+      device type they come from, without telling one visitor from another. Nothing else is
+      collected: no tracking across sites and no advertising.</p>
+
+    <h3>Deleting it</h3>
+    <p>Delete my account, in the Cloud tab, deletes your account, your email address and
+      every save and version kept in the cloud, at once. The saves in your browser stay.
+      Sign out only stops the syncing.</p>
+
+    <p class="hint">This is a free software project, not affiliated with the game's owners:
+      <a href="https://github.com/serivt/re-zoids-saga" target="_blank" rel="noopener">source code</a>.</p>
+    <div class="dlg-actions">
+      <button class="btn" value="close">Close</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- analytics -->
 <script type="module" src="main.js"></script>
 </body>
 </html>

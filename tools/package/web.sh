@@ -11,8 +11,10 @@
 # Needs the wasm32-unknown-unknown Rust target and wasm-bindgen-cli at the
 # version of the wasm-bindgen crate in Cargo.lock. With SUPABASE_URL and
 # SUPABASE_ANON_KEY (the project's public key) the site in dist/web offers
-# the cloud saves (services/cloud); without them it offers none. The zip
-# never does: a copy served elsewhere has no project to sign in to.
+# the cloud saves (services/cloud); without them it offers none. With
+# CLOUDFLARE_ANALYTICS_TOKEN (Cloudflare Web Analytics' site token, also
+# public) it counts its visits. The zip does neither: a copy served
+# elsewhere has no project to sign in to, nor visits of ours to count.
 
 source "$(dirname "$0")/common.sh"
 
@@ -37,5 +39,14 @@ rm -f "$DIST/$ARCHIVE"
 if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_ANON_KEY:-}" ]; then
     printf "export const CLOUD = { url: '%s', anonKey: '%s' };\n" \
         "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > "$OUT/config.js"
+fi
+if [ -n "${CLOUDFLARE_ANALYTICS_TOKEN:-}" ]; then
+    if [[ ! "$CLOUDFLARE_ANALYTICS_TOKEN" =~ ^[A-Za-z0-9]+$ ]]; then
+        echo "CLOUDFLARE_ANALYTICS_TOKEN must be letters and digits alone" >&2
+        exit 1
+    fi
+    BEACON="<script defer src=\"https://static.cloudflareinsights.com/beacon.min.js\" data-cf-beacon='{\"token\": \"$CLOUDFLARE_ANALYTICS_TOKEN\"}'></script>"
+    sed -i.bak "s#<!-- analytics -->#$BEACON#" "$OUT/index.html"
+    rm "$OUT/index.html.bak"
 fi
 echo "Built $OUT and $DIST/$ARCHIVE ($VERSION); serve it with, for example: python3 -m http.server -d $OUT"

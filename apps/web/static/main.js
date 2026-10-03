@@ -862,6 +862,30 @@ $('#install').addEventListener('click', async () => {
   $('#install').hidden = true;
 });
 
+// The privacy note: a dialog over the page, also opened by the address's
+// #privacy, so it can be linked to.
+
+const privacy = $('#privacy-dialog');
+
+function openPrivacy() {
+  if (!privacy.open) privacy.showModal();
+}
+
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('[data-privacy]')) return;
+  event.preventDefault();
+  openPrivacy();
+});
+privacy.addEventListener('close', () => {
+  if (window.location.hash === '#privacy') {
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+});
+addEventListener('hashchange', () => {
+  if (window.location.hash === '#privacy') openPrivacy();
+});
+if (window.location.hash === '#privacy') openPrivacy();
+
 // Whether this page is the latest version the site serves -----------------
 
 const RUNNING = $('meta[name="version"]')?.content ?? '';

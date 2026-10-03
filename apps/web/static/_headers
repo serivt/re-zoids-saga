@@ -1,12 +1,13 @@
 # The headers the site is served with on Cloudflare (Workers static
 # assets). Every file is revalidated before use, since their names carry no
 # version; the service worker keeps them for offline play. The policy lets
-# the page run its own scripts and the game's WebAssembly, and reach only
-# the translations' repository and the cloud saves' Supabase project.
+# the page run its own scripts, the game's WebAssembly and Cloudflare Web
+# Analytics' beacon, and reach only the translations' repository, the
+# cloud saves' Supabase project and that beacon's endpoint.
 /*
   Cache-Control: no-cache
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Cross-Origin-Opener-Policy: same-origin
   Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://raw.githubusercontent.com https://*.supabase.co; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://static.cloudflareinsights.com; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://raw.githubusercontent.com https://*.supabase.co https://cloudflareinsights.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'

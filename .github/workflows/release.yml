@@ -3,7 +3,8 @@
 # file holding its SHA-256 checksum. A release also publishes the web
 # version's site on Cloudflare (services/site) when the CLOUDFLARE_API_TOKEN
 # secret and the CLOUDFLARE_ACCOUNT_ID variable are set, with the cloud
-# saves when the SUPABASE_URL and SUPABASE_ANON_KEY variables are. The Android app is signed with the keystore in the
+# saves when the SUPABASE_URL and SUPABASE_ANON_KEY variables are, and
+# counting its visits when CLOUDFLARE_ANALYTICS_TOKEN is. The Android app is signed with the keystore in the
 # ANDROID_KEYSTORE_BASE64 secret (ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
 # ANDROID_KEY_PASSWORD), which a release needs; without it a run by hand
 # builds it with the debug key. It is then started on an emulator, without a
@@ -233,6 +234,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
+          CLOUDFLARE_ANALYTICS_TOKEN: ${{ vars.CLOUDFLARE_ANALYTICS_TOKEN }}
         run: tools/package/web.sh "$VERSION"
 
       - name: Checksum

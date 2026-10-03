@@ -16,7 +16,6 @@ const FILES = [
   'cloud.js',
   'sync.js',
   'config.js',
-  'privacy.html',
   'style.css',
   'manifest.webmanifest',
   'icon.png',
