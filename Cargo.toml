@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/platform",
     "crates/platform-sdl3",
+    "crates/platform-web",
     "crates/screen-filters",
     "crates/gba-runtime",
     "crates/formats",
@@ -14,6 +15,7 @@ members = [
     "crates/games/fuzors",
     "apps/launcher",
     "apps/android",
+    "apps/web",
     "apps/extractor-cli",
 ]
 
@@ -26,6 +28,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 platform = { path = "crates/platform" }
 platform-sdl3 = { path = "crates/platform-sdl3" }
+platform-web = { path = "crates/platform-web" }
 screen-filters = { path = "crates/screen-filters" }
 gba-runtime = { path = "crates/gba-runtime" }
 formats = { path = "crates/formats" }

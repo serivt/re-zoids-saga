@@ -1,0 +1,30 @@
+[package]
+name = "re-zoids-saga-web"
+description = "The game in a web browser: the page's WebAssembly, which runs the game on a canvas once the player gives it the ROM."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+extraction.workspace = true
+game-core.workspace = true
+gba-runtime.workspace = true
+platform.workspace = true
+platform-web.workspace = true
+screen-filters.workspace = true
+wasm-bindgen = "0.2"
+web-sys = { version = "0.3", features = [
+    "CustomEvent",
+    "CustomEventInit",
+    "Event",
+    "EventTarget",
+    "HtmlCanvasElement",
+    "Window",
+] }
+
+[lints]
+workspace = true
