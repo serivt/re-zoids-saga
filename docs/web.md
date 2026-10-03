@@ -22,8 +22,9 @@ desktop and on Android. The plan, in phases:
      file, kept the same way;
    - the saves exported and imported as the launcher does;
    - the page installable and playable offline, a progressive web app.
-4. **Saves in the cloud,** optional, with an account: the `.sav` files and the
-   achievements kept by the player's account, never the ROM.
+4. **Saves in the cloud** (done, below): optional, with an account signed in by a link
+   sent by email; the saves and the achievements kept by the player's account, never
+   the ROM.
 
 ## The core in WebAssembly
 
@@ -163,4 +164,75 @@ Checked in a browser:
 - an `.srm` imported into an empty slot after the browser's question;
 - with the server stopped, the page loaded from its cache with the ROM and the
   translation remembered, and the game started.
+
+## Saves in the cloud
+
+Implemented in `services/cloud/supabase/` (the database, its rules and tests, the local
+project's settings) and the page's `cloud.js` (the account and the requests) and
+`sync.js` (the syncing). The backend is a [Supabase](https://supabase.com) project:
+its Auth signs the players in, and its Postgres keeps the saves behind row-level
+security. The page calls their REST APIs directly with `fetch`, with no library, so it
+still works offline.
+
+**The account.** The player gives an email address, and Auth sends a link that signs
+them in on the page (a magic link: no password). The page keeps the session in its
+storage and refreshes it before it runs out. Sign out ends it; Delete my account deletes
+the account, the email and every save in the cloud (`delete_my_account`), the saves in
+the browser staying. The page shows the section only when the build names a project
+(`config.js`), and links to `privacy.html`, which tells the players what is kept and how
+to delete it.
+
+**What the cloud keeps** (`public.saves`, one row per account, ROM and save):
+
+- the ROM's SHA-1, computed in the browser: never the ROM;
+- the save, `slot-1` to `slot-4`, `autosave` or `achievements`, as the page keeps it
+  (Base64, at most 64 KiB);
+- what it holds, for the lists;
+- when the server stored it.
+
+Each change keeps the version before in `public.save_history`, the last ten of each
+save. Every row is the signed-in player's own: the rules let them read, add, change and
+remove their own alone, and the history read alone. The server refuses a slot the game
+has not, or a ROM not named by a SHA-1.
+
+**The syncing.** Each save remembers its last sync: the cloud's time and the browser's.
+
+- A save changed in one place only since then goes to the other. One taken from the
+  cloud keeps the browser's as `.bak`.
+- A save changed in both, or found in both before any sync, is a conflict. The Saves
+  list shows what each holds, to keep the browser's (sent to the cloud) or take the
+  cloud's.
+- The achievements never conflict: the two lists are joined, and each side gets the
+  whole.
+
+The page syncs when it opens and once a ROM is chosen, both ways. While the game plays,
+it only sends what changed, every minute and when the page is hidden, so nothing changes
+under the game.
+
+**Testing it locally** needs Docker and the Supabase CLI. No account is needed: the
+local project's mail never leaves the machine, and its web view shows the links.
+
+```bash
+supabase start --workdir services/cloud        # the database, Auth and a mail box
+supabase test db --workdir services/cloud      # the rules' tests (pgTAP)
+SUPABASE_URL=http://127.0.0.1:54321 \
+SUPABASE_ANON_KEY=<the anon key "supabase status" prints> tools/package/web.sh
+```
+
+Serve `dist/web` on `http://localhost:8737`: that is the address the local Auth sends
+its links back to (`services/cloud/supabase/config.toml`).
+
+**Deploying it** is done on the project owner's own Supabase account:
+
+1. Create a project, then link the folder (`supabase link --workdir services/cloud
+   --project-ref <ref>`) and push the database (`supabase db push --workdir
+   services/cloud`).
+2. In the project's Auth settings:
+   - set the site URL and the redirect URLs to the page's address (HTTPS);
+   - set an SMTP server for the emails, since Supabase's own sends very few an hour.
+3. Build the page with `SUPABASE_URL` and `SUPABASE_ANON_KEY` from the project's API
+   settings.
+
+The anon key is meant for browsers: the rules are what keep each player to their own
+rows. The service role key must never reach the page.
 

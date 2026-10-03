@@ -146,6 +146,10 @@ re-zoids-saga/
 │   └── extractor-cli/           # thin CLI over crates/extraction for development and
 │                                # debugging (inspect/dump extracted data)
 │
+├── services/
+│   └── cloud/                   # the web version's cloud saves: the Supabase project's
+│                                # database, rules, tests and local settings (docs/web.md)
+│
 ├── assets/                      # original assets created for this project (committable)
 │   └── fonts/
 │       ├── latin/
