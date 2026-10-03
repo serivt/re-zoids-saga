@@ -135,19 +135,20 @@ copy, and the ROM chosen or dropped anywhere on the page is read in the browser,
 sent anywhere, and played only when it is the supported dump. Play sits under it, with a
 line of what the options choose; on a phone a bar keeps Play in reach once the button
 scrolls away. The rest is in tabs: Options (the translation, the mode, classic at first,
-and, while it is the enhanced one, its settings, the picture, folded under a line of
-what it chooses, with the launcher's eight display presets (Modern first, and chosen at
-first), which set the screen filter, the scaling, the upscaler, the colors and the trail
-together and show which one the options match, the sound and the touch pad), Saves,
-Cloud (when the build has a cloud project) and Help (the keys, the gamepad, offline and
-installing). The options are remembered. A gamepad moves through the page too: the D-pad
-or the stick moves, A chooses, B goes back. The sound starts on Play, since a browser
-lets a page make sound only after the player has pressed something; when the pad will
-show, Play also asks the browser for the whole screen, where the browser lets a page
-take it (not every phone's does). While the game plays, Esc or the button at the
-screen's corner pauses it under a menu: resume, the volume, the scaling, the pad's
-opacity and whether it shows, and the way back to the launcher, which loses what was not
-saved. It links to the source code, as the GPL asks of a program handed to the browser.
+with a tip on what the enhanced one adds, and, while it is the enhanced one, its
+settings, the picture, folded under a line of what it chooses, with the launcher's eight
+display presets (Modern first, and chosen at first), which set the screen filter, the
+scaling, the upscaler, the colors and the trail together and show which one the options
+match, the sound and the touch pad), Saves, Cloud (when the build has a cloud project)
+and Help (the keys, the gamepad, offline and installing). The options are remembered. A
+gamepad moves through the page too: the D-pad or the stick moves, A chooses, B goes
+back. The sound starts on Play, since a browser lets a page make sound only after the
+player has pressed something; when the pad will show, Play also asks the browser for the
+whole screen, where the browser lets a page take it (not every phone's does). While the
+game plays, Esc or the button at the screen's corner pauses it under a menu: resume, the
+volume, the scaling, the pad's opacity and whether it shows, and the way back to the
+launcher, which loses what was not saved. It links to the source code, as the GPL asks
+of a program handed to the browser.
 
 To build it and play it locally:
 
