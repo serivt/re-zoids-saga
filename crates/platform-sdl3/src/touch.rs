@@ -1,50 +1,25 @@
 //! The on-screen pad on a touch screen, through SDL3: the fingers SDL
 //! reports, the buttons they hold (laid out by [`TouchLayout`]) and the
-//! controls drawn around the game's screen, translucent, brighter while
-//! held, with their letters in a small pixel font of the port's own.
+//! controls drawn around the game's screen in the style of
+//! [`platform::touch`]: translucent, brighter while held, with their
+//! letters in a small pixel font of the port's own.
 //!
 //! Source of knowledge: this project's own design.
 
-use platform::touch::{Control, Shape};
+use platform::touch::{
+    ARM_LENGTH, ARM_THICKNESS, BAR_LETTER_SCALE, Control, Fingers, GLYPH_ROWS, HELD_OPACITY,
+    IDLE_OPACITY, LETTER_HEIGHT, MARK_OPACITY, Shape, label, label_cells,
+};
 use platform::{Button, Input, TouchLayout};
 use sdl3::pixels::FColor;
 use sdl3::render::{FPoint, FRect, Vertex, WindowCanvas};
 
 /// Segments of a drawn circle.
 const SEGMENTS: usize = 40;
-const IDLE: FColor = FColor {
-    r: 1.0,
-    g: 1.0,
-    b: 1.0,
-    a: 0.18,
-};
-const HELD: FColor = FColor {
-    r: 1.0,
-    g: 1.0,
-    b: 1.0,
-    a: 0.45,
-};
-const MARK: FColor = FColor {
-    r: 1.0,
-    g: 1.0,
-    b: 1.0,
-    a: 0.6,
-};
-/// The letters' cells against a control's height, and their rows.
-const LETTER_HEIGHT: f32 = 0.34;
-const GLYPH_ROWS: usize = 5;
-/// The cross's arms against its radius: length and thickness.
-const ARM_LENGTH: f32 = 0.8;
-const ARM_THICKNESS: f32 = 0.34;
 
 /// The fingers on the screen and where the controls are.
 pub(crate) struct TouchPad {
-    fingers: Vec<(u64, (f32, f32))>,
-    /// Fingers that touched and lifted since the last events were read,
-    /// held for one frame so a quick tap still presses its button.
-    tapped: Vec<(f32, f32)>,
-    /// The fingers that came down since the last events were read.
-    new: Vec<u64>,
+    fingers: Fingers,
     layout: TouchLayout,
     window: (u32, u32),
     frame: (f32, f32),
@@ -62,9 +37,7 @@ impl TouchPad {
     pub(crate) fn new(frame: (usize, usize)) -> Self {
         let frame = (to_f32(frame.0), to_f32(frame.1));
         Self {
-            fingers: Vec::new(),
-            tapped: Vec::new(),
-            new: Vec::new(),
+            fingers: Fingers::default(),
             layout: TouchLayout::new(frame, frame),
             window: (0, 0),
             frame,
@@ -111,47 +84,25 @@ impl TouchPad {
     /// A new batch of events is about to be read: the taps of the last one
     /// have had their frame.
     pub(crate) fn start_events(&mut self) {
-        self.tapped.clear();
-        self.new.clear();
+        self.fingers.read();
     }
 
     /// Finger `id` is now at `at`, SDL's position across the window from
     /// 0 to 1, or has left the screen (`None`).
     pub(crate) fn finger(&mut self, id: u64, at: Option<(f32, f32)>) {
-        let lifted = self
-            .fingers
-            .iter()
-            .find(|(finger, _)| *finger == id)
-            .map(|(_, position)| *position);
-        self.fingers.retain(|(finger, _)| *finger != id);
-        match (at, lifted) {
-            (None, Some(position)) if self.new.contains(&id) => self.tapped.push(position),
-            (Some(_), None) => self.new.push(id),
-            _ => {}
-        }
-        if let Some((x, y)) = at {
-            let (width, height) = self.window;
-            self.fingers
-                .push((id, (x * to_f32_u32(width), y * to_f32_u32(height))));
-        }
+        let (width, height) = (to_f32_u32(self.window.0), to_f32_u32(self.window.1));
+        self.fingers
+            .set(id, at.map(|(x, y)| (x * width, y * height)));
     }
 
     /// Lets go of every finger, as when the app leaves the screen.
     pub(crate) fn release(&mut self) {
-        self.fingers.clear();
-        self.tapped.clear();
-        self.new.clear();
+        self.fingers.release();
     }
 
     /// The buttons the fingers hold, and those of the taps just made.
     pub(crate) fn input(&self) -> Input {
-        let fingers: Vec<(f32, f32)> = self
-            .fingers
-            .iter()
-            .map(|(_, at)| *at)
-            .chain(self.tapped.iter().copied())
-            .collect();
-        self.layout.input(&fingers)
+        self.layout.input(&self.fingers.positions())
     }
 
     /// Draws the controls, those `held` brighter.
@@ -174,7 +125,7 @@ impl TouchPad {
                     let middle = (area.x + area.width / 2.0, area.y + radius);
                     let ends = (area.x + radius, area.x + area.width - radius);
                     fan(canvas, middle, &stadium(ends, middle.1, radius), color)?;
-                    let height = area.height * LETTER_HEIGHT * 1.4;
+                    let height = area.height * LETTER_HEIGHT * BAR_LETTER_SCALE;
                     letters(canvas, label(button), middle, height, palette.mark)?;
                 }
                 (Control::Cross, Shape::Pill(_)) => {}
@@ -193,14 +144,16 @@ struct Palette {
 
 impl Palette {
     fn new(opacity: f32) -> Self {
-        let faded = |color: FColor| FColor {
-            a: color.a * opacity,
-            ..color
+        let white = |alpha: f32| FColor {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: alpha * opacity,
         };
         Self {
-            idle: faded(IDLE),
-            held: faded(HELD),
-            mark: faded(MARK),
+            idle: white(IDLE_OPACITY),
+            held: white(HELD_OPACITY),
+            mark: white(MARK_OPACITY),
         }
     }
 
@@ -321,58 +274,22 @@ fn letters(
     color: FColor,
 ) -> Result<(), sdl3::Error> {
     let cell = height / to_f32(GLYPH_ROWS);
-    let widths: Vec<usize> = text.chars().map(|ch| glyph(ch)[0].len()).collect();
-    let columns = widths.iter().sum::<usize>() + widths.len().saturating_sub(1);
-    let mut x = middle.0 - to_f32(columns) * cell / 2.0;
+    let (marks, columns) = label_cells(text);
+    let left = middle.0 - to_f32(columns) * cell / 2.0;
     let top = middle.1 - height / 2.0;
-    let mut cells = Vec::new();
-    for ch in text.chars() {
-        let rows = glyph(ch);
-        for (row, line) in rows.iter().enumerate() {
-            for (column, mark) in line.bytes().enumerate() {
-                if mark == b'#' {
-                    cells.push(FRect::new(
-                        x + to_f32(column) * cell,
-                        top + to_f32(row) * cell,
-                        cell,
-                        cell,
-                    ));
-                }
-            }
-        }
-        x += to_f32(rows[0].len() + 1) * cell;
-    }
+    let cells: Vec<FRect> = marks
+        .into_iter()
+        .map(|(column, row)| {
+            FRect::new(
+                left + to_f32(column) * cell,
+                top + to_f32(row) * cell,
+                cell,
+                cell,
+            )
+        })
+        .collect();
     canvas.set_draw_color(color);
     canvas.fill_rects(&cells)
-}
-
-fn label(button: Button) -> &'static str {
-    match button {
-        Button::A => "A",
-        Button::B => "B",
-        Button::L => "L",
-        Button::R => "R",
-        Button::Start => "START",
-        Button::Select => "SELECT",
-        Button::FastForward => ">>",
-        Button::Mute | Button::Up | Button::Down | Button::Left | Button::Right => "",
-    }
-}
-
-/// The letters the labels use, five rows each.
-fn glyph(ch: char) -> [&'static str; GLYPH_ROWS] {
-    match ch {
-        'A' => [".#.", "#.#", "###", "#.#", "#.#"],
-        'B' => ["##.", "#.#", "##.", "#.#", "##."],
-        'C' => [".##", "#..", "#..", "#..", ".##"],
-        'E' => ["###", "#..", "##.", "#..", "###"],
-        'L' => ["#..", "#..", "#..", "#..", "###"],
-        'R' => ["##.", "#.#", "##.", "#.#", "#.#"],
-        'S' => [".##", "#..", ".#.", "..#", "##."],
-        'T' => ["###", ".#.", ".#.", ".#.", ".#."],
-        '>' => ["#..", ".#.", "..#", ".#.", "#.."],
-        _ => ["...", "...", "...", "...", "..."],
-    }
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -388,17 +305,6 @@ fn to_f32_u32(value: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_label_letter_has_a_glyph_of_the_same_width_per_row() {
-        for button in Button::ALL {
-            for ch in label(button).chars() {
-                let rows = glyph(ch);
-                assert!(rows.iter().all(|row| row.len() == rows[0].len()));
-                assert!(rows.iter().any(|row| row.contains('#')), "{ch}");
-            }
-        }
-    }
 
     #[test]
     fn fingers_follow_the_window_and_lift() {

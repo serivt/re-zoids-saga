@@ -1,7 +1,9 @@
 //! The on-screen pad for touch screens: where the game's screen and each
-//! control sit in a window, and which buttons the fingers on them hold.
-//! Only layout and hit testing live here; the backend draws the controls
-//! and reports the fingers, in window pixels.
+//! control sit in a window, which buttons the fingers on them hold, and
+//! how every backend draws them alike (their translucency, the cross's
+//! arms, the labels' letters in a small pixel font of the port's own).
+//! The backend draws the controls and reports the fingers, in window
+//! pixels.
 //!
 //! In landscape the screen fills the window's height in the middle, the
 //! cross and Select on the left, A, B and Start on the right, L and R in
@@ -240,6 +242,132 @@ impl TouchLayout {
             }
         }
         input
+    }
+}
+
+/// The controls' opacity, from 0 to 1, at the usual style: idle, held and
+/// their marks (the letters).
+pub const IDLE_OPACITY: f32 = 0.18;
+/// See [`IDLE_OPACITY`].
+pub const HELD_OPACITY: f32 = 0.45;
+/// See [`IDLE_OPACITY`].
+pub const MARK_OPACITY: f32 = 0.6;
+/// The letters' height against a round button's diameter or a bar's
+/// height.
+pub const LETTER_HEIGHT: f32 = 0.34;
+/// The bars' letters against [`LETTER_HEIGHT`], larger since bars are
+/// low.
+pub const BAR_LETTER_SCALE: f32 = 1.4;
+/// The cross's arms against its radius: length and thickness.
+pub const ARM_LENGTH: f32 = 0.8;
+/// See [`ARM_LENGTH`].
+pub const ARM_THICKNESS: f32 = 0.34;
+/// The rows of a label's letters.
+pub const GLYPH_ROWS: usize = 5;
+
+/// The letters a control shows.
+#[must_use]
+pub fn label(button: Button) -> &'static str {
+    match button {
+        Button::A => "A",
+        Button::B => "B",
+        Button::L => "L",
+        Button::R => "R",
+        Button::Start => "START",
+        Button::Select => "SELECT",
+        Button::FastForward => ">>",
+        Button::Mute | Button::Up | Button::Down | Button::Left | Button::Right => "",
+    }
+}
+
+/// A label's letter, [`GLYPH_ROWS`] rows of `#` (ink) and `.` (none), all
+/// as wide.
+#[must_use]
+pub fn glyph(ch: char) -> [&'static str; GLYPH_ROWS] {
+    match ch {
+        'A' => [".#.", "#.#", "###", "#.#", "#.#"],
+        'B' => ["##.", "#.#", "##.", "#.#", "##."],
+        'C' => [".##", "#..", "#..", "#..", ".##"],
+        'E' => ["###", "#..", "##.", "#..", "###"],
+        'L' => ["#..", "#..", "#..", "#..", "###"],
+        'R' => ["##.", "#.#", "##.", "#.#", "#.#"],
+        'S' => [".##", "#..", ".#.", "..#", "##."],
+        'T' => ["###", ".#.", ".#.", ".#.", ".#."],
+        '>' => ["#..", ".#.", "..#", ".#.", "#.."],
+        _ => ["...", "...", "...", "...", "..."],
+    }
+}
+
+/// `text`'s inked cells as (column, row), and how many columns it takes,
+/// a column apart between letters.
+#[must_use]
+pub fn label_cells(text: &str) -> (Vec<(usize, usize)>, usize) {
+    let mut cells = Vec::new();
+    let mut left = 0;
+    for ch in text.chars() {
+        let rows = glyph(ch);
+        for (row, line) in rows.iter().enumerate() {
+            for (column, mark) in line.bytes().enumerate() {
+                if mark == b'#' {
+                    cells.push((left + column, row));
+                }
+            }
+        }
+        left += rows[0].len() + 1;
+    }
+    (cells, left.saturating_sub(1))
+}
+
+/// The fingers on the screen, by the backend's id for each: where they
+/// are, in window pixels, and those that touched and lifted since the
+/// buttons were last read, held for one reading so a quick tap still
+/// presses its button.
+#[derive(Debug, Clone, Default)]
+pub struct Fingers {
+    down: Vec<(u64, (f32, f32))>,
+    tapped: Vec<(f32, f32)>,
+    new: Vec<u64>,
+}
+
+impl Fingers {
+    /// Finger `id` is now at `at`, or has left the screen (`None`).
+    pub fn set(&mut self, id: u64, at: Option<(f32, f32)>) {
+        let lifted = self
+            .down
+            .iter()
+            .find(|(finger, _)| *finger == id)
+            .map(|(_, position)| *position);
+        self.down.retain(|(finger, _)| *finger != id);
+        match (at, lifted) {
+            (None, Some(position)) if self.new.contains(&id) => self.tapped.push(position),
+            (Some(_), None) => self.new.push(id),
+            _ => {}
+        }
+        if let Some(position) = at {
+            self.down.push((id, position));
+        }
+    }
+
+    /// The buttons have been read: the taps since have had their reading.
+    pub fn read(&mut self) {
+        self.tapped.clear();
+        self.new.clear();
+    }
+
+    /// Lets go of every finger, as when the game leaves the screen.
+    pub fn release(&mut self) {
+        self.down.clear();
+        self.read();
+    }
+
+    /// Where the fingers down and the taps not yet read are.
+    #[must_use]
+    pub fn positions(&self) -> Vec<(f32, f32)> {
+        self.down
+            .iter()
+            .map(|(_, at)| *at)
+            .chain(self.tapped.iter().copied())
+            .collect()
     }
 }
 
@@ -484,6 +612,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn fingers_hold_while_down_and_a_quick_tap_for_one_reading() {
+        let mut fingers = Fingers::default();
+        fingers.set(7, Some((1.0, 2.0)));
+        assert_eq!(fingers.positions(), [(1.0, 2.0)]);
+        fingers.read();
+        fingers.set(7, None);
+        assert!(
+            fingers.positions().is_empty(),
+            "a held finger lifts at once"
+        );
+        fingers.set(9, Some((3.0, 4.0)));
+        fingers.set(9, Some((5.0, 6.0)));
+        fingers.set(9, None);
+        assert_eq!(fingers.positions(), [(5.0, 6.0)], "a quick tap holds");
+        fingers.read();
+        assert!(fingers.positions().is_empty());
+        fingers.set(8, Some((1.0, 1.0)));
+        fingers.release();
+        assert!(fingers.positions().is_empty());
+    }
+
+    #[test]
+    fn every_label_has_glyphs_of_one_width_and_some_ink() {
+        for button in Button::ALL {
+            for ch in label(button).chars() {
+                let rows = glyph(ch);
+                assert!(rows.iter().all(|row| row.len() == rows[0].len()));
+                assert!(rows.iter().any(|row| row.contains('#')), "{ch}");
+            }
+        }
+        let (cells, columns) = label_cells("LA");
+        assert_eq!(columns, 7);
+        assert!(cells.contains(&(0, 4)) && cells.contains(&(5, 0)));
+        assert_eq!(label_cells(""), (Vec::new(), 0));
     }
 
     #[test]
