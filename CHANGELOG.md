@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   soon as it is continued. Each unlock slides a window down at the field's top, and the
   pause menu has an Achievements line before Quit that lists them in pages, unlocked or
   not. They are shared by every save of the ROM, in a `.achievements` file beside them.
+
+## [0.5.0] - 2026-10-02
+
+### Added
+
 - **Mute.** M (or the key or gamepad button chosen for it in the options) turns the sound
   off and, pressed again, back on, in either mode; a small MUTE mark shows at the top
   right while it is off.
