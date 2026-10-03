@@ -22,28 +22,31 @@ use extraction::{Identification, IdentifyError, Title};
 use game_core::FAST_FORWARD_SPEEDS;
 use game_core::port_text::{
     LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_AUTO_TEXT, LAUNCHER_AUTOSAVE, LAUNCHER_BACK,
-    LAUNCHER_BATTLE_ANIMATIONS, LAUNCHER_CHOOSE_TRANSLATION, LAUNCHER_CLASSIC,
+    LAUNCHER_BATTLE_ANIMATIONS, LAUNCHER_CANCEL, LAUNCHER_CHOOSE_TRANSLATION, LAUNCHER_CLASSIC,
     LAUNCHER_CLASSIC_NOTE, LAUNCHER_COLOR_DS, LAUNCHER_COLOR_GBA, LAUNCHER_COLOR_GBA_SP,
     LAUNCHER_COLOR_GBA_SP_FRONTLIT, LAUNCHER_COLOR_MICRO, LAUNCHER_COLOR_ORIGINAL, LAUNCHER_COLORS,
     LAUNCHER_CONTROLS_HELP, LAUNCHER_COPY_FAILED, LAUNCHER_CUSTOM, LAUNCHER_DAMAGE_NUMBERS,
     LAUNCHER_DEFAULT_KEYS, LAUNCHER_DISPLAY, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED,
     LAUNCHER_DOWNLOADED, LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS, LAUNCHER_ENHANCED,
-    LAUNCHER_ENHANCED_NOTE, LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED,
-    LAUNCHER_FAST_FORWARD, LAUNCHER_FILTER, LAUNCHER_FROM_FILE, LAUNCHER_FULLSCREEN,
-    LAUNCHER_GAMEPAD, LAUNCHER_HELP, LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP, LAUNCHER_IMPORTED,
-    LAUNCHER_KEYBOARD, LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LCD,
-    LAUNCHER_LCD_FINE, LAUNCHER_LCD_SOFT, LAUNCHER_LEFT, LAUNCHER_LICENSE, LAUNCHER_LOOKING_UP,
-    LAUNCHER_MODE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM, LAUNCHER_NO_TRANSLATION,
-    LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON, LAUNCHER_OPENS_PAGE,
-    LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED, LAUNCHER_PICK_ABOUT,
-    LAUNCHER_PICK_MODE, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM, LAUNCHER_PICK_TOUCH_OPTIONS,
+    LAUNCHER_ENHANCED_NOTE, LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORT_SRM,
+    LAUNCHER_EXPORT_SRM_HELP, LAUNCHER_EXPORT_STRICT, LAUNCHER_EXPORT_STRICT_HELP,
+    LAUNCHER_EXPORTED, LAUNCHER_FAST_FORWARD, LAUNCHER_FILTER, LAUNCHER_FROM_FILE,
+    LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD, LAUNCHER_HELP, LAUNCHER_IMPORT, LAUNCHER_IMPORT_CHECK,
+    LAUNCHER_IMPORT_FILE, LAUNCHER_IMPORT_HELP, LAUNCHER_IMPORTED, LAUNCHER_KEYBOARD,
+    LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LCD, LAUNCHER_LCD_FINE,
+    LAUNCHER_LCD_SOFT, LAUNCHER_LEFT, LAUNCHER_LICENSE, LAUNCHER_LOOKING_UP, LAUNCHER_MODE,
+    LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM, LAUNCHER_NO_TRANSLATION, LAUNCHER_NOT_A_SAVE,
+    LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON, LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS,
+    LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED, LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_MODE,
+    LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM, LAUNCHER_PICK_TOUCH_OPTIONS,
     LAUNCHER_PICK_TRANSLATION, LAUNCHER_PIXEL_ART, LAUNCHER_PLAY, LAUNCHER_PRESET,
     LAUNCHER_PRESET_DS, LAUNCHER_PRESET_GBA, LAUNCHER_PRESET_GBA_SP,
     LAUNCHER_PRESET_GBA_SP_FRONTLIT, LAUNCHER_PRESET_MICRO, LAUNCHER_PRESET_MODERN,
     LAUNCHER_PRESET_PLAYER, LAUNCHER_PRESET_SMOOTH_PIXEL_ART, LAUNCHER_PRESS_KEY,
-    LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT,
-    LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER,
-    LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SAVES,
+    LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_REPLACE,
+    LAUNCHER_RIGHT, LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE,
+    LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED,
+    LAUNCHER_SAVE_LEVEL, LAUNCHER_SAVE_MONEY, LAUNCHER_SAVE_PLAYED, LAUNCHER_SAVES,
     LAUNCHER_SAVES_HELP, LAUNCHER_SCANLINES, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY,
     LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP,
     LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY,
@@ -63,7 +66,7 @@ use screen_filters::{ColorProfile, TrailMode, Upscaler};
 
 use crate::download::{Answer, Download, Language};
 use crate::quit::QuitPrompt;
-use crate::saves;
+use crate::saves::{self, ExportKind, SaveSummary};
 use crate::settings::{FULL_VOLUME, GameMode, SCALES, Settings, TOUCH_OPACITIES, TOUCH_SIZES};
 use crate::update::{RELEASES_URL, UpdateCheck, Version};
 
@@ -107,6 +110,8 @@ const FIRST_LINE_Y: usize = 52;
 const LINE_HEIGHT: usize = 10;
 const OPTIONS_FIRST_LINE_Y: usize = 51;
 const OPTION_LINE_HEIGHT: usize = 10;
+/// The options' and the display's lines, closer so eight fit the panel.
+const SETTING_LINE_HEIGHT: usize = 9;
 /// Rows the about screen's page lines skip, their address below them.
 const PAGE_ROWS: usize = 2;
 /// How far a page's address sits right of its label.
@@ -216,13 +221,14 @@ enum Setting {
 }
 
 /// The options on the desktop.
-const DESKTOP_SETTINGS: [Setting; 7] = [
+const DESKTOP_SETTINGS: [Setting; 8] = [
     Setting::Keyboard,
     Setting::Gamepad,
     Setting::Window,
     Setting::Fullscreen,
     Setting::Display,
     Setting::Volume,
+    Setting::Saves,
     Setting::Back,
 ];
 
@@ -373,9 +379,15 @@ enum Screen {
     Translations(usize),
     /// The save slots, with the line under the cursor.
     Saves(usize),
-    /// What to do with save slot `slot` (from 0), with the line under the
-    /// cursor.
+    /// What to do with save slot `slot` (from 0), or with the autosave
+    /// ([`AUTOSAVE_LINE`]), with the line under the cursor.
     Slot {
+        slot: usize,
+        line: usize,
+    },
+    /// The save chosen to import into slot `slot`, against what the slot
+    /// holds, with the line under the cursor: replace it, or cancel.
+    ConfirmImport {
         slot: usize,
         line: usize,
     },
@@ -578,6 +590,9 @@ pub struct Front {
     save_choice: Option<(SaveAction, usize, FileChoice)>,
     /// The message of the last export or import.
     save_status: Option<&'static str>,
+    /// The save chosen to import, until the player replaces the slot's
+    /// with it or cancels.
+    pending_import: Option<PendingImport>,
     line: usize,
     screen: Screen,
     choosing: Option<(Line, FileChoice)>,
@@ -637,6 +652,7 @@ impl Front {
             download_failure: None,
             save_choice: None,
             save_status: None,
+            pending_import: None,
             unopened: false,
             update_check: None,
             newer: None,
@@ -775,6 +791,7 @@ impl Front {
                 (Event::Back, Screen::Saves(_)) => self.screen = saves_option(),
                 (Event::Back, Screen::Display(_)) => self.screen = display_option(),
                 (Event::Back, Screen::Slot { slot, .. }) => self.screen = Screen::Saves(slot),
+                (Event::Back, Screen::ConfirmImport { slot, .. }) => self.cancel_import(slot),
                 (Event::Back, Screen::Main) if self.choosing.is_none() => {
                     self.quitting = match self.quitting {
                         Some(_) => None,
@@ -859,7 +876,12 @@ impl Front {
                 let (action, slot) = (*action, *slot);
                 self.save_choice = None;
                 if let Some(path) = answer {
-                    self.save_status = Some(self.copy_save(action, slot, &path));
+                    match action {
+                        SaveAction::Export(kind) => {
+                            self.save_status = Some(self.export_save(kind, slot, &path));
+                        }
+                        SaveAction::Import => self.prepare_import(slot, &path),
+                    }
                 }
             }
             return Ok(Step::Stay);
@@ -872,6 +894,7 @@ impl Front {
             Screen::Translations(line) => self.update_translations(display, line, pressed)?,
             Screen::Saves(line) => self.update_saves(line, pressed),
             Screen::Slot { slot, line } => self.update_slot(display, slot, line, pressed)?,
+            Screen::ConfirmImport { slot, line } => self.update_confirm(slot, line, pressed),
             Screen::Options(line) => self.update_options(line, pressed),
             Screen::Display(line) => self.update_display(line, pressed),
             Screen::Mode(line) => self.update_mode(line, pressed),
@@ -910,7 +933,7 @@ impl Front {
             }
             Screen::Options(_) => {
                 let Some(line) =
-                    row_at(y, OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, SETTINGS.len())
+                    row_at(y, OPTIONS_FIRST_LINE_Y, SETTING_LINE_HEIGHT, SETTINGS.len())
                 else {
                     return Input::default();
                 };
@@ -935,7 +958,7 @@ impl Front {
                 let Some(line) = row_at(
                     y,
                     OPTIONS_FIRST_LINE_Y,
-                    OPTION_LINE_HEIGHT,
+                    SETTING_LINE_HEIGHT,
                     DISPLAY_SETTINGS.len(),
                 ) else {
                     return Input::default();
@@ -972,23 +995,47 @@ impl Front {
                 self.screen = Screen::Translations(line);
                 chosen
             }
+            Screen::Saves(_) | Screen::Slot { .. } | Screen::ConfirmImport { .. } => {
+                self.tap_saves(y, chosen)
+            }
+            Screen::Bindings { .. } => Input::default(),
+        }
+    }
+
+    /// A tap at row `y` of the saves' screens: the line under it becomes
+    /// the selected one, and `chosen` is what it presses.
+    fn tap_saves(&mut self, y: usize, chosen: Input) -> Input {
+        match self.screen {
             Screen::Saves(_) => {
-                let Some(line) = row_at(y, OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, SLOTS + 1)
+                let Some(line) = row_at(y, OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, SAVES_LINES)
                 else {
                     return Input::default();
                 };
                 self.screen = Screen::Saves(line);
                 chosen
             }
+            Screen::ConfirmImport { slot, .. } => {
+                let rows = CONFIRM_INFO_ROWS + CONFIRM_LINES;
+                let Some(row) = row_at(y, OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, rows)
+                    .filter(|row| *row >= CONFIRM_INFO_ROWS)
+                else {
+                    return Input::default();
+                };
+                self.screen = Screen::ConfirmImport {
+                    slot,
+                    line: row - CONFIRM_INFO_ROWS,
+                };
+                chosen
+            }
             Screen::Slot { slot, .. } => {
-                let count = SLOT_ACTIONS.len();
+                let count = slot_actions(slot).len();
                 let Some(line) = row_at(y, OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, count) else {
                     return Input::default();
                 };
                 self.screen = Screen::Slot { slot, line };
                 chosen
             }
-            Screen::Bindings { .. } => Input::default(),
+            _ => Input::default(),
         }
     }
 
@@ -1135,13 +1182,13 @@ impl Front {
             line = line.saturating_sub(1);
         }
         if pressed.is_held(Button::Down) {
-            line = (line + 1).min(SLOTS);
+            line = (line + 1).min(SAVES_LINES - 1);
         }
         self.screen = Screen::Saves(line);
         if !pressed.is_held(Button::A) {
             return;
         }
-        if line == SLOTS {
+        if line == SAVES_LINES - 1 {
             self.screen = saves_option();
         } else if self.rom.is_some() {
             self.save_status = None;
@@ -1154,9 +1201,10 @@ impl Front {
         }
     }
 
-    /// A slot's screen: up and down move, X exports the slot's save or
-    /// imports one through the system's dialog, or goes back, and so does
-    /// Z.
+    /// A slot's screen: up and down move, X exports the slot's save (for an
+    /// emulator, for `RetroArch`, or without the port's notes) or imports one
+    /// through the system's dialog, or goes back, and so does Z. The
+    /// autosave's is the same without the import.
     fn update_slot(
         &mut self,
         display: &Sdl3Display,
@@ -1172,8 +1220,9 @@ impl Front {
         if pressed.is_held(Button::Up) {
             line = line.saturating_sub(1);
         }
+        let actions = slot_actions(slot);
         if pressed.is_held(Button::Down) {
-            line = (line + 1).min(SLOT_ACTIONS.len() - 1);
+            line = (line + 1).min(actions.len() - 1);
         }
         self.screen = Screen::Slot { slot, line };
         if !pressed.is_held(Button::A) {
@@ -1183,15 +1232,19 @@ impl Front {
             return Ok(());
         };
         self.save_status = None;
-        match SLOT_ACTIONS[line] {
-            SlotLine::Action(SaveAction::Export) => {
-                if !saves::slot_file(rom, slot).is_file() {
+        match actions[line] {
+            SlotLine::Action(SaveAction::Export(kind)) => {
+                if !source_file(rom, slot).is_file() {
                     self.save_status = Some(LAUNCHER_SLOT_EMPTY);
                     return Ok(());
                 }
-                let name = PathBuf::from(saves::export_name(slot));
-                let choice = display.choose_file_to_write(&SAVE_FILTERS, Some(&name))?;
-                self.save_choice = Some((SaveAction::Export, slot, choice));
+                let name = PathBuf::from(saves::export_name(rom, kind));
+                let filter = match kind {
+                    ExportKind::RetroArch => ("RetroArch save (.srm)", "srm"),
+                    ExportKind::Emulator | ExportKind::Strict => ("Save (.sav)", "sav"),
+                };
+                let choice = display.choose_file_to_write(&[filter], Some(&name))?;
+                self.save_choice = Some((SaveAction::Export(kind), slot, choice));
             }
             SlotLine::Action(SaveAction::Import) => {
                 let choice = display.choose_file(&SAVE_FILTERS, None)?;
@@ -1202,29 +1255,79 @@ impl Front {
         Ok(())
     }
 
-    /// Exports slot `slot`'s save to `path`, or imports the save at `path`
-    /// into it; the message it leaves.
-    fn copy_save(&self, action: SaveAction, slot: usize, path: &Path) -> &'static str {
+    /// Exports slot `slot`'s save (or the autosave) to `path` as `kind`
+    /// asks; the message it leaves.
+    fn export_save(&self, kind: ExportKind, slot: usize, path: &Path) -> &'static str {
         let Some((rom, _)) = &self.rom else {
             return LAUNCHER_ROM_FIRST;
         };
-        match action {
-            SaveAction::Export => std::fs::read(saves::slot_file(rom, slot))
-                .ok()
-                .and_then(|bytes| platform_sdl3::write_file(path, &bytes).ok())
-                .map_or(LAUNCHER_COPY_FAILED, |()| LAUNCHER_EXPORTED),
-            SaveAction::Import => {
-                let Ok(bytes) = platform_sdl3::read_file(path) else {
-                    return LAUNCHER_COPY_FAILED;
-                };
-                let rom_bytes = std::fs::read(rom).unwrap_or_default();
-                if !saves::is_save(&rom_bytes, &bytes) {
-                    return LAUNCHER_NOT_A_SAVE;
-                }
-                saves::import(rom, slot, &bytes)
-                    .map_or(LAUNCHER_COPY_FAILED, |()| LAUNCHER_IMPORTED)
-            }
+        let rom_bytes = std::fs::read(rom).unwrap_or_default();
+        std::fs::read(source_file(rom, slot))
+            .ok()
+            .map(|bytes| kind.bytes(&rom_bytes, bytes))
+            .and_then(|bytes| platform_sdl3::write_file(path, &bytes).ok())
+            .map_or(LAUNCHER_COPY_FAILED, |()| LAUNCHER_EXPORTED)
+    }
+
+    /// Reads the save at `path` to import into slot `slot`: one of the
+    /// game's opens the confirmation with what it and the slot hold;
+    /// anything else leaves its message.
+    fn prepare_import(&mut self, slot: usize, path: &Path) {
+        let Some((rom, _)) = &self.rom else {
+            self.save_status = Some(LAUNCHER_ROM_FIRST);
+            return;
+        };
+        let Ok(bytes) = platform_sdl3::read_file(path) else {
+            self.save_status = Some(LAUNCHER_COPY_FAILED);
+            return;
+        };
+        let rom_bytes = std::fs::read(rom).unwrap_or_default();
+        let Some(file) = saves::summary(&rom_bytes, &bytes) else {
+            self.save_status = Some(LAUNCHER_NOT_A_SAVE);
+            return;
+        };
+        let current = std::fs::read(saves::slot_file(rom, slot))
+            .ok()
+            .and_then(|held| saves::summary(&rom_bytes, &held));
+        self.pending_import = Some(PendingImport {
+            bytes,
+            file,
+            current,
+        });
+        self.save_status = None;
+        self.screen = Screen::ConfirmImport { slot, line: 0 };
+    }
+
+    /// The import's confirmation: up and down move, X replaces the slot's
+    /// save with the file's (the slot's kept as `.bak`) or cancels, and Z
+    /// cancels; either goes back to the slot's screen.
+    fn update_confirm(&mut self, slot: usize, line: usize, pressed: Input) {
+        if pressed.is_held(Button::B) {
+            self.cancel_import(slot);
+            return;
         }
+        let line = moved(line, pressed, CONFIRM_LINES);
+        self.screen = Screen::ConfirmImport { slot, line };
+        if !pressed.is_held(Button::A) {
+            return;
+        }
+        let pending = self.pending_import.take();
+        if line == 0
+            && let (Some((rom, _)), Some(pending)) = (&self.rom, pending)
+        {
+            self.save_status = Some(
+                saves::import(rom, slot, &pending.bytes)
+                    .map_or(LAUNCHER_COPY_FAILED, |()| LAUNCHER_IMPORTED),
+            );
+        }
+        self.screen = import_line(slot);
+    }
+
+    /// Drops the save chosen to import and goes back to slot `slot`'s
+    /// screen.
+    fn cancel_import(&mut self, slot: usize) {
+        self.pending_import = None;
+        self.screen = import_line(slot);
     }
 
     fn update_main(&mut self, display: &Sdl3Display, pressed: Input) -> Result<Step> {
@@ -1516,27 +1619,8 @@ impl Front {
                 self.centered(frame, STATUS_Y, &status, color);
                 self.centered(frame, HELP_Y, &self.text(LIST_HELP), DIM);
             }
-            Screen::Saves(line) => {
-                self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_SAVES), DIM);
-                self.draw_saves(frame, line);
-                let (status, color) = self.save_message(LAUNCHER_SAVES_HELP);
-                self.centered(frame, STATUS_Y, &status, color);
-                self.centered(frame, HELP_Y, &self.text(LIST_HELP), DIM);
-            }
-            Screen::Slot { slot, line } => {
-                let heading = self
-                    .text(LAUNCHER_SLOT)
-                    .replace("{slot}", &(slot + 1).to_string());
-                self.centered(frame, SUBTITLE_Y, &heading, DIM);
-                self.draw_slot(frame, line);
-                let help = match SLOT_ACTIONS[line] {
-                    SlotLine::Action(SaveAction::Export) => LAUNCHER_EXPORT_HELP,
-                    SlotLine::Action(SaveAction::Import) => LAUNCHER_IMPORT_HELP,
-                    SlotLine::Back => LAUNCHER_SAVES_HELP,
-                };
-                let (status, color) = self.save_message(help);
-                self.centered(frame, STATUS_Y, &status, color);
-                self.centered(frame, HELP_Y, &self.text(LIST_HELP), DIM);
+            Screen::Saves(_) | Screen::Slot { .. } | Screen::ConfirmImport { .. } => {
+                self.draw_save_screens(frame);
             }
             Screen::About(line) => {
                 self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_ABOUT), DIM);
@@ -1666,7 +1750,7 @@ impl Front {
             .collect();
         let value_x = self.value_column(&labels);
         for (index, setting) in settings.iter().enumerate() {
-            let y = OPTIONS_FIRST_LINE_Y + index * OPTION_LINE_HEIGHT;
+            let y = OPTIONS_FIRST_LINE_Y + index * SETTING_LINE_HEIGHT;
             let is_selected = index == selected;
             let color = if is_selected { TEXT } else { DIM };
             let value = self
@@ -1773,22 +1857,63 @@ impl Front {
         }
     }
 
-    /// The save slots, each with what it holds, and the way back.
+    /// The saves' screens: the list, a slot's actions, the import's
+    /// confirmation, each with its status and the keys.
+    fn draw_save_screens(&self, frame: &mut Frame) {
+        match self.screen {
+            Screen::Saves(line) => {
+                self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_SAVES), DIM);
+                self.draw_saves(frame, line);
+                let (status, color) = self.save_message(LAUNCHER_SAVES_HELP);
+                self.centered(frame, STATUS_Y, &status, color);
+                self.centered(frame, HELP_Y, &self.text(LIST_HELP), DIM);
+            }
+            Screen::Slot { slot, line } => {
+                self.centered(frame, SUBTITLE_Y, &self.slot_name(slot), DIM);
+                self.draw_slot(frame, slot, line);
+                let help = match slot_actions(slot)[line] {
+                    SlotLine::Action(SaveAction::Export(ExportKind::Emulator)) => {
+                        LAUNCHER_EXPORT_HELP
+                    }
+                    SlotLine::Action(SaveAction::Export(ExportKind::RetroArch)) => {
+                        LAUNCHER_EXPORT_SRM_HELP
+                    }
+                    SlotLine::Action(SaveAction::Export(ExportKind::Strict)) => {
+                        LAUNCHER_EXPORT_STRICT_HELP
+                    }
+                    SlotLine::Action(SaveAction::Import) => LAUNCHER_IMPORT_HELP,
+                    SlotLine::Back => LAUNCHER_SAVES_HELP,
+                };
+                let (status, color) = self.save_message(help);
+                self.centered(frame, STATUS_Y, &status, color);
+                self.centered(frame, HELP_Y, &self.text(LIST_HELP), DIM);
+            }
+            Screen::ConfirmImport { slot, line } => {
+                self.centered(frame, SUBTITLE_Y, &self.slot_name(slot), DIM);
+                self.draw_confirm(frame, slot, line);
+                let (status, color) = self.save_message(LAUNCHER_IMPORT_CHECK);
+                self.centered(frame, STATUS_Y, &status, color);
+                self.centered(frame, HELP_Y, &self.text(LIST_HELP), DIM);
+            }
+            _ => {}
+        }
+    }
+
+    /// The save slots and the autosave, each with what it holds, and the
+    /// way back.
     fn draw_saves(&self, frame: &mut Frame, selected: usize) {
-        for index in 0..=SLOTS {
+        for index in 0..SAVES_LINES {
             let y = OPTIONS_FIRST_LINE_Y + index * OPTION_LINE_HEIGHT;
             let is_selected = index == selected;
             let color = if is_selected { TEXT } else { DIM };
-            if index == SLOTS {
+            if index == SAVES_LINES - 1 {
                 let label = self.text(LAUNCHER_BACK);
                 self.draw_line(frame, (y, is_selected, color), &label, None);
                 continue;
             }
-            let label = self
-                .text(LAUNCHER_SLOT)
-                .replace("{slot}", &(index + 1).to_string());
+            let label = self.slot_name(index);
             let value = self.rom.as_ref().map(|(rom, _)| {
-                if saves::slot_file(rom, index).is_file() {
+                if source_file(rom, index).is_file() {
                     (LANGUAGE_VALUE_X, self.text(LAUNCHER_SLOT_SAVED), GOOD)
                 } else {
                     (LANGUAGE_VALUE_X, self.text(LAUNCHER_SLOT_EMPTY), DIM)
@@ -1799,17 +1924,92 @@ impl Front {
     }
 
     /// A slot's actions and the way back.
-    fn draw_slot(&self, frame: &mut Frame, selected: usize) {
-        for (index, entry) in SLOT_ACTIONS.iter().enumerate() {
+    fn draw_slot(&self, frame: &mut Frame, slot: usize, selected: usize) {
+        for (index, entry) in slot_actions(slot).iter().enumerate() {
             let y = OPTIONS_FIRST_LINE_Y + index * OPTION_LINE_HEIGHT;
             let is_selected = index == selected;
             let color = if is_selected { TEXT } else { DIM };
             let label = self.text(match entry {
-                SlotLine::Action(SaveAction::Export) => LAUNCHER_EXPORT,
+                SlotLine::Action(SaveAction::Export(ExportKind::Emulator)) => LAUNCHER_EXPORT,
+                SlotLine::Action(SaveAction::Export(ExportKind::RetroArch)) => LAUNCHER_EXPORT_SRM,
+                SlotLine::Action(SaveAction::Export(ExportKind::Strict)) => LAUNCHER_EXPORT_STRICT,
                 SlotLine::Action(SaveAction::Import) => LAUNCHER_IMPORT,
                 SlotLine::Back => LAUNCHER_BACK,
             });
             self.draw_line(frame, (y, is_selected, color), &label, None);
+        }
+    }
+
+    /// The import's confirmation: what the file holds and what the slot
+    /// does, two lines each, then replacing and canceling.
+    fn draw_confirm(&self, frame: &mut Frame, slot: usize, selected: usize) {
+        let Some(pending) = &self.pending_import else {
+            return;
+        };
+        let file = self.text(LAUNCHER_IMPORT_FILE);
+        let held = self.slot_name(slot);
+        let value_x = self.value_column(&[file.clone(), held.clone()]);
+        let mut rows: Vec<(String, (String, Rgb))> = Vec::new();
+        for (label, summary) in [
+            (file, Some(&pending.file)),
+            (held, pending.current.as_ref()),
+        ] {
+            if let Some(summary) = summary {
+                let [first, second] = self.summary_lines(summary);
+                rows.push((label, (first, GOOD)));
+                rows.push((String::new(), (second, GOOD)));
+            } else {
+                rows.push((label, (self.text(LAUNCHER_SLOT_EMPTY), DIM)));
+                rows.push((String::new(), (String::new(), DIM)));
+            }
+        }
+        for (index, (label, (value, color))) in rows.into_iter().enumerate() {
+            let y = OPTIONS_FIRST_LINE_Y + index * OPTION_LINE_HEIGHT;
+            self.draw_line(
+                frame,
+                (y, false, DIM),
+                &label,
+                Some((value_x, value, color)),
+            );
+        }
+        for (index, key) in [LAUNCHER_REPLACE, LAUNCHER_CANCEL].into_iter().enumerate() {
+            let y = OPTIONS_FIRST_LINE_Y + (CONFIRM_INFO_ROWS + index) * OPTION_LINE_HEIGHT;
+            let is_selected = index == selected;
+            let color = if is_selected { TEXT } else { DIM };
+            self.draw_line(frame, (y, is_selected, color), &self.text(key), None);
+        }
+    }
+
+    /// What a save holds, in two lines: its level and area, then its money
+    /// and, when the port counted it, the time played.
+    fn summary_lines(&self, summary: &SaveSummary) -> [String; 2] {
+        let game = &summary.game;
+        let first = self
+            .text(LAUNCHER_SAVE_LEVEL)
+            .replace("{level}", &game.level.to_string())
+            .replace("{area}", &game.area.to_string());
+        let mut second = self
+            .text(LAUNCHER_SAVE_MONEY)
+            .replace("{money}", &game.money.to_string());
+        if let Some((hours, minutes)) = summary.played {
+            second.push_str(", ");
+            second.push_str(
+                &self
+                    .text(LAUNCHER_SAVE_PLAYED)
+                    .replace("{hours}", &hours.to_string())
+                    .replace("{minutes}", &format!("{minutes:02}")),
+            );
+        }
+        [first, second]
+    }
+
+    /// The name of save slot `slot`'s line, or the autosave's.
+    fn slot_name(&self, slot: usize) -> String {
+        if slot == AUTOSAVE_LINE {
+            self.text(LAUNCHER_AUTOSAVE)
+        } else {
+            self.text(LAUNCHER_SLOT)
+                .replace("{slot}", &(slot + 1).to_string())
         }
     }
 
@@ -2310,13 +2510,32 @@ fn po_language(text: &str) -> Option<String> {
 
 /// The save slots the saves' screen lists, as many as the game offers.
 const SLOTS: usize = game_core::slots::DEFAULT_SLOTS;
-const SAVE_FILTERS: [(&str, &str); 1] = [("Save (.sav)", "sav")];
+/// The saves' screen's line of the autosave, after the slots, and its
+/// lines with the way back.
+const AUTOSAVE_LINE: usize = SLOTS;
+const SAVES_LINES: usize = SLOTS + 2;
+/// The saves an import takes: the game's own, or `RetroArch`'s.
+const SAVE_FILTERS: [(&str, &str); 1] = [("Save (.sav, .srm)", "sav;srm")];
+/// The import's confirmation: rows of what the file and the slot hold,
+/// then its lines.
+const CONFIRM_INFO_ROWS: usize = 4;
+const CONFIRM_LINES: usize = 2;
+
+/// A save chosen to import, read and summed up, until the player decides.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PendingImport {
+    bytes: Vec<u8>,
+    /// What it holds.
+    file: SaveSummary,
+    /// What the slot holds now, if anything.
+    current: Option<SaveSummary>,
+}
 
 /// What a slot's screen does with its save.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SaveAction {
-    /// Writes a copy of it where the player chooses.
-    Export,
+    /// Writes a copy of it where the player chooses, of this kind.
+    Export(ExportKind),
     /// Replaces it with a file the player chooses.
     Import,
 }
@@ -2328,11 +2547,49 @@ enum SlotLine {
     Back,
 }
 
-const SLOT_ACTIONS: [SlotLine; 3] = [
-    SlotLine::Action(SaveAction::Export),
+const SLOT_ACTIONS: [SlotLine; 5] = [
+    SlotLine::Action(SaveAction::Export(ExportKind::Emulator)),
+    SlotLine::Action(SaveAction::Export(ExportKind::RetroArch)),
+    SlotLine::Action(SaveAction::Export(ExportKind::Strict)),
     SlotLine::Action(SaveAction::Import),
     SlotLine::Back,
 ];
+/// The autosave's: the exports alone, the autosave being the game's own.
+const AUTOSAVE_ACTIONS: [SlotLine; 4] = [
+    SlotLine::Action(SaveAction::Export(ExportKind::Emulator)),
+    SlotLine::Action(SaveAction::Export(ExportKind::RetroArch)),
+    SlotLine::Action(SaveAction::Export(ExportKind::Strict)),
+    SlotLine::Back,
+];
+
+/// The actions of slot `slot`'s screen, or the autosave's.
+fn slot_actions(slot: usize) -> &'static [SlotLine] {
+    if slot == AUTOSAVE_LINE {
+        &AUTOSAVE_ACTIONS
+    } else {
+        &SLOT_ACTIONS
+    }
+}
+
+/// Where slot `slot`'s save of the ROM at `rom` is, or the autosave's.
+fn source_file(rom: &Path, slot: usize) -> PathBuf {
+    if slot == AUTOSAVE_LINE {
+        saves::autosave_file(rom)
+    } else {
+        saves::slot_file(rom, slot)
+    }
+}
+
+/// Slot `slot`'s screen with the cursor on its import.
+fn import_line(slot: usize) -> Screen {
+    Screen::Slot {
+        slot,
+        line: SLOT_ACTIONS
+            .iter()
+            .position(|line| *line == SlotLine::Action(SaveAction::Import))
+            .unwrap_or(0),
+    }
+}
 
 /// The options' screen with the cursor on the display's line.
 fn display_option() -> Screen {
@@ -2923,12 +3180,12 @@ mod tests {
 
         front.screen = Screen::Options(0);
         let volume = line_of(Setting::Volume);
-        let y = middle_of(OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, volume);
+        let y = middle_of(OPTIONS_FIRST_LINE_Y, SETTING_LINE_HEIGHT, volume);
         assert_eq!(front.tap(40, y), press(Button::Left));
         assert_eq!(front.tap(200, y), press(Button::Right));
         assert_eq!(front.screen, Screen::Options(volume));
         let back = line_of(Setting::Back);
-        let y = middle_of(OPTIONS_FIRST_LINE_Y, OPTION_LINE_HEIGHT, back);
+        let y = middle_of(OPTIONS_FIRST_LINE_Y, SETTING_LINE_HEIGHT, back);
         assert_eq!(front.tap(x, y), press(Button::A));
 
         front.screen = Screen::About(0);
@@ -3045,6 +3302,66 @@ mod tests {
         front.screen = Screen::Slot { slot: 0, line: 1 };
         front.draw(&mut frame);
         assert_eq!(frame.pixel(0, 0), Some(BACKDROP_TOP));
+    }
+
+    #[test]
+    fn the_autosave_only_exports_and_an_import_is_confirmed_or_canceled() {
+        let mut front = Front::new(&Settings::default());
+        front.rom = Some((scratch("confirm.gba"), RomKind::Verified));
+        front.update_saves(AUTOSAVE_LINE, press(Button::A));
+        assert_eq!(
+            front.screen,
+            Screen::Slot {
+                slot: AUTOSAVE_LINE,
+                line: 0
+            }
+        );
+        assert!(
+            !slot_actions(AUTOSAVE_LINE).contains(&SlotLine::Action(SaveAction::Import)),
+            "the autosave is the game's own"
+        );
+        assert!(slot_actions(0).contains(&SlotLine::Action(SaveAction::Import)));
+        let summary = SaveSummary {
+            game: game_core::slots::SlotSummary {
+                name: String::new(),
+                level: 31,
+                area: 10,
+                money: 4_698_050,
+            },
+            played: Some((12, 3)),
+        };
+        assert_eq!(
+            front.summary_lines(&summary),
+            [
+                "Lv 31, area 10".to_owned(),
+                "4698050 G, 12:03 played".to_owned()
+            ]
+        );
+        let pending = PendingImport {
+            bytes: vec![0; 4],
+            file: summary,
+            current: None,
+        };
+        front.pending_import = Some(pending.clone());
+        front.screen = Screen::ConfirmImport { slot: 1, line: 0 };
+        let mut frame = Frame::new(240, 160, Rgb::default());
+        front.draw(&mut frame);
+        front.update_confirm(1, 0, press(Button::Down));
+        assert_eq!(front.screen, Screen::ConfirmImport { slot: 1, line: 1 });
+        front.update_confirm(1, 1, press(Button::A));
+        assert_eq!(front.screen, import_line(1));
+        assert_eq!(
+            (front.pending_import.is_none(), front.save_status),
+            (true, None)
+        );
+        front.pending_import = Some(pending);
+        front.update_confirm(1, 0, press(Button::A));
+        assert_eq!(
+            front.save_status,
+            Some(LAUNCHER_COPY_FAILED),
+            "a ROM that is no game's refuses the save"
+        );
+        assert!(front.pending_import.is_none());
     }
 
     #[test]

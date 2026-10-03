@@ -244,6 +244,28 @@ pub const LAUNCHER_EXPORT_HELP: &str = "port/launcher/export-help";
 /// See [`LAUNCHER_SAVES`].
 pub const LAUNCHER_IMPORT_HELP: &str = "port/launcher/import-help";
 /// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_EXPORT_SRM: &str = "port/launcher/export-srm";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_EXPORT_STRICT: &str = "port/launcher/export-strict";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_EXPORT_SRM_HELP: &str = "port/launcher/export-srm-help";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_EXPORT_STRICT_HELP: &str = "port/launcher/export-strict-help";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_IMPORT_FILE: &str = "port/launcher/import-file";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_IMPORT_CHECK: &str = "port/launcher/import-check";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_SAVE_LEVEL: &str = "port/launcher/save-level";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_SAVE_MONEY: &str = "port/launcher/save-money";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_SAVE_PLAYED: &str = "port/launcher/save-played";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_REPLACE: &str = "port/launcher/replace";
+/// See [`LAUNCHER_SAVES`].
+pub const LAUNCHER_CANCEL: &str = "port/launcher/cancel";
+/// See [`LAUNCHER_SAVES`].
 pub const LAUNCHER_EXPORTED: &str = "port/launcher/exported";
 /// See [`LAUNCHER_SAVES`].
 pub const LAUNCHER_IMPORTED: &str = "port/launcher/imported";
@@ -865,7 +887,7 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
     launcher(
         LAUNCHER_SAVES,
         "Saves",
-        "The options' line of the saves, on Android, and its screen's heading",
+        "The options' line of the saves, and its screen's heading",
     ),
     launcher(
         LAUNCHER_SLOT,
@@ -884,8 +906,8 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
     ),
     launcher(
         LAUNCHER_EXPORT,
-        "Export...",
-        "Writes a copy of the slot's save where the player chooses",
+        "Export .sav...",
+        "Writes a copy of the save where the player chooses, for an emulator or a flash cart",
     ),
     launcher(
         LAUNCHER_IMPORT,
@@ -899,8 +921,63 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
     ),
     launcher_line(
         LAUNCHER_EXPORT_HELP,
-        "Writes a copy of this save.",
-        "Help for Export",
+        "For an emulator or a flash cart.",
+        "Help for Export .sav",
+    ),
+    launcher(
+        LAUNCHER_EXPORT_SRM,
+        "Export .srm...",
+        "Writes a copy of the save under RetroArch's extension, the same bytes",
+    ),
+    launcher(
+        LAUNCHER_EXPORT_STRICT,
+        "Export as the cartridge...",
+        "Writes a copy of the save without the port's notes (the name in full, the records), as the cartridge would hold it",
+    ),
+    launcher_line(
+        LAUNCHER_EXPORT_SRM_HELP,
+        "For RetroArch: the same save, as .srm.",
+        "Help for Export .srm",
+    ),
+    launcher_line(
+        LAUNCHER_EXPORT_STRICT_HELP,
+        "Without the port's name and records.",
+        "Help for Export as the cartridge",
+    ),
+    launcher(
+        LAUNCHER_IMPORT_FILE,
+        "File",
+        "The import's confirmation: the line of what the chosen file holds",
+    ),
+    launcher_line(
+        LAUNCHER_IMPORT_CHECK,
+        "Replace? The slot's save is kept as .bak.",
+        "The import's confirmation's help: what the file and the slot hold are shown above",
+    ),
+    launcher(
+        LAUNCHER_SAVE_LEVEL,
+        "Lv {level}, area {area}",
+        "What a save holds, first line: the party's level and the area it was saved in",
+    ),
+    launcher(
+        LAUNCHER_SAVE_MONEY,
+        "{money} G",
+        "Second line: its money; the time played follows when the port counted it",
+    ),
+    launcher(
+        LAUNCHER_SAVE_PLAYED,
+        "{hours}:{minutes} played",
+        "The time played, hours and minutes",
+    ),
+    launcher(
+        LAUNCHER_REPLACE,
+        "Replace the slot's save",
+        "The import's confirmation: replaces the slot's save with the file's",
+    ),
+    launcher(
+        LAUNCHER_CANCEL,
+        "Cancel",
+        "The import's confirmation: leaves the slot as it is",
     ),
     launcher_line(
         LAUNCHER_IMPORT_HELP,

@@ -1,21 +1,27 @@
-//! The saves kept beside the ROM, copied to or from another place: on
-//! Android the app's own folder is out of reach, so its launcher exports a
-//! slot's `.sav` through the system's dialog (to an emulator, another
-//! device or a backup) and imports one, which must read as a save of the
-//! game before it replaces the slot; the save it replaces is kept beside
-//! it as `.bak`. The enhanced mode's achievements, which every slot
+//! The saves kept beside the ROM, copied to or from another place through
+//! the system's dialog: a slot's save, or the enhanced mode's autosave, is
+//! exported for an emulator or a flash cart (`.sav`), for `RetroArch`
+//! (`.srm`, the same bytes) or without the port's notes (the memory the
+//! cartridge itself would hold); a save chosen to import must read as a
+//! save of the game, and the player sees what it holds against what the
+//! slot holds before it replaces the slot, whose save is kept beside it as
+//! `.bak`. On Android the app's own folder is out of reach, so this is the
+//! only way in or out. The enhanced mode's achievements, which every slot
 //! shares, are kept beside them in a file of their own.
 //!
 //! Source of knowledge: this project's own design.
 
 use std::path::{Path, PathBuf};
 
-use game_core::save::SaveFile;
-use platform_sdl3::slot_path;
+use game_core::save::{Found, SaveFile};
+use game_core::slots::{Slot, SlotSummary};
+use platform_sdl3::{autosave_path, slot_path};
 
 /// The extension of a save beside its ROM, and of the one an import
 /// replaces.
 pub const SAVE_EXTENSION: &str = "sav";
+/// The extension `RetroArch` gives a game's save memory.
+const RETROARCH_EXTENSION: &str = "srm";
 const BACKUP_EXTENSION: &str = "bak";
 /// The extension of the file beside the saves that keeps the enhanced
 /// mode's achievements, which every slot shares.
@@ -25,6 +31,75 @@ const ACHIEVEMENTS_EXTENSION: &str = "achievements";
 #[must_use]
 pub fn slot_file(rom: &Path, slot: usize) -> PathBuf {
     slot_path(&rom.with_extension(SAVE_EXTENSION), slot)
+}
+
+/// Where the enhanced mode's autosave of the ROM at `rom` is kept.
+#[must_use]
+pub fn autosave_file(rom: &Path) -> PathBuf {
+    autosave_path(&rom.with_extension(SAVE_EXTENSION))
+}
+
+/// What an export writes, and for what.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportKind {
+    /// The save as it is, for an emulator or a flash cart: `.sav`.
+    Emulator,
+    /// The same bytes under `RetroArch`'s extension: `.srm`.
+    RetroArch,
+    /// The save without the port's notes, the memory the cartridge itself
+    /// would hold: `.sav`.
+    Strict,
+}
+
+impl ExportKind {
+    /// The extension of the file it writes.
+    #[must_use]
+    pub const fn extension(self) -> &'static str {
+        match self {
+            Self::Emulator | Self::Strict => SAVE_EXTENSION,
+            Self::RetroArch => RETROARCH_EXTENSION,
+        }
+    }
+
+    /// The bytes to write for the save `bytes` of the game whose ROM is
+    /// `rom_bytes`.
+    #[must_use]
+    pub fn bytes(self, rom_bytes: &[u8], bytes: Vec<u8>) -> Vec<u8> {
+        match (self, extraction::saga_save::save_layout(rom_bytes)) {
+            (Self::Strict, Ok(layout)) => SaveFile::new(layout).without_port_notes(bytes),
+            _ => bytes,
+        }
+    }
+}
+
+/// What a save holds, for the player to see before an import: its game's
+/// level, area and money, and the time played when the port counted it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveSummary {
+    /// The game's fields.
+    pub game: SlotSummary,
+    /// Hours and minutes played, when the save keeps the port's
+    /// statistics.
+    pub played: Option<(u32, u32)>,
+}
+
+/// What `bytes`, a save of the game whose ROM is `rom_bytes`, holds; `None`
+/// when they hold no game to continue.
+#[must_use]
+pub fn summary(rom_bytes: &[u8], bytes: &[u8]) -> Option<SaveSummary> {
+    let layout = extraction::saga_save::save_layout(rom_bytes).ok()?;
+    let found = SaveFile::new(layout).read(Some(bytes.to_vec()));
+    let Slot::Game(game) = Slot::from_found(&found) else {
+        return None;
+    };
+    let played = match &found {
+        Found::Saved(saved) | Found::Restored(saved) if saved.stats.play_frames > 0 => {
+            let (hours, minutes, _) = saved.stats.play_time();
+            Some((hours, minutes))
+        }
+        _ => None,
+    };
+    Some(SaveSummary { game, played })
 }
 
 /// Where the achievements of the games saved at `save` are kept: beside
@@ -69,10 +144,15 @@ pub fn import(rom: &Path, slot: usize, bytes: &[u8]) -> Result<(), String> {
     std::fs::rename(&temporary, &kept).map_err(|error| error.to_string())
 }
 
-/// The name an exported slot is proposed under.
+/// The name an export is proposed under: the ROM's, so an emulator or
+/// `RetroArch` loads it beside the ROM by itself, with the kind's extension.
 #[must_use]
-pub fn export_name(slot: usize) -> String {
-    format!("Zoids Saga (slot {}).{SAVE_EXTENSION}", slot + 1)
+pub fn export_name(rom: &Path, kind: ExportKind) -> String {
+    let stem = rom.file_stem().map_or_else(
+        || "Zoids Saga".to_owned(),
+        |stem| stem.to_string_lossy().into_owned(),
+    );
+    format!("{stem}.{}", kind.extension())
 }
 
 #[cfg(test)]
@@ -86,7 +166,9 @@ mod tests {
         let rom = Path::new("/data/rom.gba");
         assert_eq!(slot_file(rom, 0), PathBuf::from("/data/rom.sav"));
         assert_eq!(slot_file(rom, 2), PathBuf::from("/data/rom.3.sav"));
-        assert_eq!(export_name(1), "Zoids Saga (slot 2).sav");
+        assert_eq!(export_name(rom, ExportKind::Emulator), "rom.sav");
+        assert_eq!(export_name(rom, ExportKind::RetroArch), "rom.srm");
+        assert_eq!(autosave_file(rom), PathBuf::from("/data/rom.auto.sav"));
         assert_eq!(
             achievements_file(&slot_file(rom, 0)),
             PathBuf::from("/data/rom.achievements")
@@ -105,6 +187,8 @@ mod tests {
         assert!(import(&rom, 0, &blank).is_err());
         assert_eq!(std::fs::read(slot_file(&rom, 0)).unwrap(), b"kept");
         assert!(import(&folder.join("missing.gba"), 0, b"x").is_err());
+        assert_eq!(summary(&[0u8; 64], &blank), None);
+        assert_eq!(ExportKind::Strict.bytes(&[0u8; 64], vec![7]), vec![7]);
         let _ = std::fs::remove_dir_all(&folder);
     }
 }
