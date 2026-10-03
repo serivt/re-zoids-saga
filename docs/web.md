@@ -106,10 +106,14 @@ WebAssembly and the page in `apps/web/static/`).
   pad drawn on `pad`, a canvas beside the game's in the element over the window, which
   takes the fingers; the page's `menu` button is kept at the game screen's top left
   corner, wherever the screen goes.
-  - The options are given as the launcher's settings lines: `mode`, `color`, `trail`,
-    `upscale`, `volume`, `muted` (`1` to start without sound), `scaling` (`sharp`,
-    `fill` or `smooth`), and the pad's `touch` (`auto`, `on` or `off`), `touch-size`
-    and `touch-opacity`.
+  - The options are given as the launcher's settings lines: `mode` and the enhanced
+    mode's `battle-animations`, `damage-numbers`, `auto-text`, `autosave`,
+    `weapon-reach` and `fast-forward`, `color`, `trail`, `upscale`, `volume`, `muted`
+    (`1` to start without sound), `scaling` (`sharp`, `fill` or `smooth`), and the
+    pad's `touch` (`auto`, `on` or `off`), `touch-size` and `touch-opacity`.
+  - When the game's pause menu changes the enhanced mode's settings, the page hears
+    `re-zoids-saga:enhancements`, the settings' lines as its detail, and remembers them
+    for the next game, as the launcher does.
   - It gives the page the game's session: `pause()`, `resume()`, `quit()` (the page
     then hears `re-zoids-saga:left`), and `set_volume`, `set_scaling`, `set_touch` and
     `set_touch_opacity`, which change those options while the game plays.
@@ -124,18 +128,19 @@ WebAssembly and the page in `apps/web/static/`).
 copy, and the ROM chosen or dropped anywhere on the page is read in the browser, never
 sent anywhere, and played only when it is the supported dump. Play sits under it, with a
 line of what the options choose; on a phone a bar keeps Play in reach once the button
-scrolls away. The rest is in tabs: Options (the translation, the mode, the picture, the
-sound and the touch pad; the display presets and the LCD grid and scan lines are marked
-to come), Saves, Cloud (when the build has a cloud project) and Help (the keys, the
-gamepad, offline and installing). The options are remembered. A gamepad moves through
-the page too: the D-pad or the stick moves, A chooses, B goes back. The sound starts on
-Play, since a browser lets a page make sound only after the player has pressed
-something; when the pad will show, Play also asks the browser for the whole screen,
-where the browser lets a page take it (not every phone's does). While the game plays,
-Esc or the button at the screen's corner pauses it under a menu: resume, the volume, the
-scaling, the pad's opacity and whether it shows, and the way back to the launcher, which
-loses what was not saved. It links to the source code, as the GPL asks of a program
-handed to the browser.
+scrolls away. The rest is in tabs: Options (the translation, the mode, classic at first,
+and, while it is the enhanced one, its settings, the picture, folded under a line of
+what it chooses, the sound and the touch pad; the display presets and the LCD grid and
+scan lines are marked to come), Saves, Cloud (when the build has a cloud project) and
+Help (the keys, the gamepad, offline and installing). The options are remembered. A
+gamepad moves through the page too: the D-pad or the stick moves, A chooses, B goes
+back. The sound starts on Play, since a browser lets a page make sound only after the
+player has pressed something; when the pad will show, Play also asks the browser for the
+whole screen, where the browser lets a page take it (not every phone's does). While the
+game plays, Esc or the button at the screen's corner pauses it under a menu: resume, the
+volume, the scaling, the pad's opacity and whether it shows, and the way back to the
+launcher, which loses what was not saved. It links to the source code, as the GPL asks
+of a program handed to the browser.
 
 To build it and play it locally:
 
