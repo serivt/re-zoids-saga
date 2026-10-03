@@ -5,6 +5,8 @@
 import init, { check_rom, save_summary, start } from './pkg/re_zoids_saga_web.js';
 import * as store from './store.js';
 import * as saves from './saves.js';
+import * as cloud from './cloud.js';
+import * as sync from './sync.js';
 
 const OPTIONS_KEY = 're-zoids-saga/page-options';
 const TRANSLATIONS = 'https://raw.githubusercontent.com/serivt/re-zoids-saga-translations/main/';
@@ -19,11 +21,15 @@ const play = $('play');
 const romStatus = $('rom-status');
 const translationStatus = $('translation-status');
 const saveStatus = $('save-status');
+const cloudStatus = $('cloud-status');
 const fields = ['language', 'mode', 'scaling', 'color', 'trail', 'volume'];
+const SYNC_EVERY_MS = 60_000;
 
 let rom = null;
 let romName = 'Zoids Saga';
 let translation = null;
+let conflicts = new Map();
+let signedIn = false;
 
 await init();
 if ('serviceWorker' in navigator) {
@@ -33,6 +39,7 @@ await offerLanguages();
 restoreOptions();
 await restoreRom();
 await restoreTranslation();
+await openCloud();
 
 $('rom').addEventListener('change', (event) => takeRom(event.target.files[0]));
 const drop = $('drop');
@@ -53,6 +60,10 @@ for (const id of fields) {
   $(id).addEventListener('change', saveOptions);
 }
 $('import-file').addEventListener('change', importSave);
+$('cloud-form').addEventListener('submit', sendLink);
+$('cloud-sync').addEventListener('click', () => runSync());
+$('cloud-sign-out').addEventListener('click', signOut);
+$('cloud-delete').addEventListener('click', deleteAccount);
 play.addEventListener('click', begin);
 window.addEventListener('resize', fit);
 window.addEventListener('re-zoids-saga:left', () => window.location.reload());
@@ -65,6 +76,7 @@ async function takeRom(file) {
   if (useRom(bytes, file.name, false)) {
     await store.put('rom', { name: file.name, bytes });
     await store.keep();
+    if (signedIn) await runSync();
   }
 }
 
@@ -180,6 +192,17 @@ function showSaves() {
     if (save.imports) {
       actions.append(button('Import…', false, () => askImport(save)));
     }
+    const conflict = conflicts.get(save.key);
+    if (conflict) {
+      const note = rows.insertRow();
+      note.className = 'conflict';
+      note.insertCell();
+      note.insertCell().textContent =
+        `Changed here and in the cloud. This browser: ${conflict.browser}. Cloud: ${conflict.cloud}.`;
+      const choice = note.insertCell();
+      choice.append(button('Keep this browser\'s', false, () => settle(save.key, conflict, true)));
+      choice.append(button('Take the cloud\'s', false, () => settle(save.key, conflict, false)));
+    }
   }
 }
 
@@ -229,6 +252,83 @@ async function importSave(event) {
   showSaves();
 }
 
+// The cloud ------------------------------------------------------------------
+
+async function openCloud() {
+  if (!cloud.enabled) return;
+  $('cloud').hidden = false;
+  const error = cloud.takeSignIn();
+  if (error) say(cloudStatus, `The sign-in link did not work: ${error}`, 'bad');
+  await showAccount();
+  if (signedIn && rom) await runSync();
+}
+
+async function showAccount() {
+  const email = await cloud.account().catch(() => null);
+  signedIn = Boolean(email);
+  $('cloud-out').hidden = signedIn;
+  $('cloud-in').hidden = !signedIn;
+  $('cloud-account').textContent = email ?? '';
+}
+
+async function sendLink(event) {
+  event.preventDefault();
+  try {
+    await cloud.sendLink($('cloud-email').value);
+    say(cloudStatus, 'Check your email: the link signs you in here.', 'good');
+  } catch (error) {
+    say(cloudStatus, `The link could not be sent: ${error.message}`, 'bad');
+  }
+}
+
+// Syncs the saves with the cloud; `uploadsOnly` while the game plays, so
+// nothing changes under it.
+async function runSync(uploadsOnly = false) {
+  if (!signedIn || !rom) return;
+  try {
+    const found = await sync.syncAll(rom, { uploadsOnly });
+    if (!uploadsOnly) conflicts = found;
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const left = conflicts.size ? `; ${conflicts.size} to settle below` : '';
+    say(cloudStatus, `Synced at ${time}${left}`, conflicts.size ? 'bad' : 'good');
+    if (!menu.hidden) showSaves();
+  } catch (error) {
+    say(cloudStatus, `The cloud could not be reached: ${error.message}`, 'bad');
+  }
+}
+
+async function settle(key, conflict, keepBrowser) {
+  await sync.settle(rom, key, conflict, keepBrowser);
+  conflicts.delete(key);
+  showSaves();
+}
+
+async function signOut() {
+  await cloud.signOut();
+  conflicts = new Map();
+  await showAccount();
+  showSaves();
+  say(cloudStatus, 'Signed out; the saves stay in this browser.', '');
+}
+
+async function deleteAccount() {
+  const question = 'Delete your account and every save kept in the cloud? '
+    + 'The saves in this browser stay. This cannot be undone.';
+  if (!window.confirm(question)) return;
+  try {
+    await cloud.deleteAccount();
+    await showAccount();
+    say(cloudStatus, 'Your account and its cloud saves are deleted.', 'good');
+  } catch (error) {
+    say(cloudStatus, `The account could not be deleted: ${error.message}`, 'bad');
+  }
+}
+
+function say(element, text, kind) {
+  element.textContent = text;
+  element.className = `status ${kind}`;
+}
+
 // Playing ------------------------------------------------------------------
 
 async function begin() {
@@ -245,6 +345,12 @@ async function begin() {
   fit();
   try {
     start(rom, settings, $('language').value === '' ? undefined : translation ?? undefined, canvas);
+    if (signedIn) {
+      setInterval(() => runSync(true), SYNC_EVERY_MS);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') runSync(true);
+      });
+    }
   } catch (error) {
     stage.hidden = true;
     menu.hidden = false;

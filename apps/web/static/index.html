@@ -80,6 +80,28 @@
       <p id="save-status" class="status" role="status"></p>
     </section>
 
+    <section id="cloud" class="saves" hidden>
+      <h2>Cloud saves</h2>
+      <div id="cloud-out">
+        <p class="note">Sign in with your email to keep your saves and achievements in the
+          cloud and play them in any browser. <a href="privacy.html">What is kept, and how to
+          delete it</a>.</p>
+        <form id="cloud-form">
+          <input id="cloud-email" type="email" required placeholder="you@example.com"
+            autocomplete="email">
+          <button class="small" type="submit">Send me a sign-in link</button>
+        </form>
+      </div>
+      <div id="cloud-in" hidden>
+        <p>Signed in as <strong id="cloud-account"></strong>. The saves sync when the page
+          opens, every minute while you play, and when you leave it.</p>
+        <button class="small" id="cloud-sync">Sync now</button>
+        <button class="small" id="cloud-sign-out">Sign out</button>
+        <button class="small" id="cloud-delete">Delete my account</button>
+      </div>
+      <p id="cloud-status" class="status" role="status"></p>
+    </section>
+
     <p class="keys">Arrows move, X = A, Z = B, Return = START, Backspace = SELECT, A = L, S = R,
       M mutes, Space holds the enhanced mode's fast forward; gamepads work too.</p>
     <p class="note">Works offline once loaded, and can be installed from the browser's menu.

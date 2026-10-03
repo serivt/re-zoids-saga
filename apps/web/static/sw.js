@@ -9,6 +9,10 @@ const FILES = [
   'main.js',
   'store.js',
   'saves.js',
+  'cloud.js',
+  'sync.js',
+  'config.js',
+  'privacy.html',
   'style.css',
   'manifest.webmanifest',
   'icon.png',
@@ -30,7 +34,7 @@ self.addEventListener('activate', (event) => {
 });
 
 // The page's own files from the cache first; anything else (the
-// translations' repository) from the network.
+// translations' repository, the cloud) from the network.
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;

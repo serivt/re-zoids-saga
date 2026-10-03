@@ -91,3 +91,7 @@ button.small {
 .saves table { width: 100%; border-collapse: collapse; }
 .saves td { padding: 0.35rem 0.5rem 0.35rem 0; vertical-align: top; border-top: 1px solid var(--panel); }
 .saves td:first-child { white-space: nowrap; color: var(--dim); }
+
+#cloud-form { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+#cloud-email { flex: 1; min-width: 12rem; font: inherit; padding: 0.3rem 0.5rem; }
+.saves tr.conflict td { color: var(--bad); border-top: 0; }

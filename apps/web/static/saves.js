@@ -13,23 +13,38 @@ export const SAVES = [
   { key: 'autosave', label: 'Autosave', imports: false },
 ];
 
-// The bytes of the save under `key`, or null.
-export function read(key) {
-  const text = localStorage.getItem(PREFIX + key);
-  if (text === null) return null;
+// The bytes Base64 `text` holds.
+export function fromBase64(text) {
   const binary = atob(text);
   const bytes = new Uint8Array(binary.length);
   for (let at = 0; at < binary.length; at++) bytes[at] = binary.charCodeAt(at);
   return bytes;
 }
 
-// Keeps `bytes` as the save under `key`, kept first as `key.bak`.
-export function write(key, bytes) {
-  const before = localStorage.getItem(PREFIX + key);
-  if (before !== null) localStorage.setItem(`${PREFIX}${key}.bak`, before);
+// `bytes` as Base64 text.
+export function toBase64(bytes) {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  localStorage.setItem(PREFIX + key, btoa(binary));
+  return btoa(binary);
+}
+
+// The bytes of the save under `key`, or null.
+export function read(key) {
+  const text = localStorage.getItem(PREFIX + key);
+  return text === null ? null : fromBase64(text);
+}
+
+// Keeps `bytes` as the save under `key`, the one before kept as `key.bak`.
+export function write(key, bytes) {
+  writeText(key, toBase64(bytes));
+}
+
+// Keeps the Base64 `text` as the save under `key`, as the game keeps its
+// own: the one before kept as `key.bak`, and the time it was stored.
+export function writeText(key, text) {
+  const before = localStorage.getItem(PREFIX + key);
+  if (before !== null && before !== text) localStorage.setItem(`${PREFIX}${key}.bak`, before);
+  localStorage.setItem(PREFIX + key, text);
   localStorage.setItem(PREFIX + key + STORED, String(Date.now()));
 }
 

@@ -6,7 +6,9 @@
 # Usage: tools/package/web.sh [version]
 #
 # Needs the wasm32-unknown-unknown Rust target and wasm-bindgen-cli at the
-# version of the wasm-bindgen crate in Cargo.lock.
+# version of the wasm-bindgen crate in Cargo.lock. With SUPABASE_URL and
+# SUPABASE_ANON_KEY (the project's public key) the page offers the cloud
+# saves (services/cloud); without them it offers none.
 
 source "$(dirname "$0")/common.sh"
 
@@ -18,6 +20,10 @@ mkdir -p "$OUT/pkg"
 cargo build --release --locked --target wasm32-unknown-unknown -p re-zoids-saga-web
 wasm-bindgen --target web --no-typescript --out-dir "$OUT/pkg" "$WASM"
 cp apps/web/static/* "$OUT/"
+if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_ANON_KEY:-}" ]; then
+    printf "export const CLOUD = { url: '%s', anonKey: '%s' };\n" \
+        "$SUPABASE_URL" "$SUPABASE_ANON_KEY" > "$OUT/config.js"
+fi
 for FILE in sw.js index.html; do
     sed -i.bak "s/__VERSION__/$VERSION/" "$OUT/$FILE"
     rm "$OUT/$FILE.bak"
