@@ -259,8 +259,9 @@ them in on the page (a magic link: no password). The page keeps the session in i
 storage and refreshes it before it runs out. Sign out ends it; Delete my account deletes
 the account, the email and every save in the cloud (`delete_my_account`), the saves in
 the browser staying. The page shows the section only when the build names a project
-(`config.js`), and links to `privacy.html`, which tells the players what is kept and how
-to delete it.
+(`config.js`), and links to the privacy note, a dialog on the page (also opened by the
+address `#privacy`, so it can be linked to), which tells the players what is kept and
+how to delete it.
 
 **What the cloud keeps** (`public.saves`, one row per account, ROM and save):
 
@@ -366,3 +367,39 @@ first time.
 The release's zip never carries the cloud project, only the published site does: a copy
 served elsewhere could not sign in anyway, since Supabase sends its links only to the
 addresses it lists.
+
+## Metrics
+
+Two views of how the site is used, neither of which follows a player across sites or
+keeps anything in their browser; the privacy note (the page's dialog, at `#privacy`)
+tells of both.
+
+**Visits.** The published site counts its visits with [Cloudflare Web
+Analytics](https://www.cloudflare.com/web-analytics/): page views, visits, countries,
+browsers, devices and where the visitors came from, with no cookies.
+`tools/package/web.sh` adds its beacon to the page when `CLOUDFLARE_ANALYTICS_TOKEN`
+(the site's token, which is public) names one, in place of the `<!-- analytics -->`
+comment; the release's zip never carries it. The content security policy lets the beacon
+load (`static.cloudflareinsights.com`) and report (`cloudflareinsights.com`). To turn it
+on: in Cloudflare, Web Analytics › Add a site, with the site's address and manual setup,
+then put the token in the repository's variable `CLOUDFLARE_ANALYTICS_TOKEN` (or the
+local `.env`) and publish again. The figures are in Cloudflare, Web Analytics.
+
+**The players' progress.** For the players with cloud saves alone, read from what those
+saves already keep (`migrations/20261003130000_player_stats.sql`). The views live in the
+schema `stats`, which the API does not serve and which neither the page's anonymous role
+nor the players may use; they are read in Supabase's SQL editor:
+
+| View | What it shows |
+|---|---|
+| `stats.player_progress` | Each player and ROM, newest first: email, sign-up and last sign-in, the furthest their saves reach (level, area, money, minutes played), the slots they use, when they last saved, the achievements unlocked |
+| `stats.overview` | The accounts, the players with saves, and those who saved in the last 7 and 30 days |
+| `stats.furthest_area` | How many players have reached each area as their furthest |
+| `stats.save_progress` | Each save's level, area, money and minutes played, read from its summary |
+
+For example, `select * from stats.player_progress;`. An achievements' list that does not
+read counts as none rather than stopping the view. Checked by
+`tests/stats_test.sql` (with `supabase test db --workdir services/cloud`): the values
+read from synthetic saves, the totals, an unreadable list, and the page's roles refused;
+the local API refuses the schema too. Players who do not sign in leave no trace: their
+saves live in their browser alone.

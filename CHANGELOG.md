@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     SHA-1.
   - Each release carries the whole site as `re-zoids-saga-<version>-web.zip`, for any
     static web server.
+  - The published site counts its visits with Cloudflare Web Analytics, which uses no
+    cookies; the privacy note, now a dialog on the page (and at `#privacy`), tells what
+    is kept.
 
 ## [0.6.0] - 2026-10-03
 
