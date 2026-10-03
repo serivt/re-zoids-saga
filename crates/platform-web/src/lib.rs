@@ -13,12 +13,14 @@
 mod audio;
 mod canvas;
 mod keys;
+mod pad;
 mod stage;
 mod storage;
 
 pub use audio::WebAudio;
 pub use canvas::{WebCanvas, WebDisplay};
 pub use keys::{WebInput, button_for_code, button_for_pad};
+pub use pad::{PadLayout, pad_layout};
 pub use stage::{PadMode, PadStyle, Scaling, StageElements, WebStage, fit_screen};
 pub use storage::{LocalStorage, decode, encode};
 

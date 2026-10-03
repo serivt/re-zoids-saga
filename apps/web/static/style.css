@@ -346,6 +346,8 @@ fieldset.group > legend { width: 100%; padding: 0; margin-bottom: 16px; }
 }
 .pause-btn:hover, .pause-btn:focus-visible, .game.show-ui .pause-btn { opacity: 1; }
 html.touch .pause-btn { opacity: .75; }
+@media (orientation: portrait) { html.touch .pause-btn { width: 48px; height: 48px; } }
+@media (orientation: landscape) { html.touch .pause-btn { width: 64px; height: 36px; } }
 
 /* Quick menu */
 .quick .row { min-height: 48px; flex-wrap: nowrap; }

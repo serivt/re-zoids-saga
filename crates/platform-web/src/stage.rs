@@ -2,17 +2,18 @@
 //!
 //! Without the pad the screen is centered in the window, as large as it
 //! fits, in whole multiples for the sharp scaling. With it, the screen and
-//! the controls sit where [`TouchLayout`] puts them, as on Android: the
-//! screen in the middle and the controls on its sides when the window is
-//! wider than tall, the screen on top and the controls below it otherwise.
-//! The controls are drawn on a canvas over the whole window in the style
-//! of [`platform::touch`], and the fingers come from the page's pointer
-//! events, so several press at once.
+//! the controls sit where the web page's own pad puts them (see
+//! [`crate::pad`]): the screen in the middle and the controls on its sides
+//! when the window is wider than tall, the screen on top and the controls
+//! below it otherwise. The controls are drawn on a canvas over the whole
+//! window, and the fingers come from the page's pointer events, so several
+//! press at once.
 //!
 //! The pad shows on touch screens (a coarse pointer, or once the screen is
 //! touched) and hides while a gamepad is connected; the page can also
 //! always show it or never. The page's own menu button, if it has one, is
-//! kept at the screen's top left corner, wherever the screen goes.
+//! kept where the pad leaves room for it, or at the screen's top left
+//! corner without the pad.
 //!
 //! An LCD's grid or a television's scan lines, when chosen, are drawn on a
 //! canvas of their own over the screen, at the device's pixels, which the
@@ -21,14 +22,10 @@
 //! launcher's.
 
 use std::cell::{Cell, RefCell};
-use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::rc::Rc;
 
-use platform::touch::{
-    ARM_LENGTH, ARM_THICKNESS, Area, BAR_LETTER_SCALE, Control, Fingers, GLYPH_ROWS, HELD_OPACITY,
-    IDLE_OPACITY, LETTER_HEIGHT, MARK_OPACITY, Shape, label, label_cells,
-};
-use platform::{Button, Input, PlatformError, TouchLayout};
+use platform::touch::{Area, Fingers};
+use platform::{Input, PlatformError, TouchLayout};
 use screen_filters::Grid;
 use screen_filters::grid::Rect;
 use wasm_bindgen::JsCast;
@@ -37,6 +34,7 @@ use web_sys::{
     CanvasRenderingContext2d, Event, HtmlCanvasElement, HtmlElement, PointerEvent, Window,
 };
 
+use crate::pad::{draw_pad, pad_layout};
 use crate::web_error;
 
 /// How far inside the screen's corner the page's menu button sits, in CSS
@@ -300,15 +298,12 @@ impl WebStage {
         self.laid = Some(laid);
         self.drawn = None;
         let window = (to_f32_f64(laid.width), to_f32_f64(laid.height));
+        let mut menu_middle = None;
         let area = if laid.shown {
-            let mut layout = TouchLayout::sized(window, self.frame, self.style.size);
-            if !self.style.fast_forward {
-                layout
-                    .controls
-                    .retain(|placed| placed.control != Control::Button(Button::FastForward));
-            }
-            let screen = layout.screen;
-            self.layout = Some(layout);
+            let pad = pad_layout(window, self.frame, self.style.size, self.style.fast_forward);
+            let screen = pad.touch.screen;
+            menu_middle = Some(pad.menu);
+            self.layout = Some(pad.touch);
             screen
         } else {
             self.layout = None;
@@ -319,9 +314,16 @@ impl WebStage {
         place(&self.screen, area);
         self.draw_grid(area, laid.density);
         if let Some(menu) = &self.menu {
+            let (left, top) = match menu_middle {
+                Some((x, y)) => (
+                    x - to_f32_i32(menu.offset_width()) / 2.0,
+                    y - to_f32_i32(menu.offset_height()) / 2.0,
+                ),
+                None => (area.x + MENU_INSET, area.y + MENU_INSET),
+            };
             let style = menu.style();
-            let _ = style.set_property("left", &format!("{}px", area.x + MENU_INSET));
-            let _ = style.set_property("top", &format!("{}px", area.y + MENU_INSET));
+            let _ = style.set_property("left", &format!("{left}px"));
+            let _ = style.set_property("top", &format!("{top}px"));
         }
         self.pad.set_hidden(!laid.shown);
         if laid.shown {
@@ -392,33 +394,7 @@ impl WebStage {
         let context = &self.context;
         let _ = context.set_transform(laid.density, 0.0, 0.0, laid.density, 0.0, 0.0);
         context.clear_rect(0.0, 0.0, laid.width, laid.height);
-        let opacity = f64::from(self.style.opacity.clamp(0.0, 1.0));
-        let paint = Paint {
-            idle: white(IDLE_OPACITY, opacity),
-            held: white(HELD_OPACITY, opacity),
-            mark: white(MARK_OPACITY, opacity),
-        };
-        for placed in &layout.controls {
-            match (placed.control, placed.shape) {
-                (Control::Cross, Shape::Circle { x, y, radius }) => {
-                    draw_cross(context, (x, y), radius, held, &paint);
-                }
-                (Control::Button(button), Shape::Circle { x, y, radius }) => {
-                    context.set_fill_style_str(paint.of(held.is_held(button)));
-                    disc(context, (x, y), radius);
-                    let height = radius * 2.0 * LETTER_HEIGHT;
-                    letters(context, label(button), (x, y), height, &paint.mark);
-                }
-                (Control::Button(button), Shape::Pill(area)) => {
-                    context.set_fill_style_str(paint.of(held.is_held(button)));
-                    pill(context, area);
-                    let middle = (area.x + area.width / 2.0, area.y + area.height / 2.0);
-                    let height = area.height * LETTER_HEIGHT * BAR_LETTER_SCALE;
-                    letters(context, label(button), middle, height, &paint.mark);
-                }
-                (Control::Cross, Shape::Pill(_)) => {}
-            }
-        }
+        draw_pad(context, layout, held, self.style.opacity);
     }
 }
 
@@ -487,102 +463,6 @@ fn place(canvas: &HtmlCanvasElement, area: Area) {
     }
 }
 
-/// The colors of the controls.
-struct Paint {
-    idle: String,
-    held: String,
-    mark: String,
-}
-
-impl Paint {
-    fn of(&self, held: bool) -> &str {
-        if held { &self.held } else { &self.idle }
-    }
-}
-
-/// White at `alpha` times `opacity`, as the canvas reads colors.
-fn white(alpha: f32, opacity: f64) -> String {
-    format!("rgba(255, 255, 255, {:.3})", f64::from(alpha) * opacity)
-}
-
-/// The cross: a faint disc, and its four arms, each brighter while its
-/// direction is held.
-fn draw_cross(
-    context: &CanvasRenderingContext2d,
-    (x, y): (f32, f32),
-    radius: f32,
-    held: Input,
-    paint: &Paint,
-) {
-    context.set_fill_style_str(&paint.idle);
-    disc(context, (x, y), radius);
-    let (x, y) = (f64::from(x), f64::from(y));
-    let length = f64::from(radius * ARM_LENGTH);
-    let thickness = f64::from(radius * ARM_THICKNESS);
-    let half = thickness / 2.0;
-    context.fill_rect(x - half, y - half, thickness, thickness);
-    for (button, (left, top, width, height)) in [
-        (Button::Up, (x - half, y - length, thickness, length - half)),
-        (Button::Down, (x - half, y + half, thickness, length - half)),
-        (
-            Button::Left,
-            (x - length, y - half, length - half, thickness),
-        ),
-        (
-            Button::Right,
-            (x + half, y - half, length - half, thickness),
-        ),
-    ] {
-        context.set_fill_style_str(paint.of(held.is_held(button)));
-        context.fill_rect(left, top, width, height);
-    }
-}
-
-/// A filled circle in the current color.
-fn disc(context: &CanvasRenderingContext2d, (x, y): (f32, f32), radius: f32) {
-    context.begin_path();
-    let _ = context.arc(f64::from(x), f64::from(y), f64::from(radius), 0.0, TAU);
-    context.fill();
-}
-
-/// A filled bar with round ends over `area`, in the current color.
-fn pill(context: &CanvasRenderingContext2d, area: Area) {
-    let radius = f64::from(area.height) / 2.0;
-    let middle = f64::from(area.y) + radius;
-    let (left, right) = (
-        f64::from(area.x) + radius,
-        f64::from(area.x + area.width) - radius,
-    );
-    context.begin_path();
-    let _ = context.arc(right, middle, radius, -FRAC_PI_2, FRAC_PI_2);
-    let _ = context.arc(left, middle, radius, FRAC_PI_2, PI + FRAC_PI_2);
-    context.close_path();
-    context.fill();
-}
-
-/// `text` centered on `middle`, `height` pixels tall, in `color`.
-fn letters(
-    context: &CanvasRenderingContext2d,
-    text: &str,
-    middle: (f32, f32),
-    height: f32,
-    color: &str,
-) {
-    let (cells, columns) = label_cells(text);
-    let cell = f64::from(height) / to_f64(GLYPH_ROWS);
-    let left = f64::from(middle.0) - to_f64(columns) * cell / 2.0;
-    let top = f64::from(middle.1 - height / 2.0);
-    context.set_fill_style_str(color);
-    for (column, row) in cells {
-        context.fill_rect(
-            left + to_f64(column) * cell,
-            top + to_f64(row) * cell,
-            cell,
-            cell,
-        );
-    }
-}
-
 /// A canvas's size in device pixels for `value`.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn pixels(value: f64) -> u32 {
@@ -592,11 +472,6 @@ fn pixels(value: f64) -> u32 {
 #[allow(clippy::cast_precision_loss)]
 fn to_f32(value: usize) -> f32 {
     value as f32
-}
-
-#[allow(clippy::cast_precision_loss)]
-fn to_f64(value: usize) -> f64 {
-    value as f64
 }
 
 #[allow(clippy::cast_precision_loss)]
@@ -639,11 +514,5 @@ mod tests {
         assert_eq!(Scaling::from_key("fill"), Some(Scaling::Fill));
         assert_eq!(Scaling::from_key("other"), None);
         assert!(platform::touch::SIZES.contains(&PadStyle::default().size));
-    }
-
-    #[test]
-    fn colors_fade_with_the_opacity() {
-        assert_eq!(white(0.5, 1.0), "rgba(255, 255, 255, 0.500)");
-        assert_eq!(white(0.5, 0.5), "rgba(255, 255, 255, 0.250)");
     }
 }
