@@ -26,6 +26,7 @@ Written from their public descriptions, with no code consulted:
 
 | Component | Upstream | Where | Version | License |
 |---|---|---|---|---|
+| GitHub's mark (Octicons' `mark-github`), on the web page's link to the repository | [Octicons](https://github.com/primer/octicons) | `apps/web/static/index.html` (the icons' sprite) | 19 | MIT, © GitHub, Inc. (the notice beside the icon) |
 | SDL's Android Java layer (`org.libsdl.app`) and Gradle wrapper | [SDL](https://github.com/libsdl-org/SDL) `android-project` | `apps/android/project/app/src/main/java/org/libsdl/app/`, `apps/android/project/gradlew*`, `apps/android/project/gradle/wrapper/` | 3.4.16 (the `sdl3-src` crate the build uses) | zlib (`LICENSE.txt` beside the sources); the Gradle wrapper, Apache-2.0 |
 
 The Java files are unchanged copies; the app's own activity

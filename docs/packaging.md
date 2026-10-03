@@ -62,16 +62,18 @@ targets; the macOS app carries the `.icns` in its bundle.
 
 ## Releases
 
-[.github/workflows/release.yml](../.github/workflows/release.yml) runs the five
-scripts on GitHub's runners (macOS 14, Windows, Ubuntu 22.04, and Ubuntu 24.04 for
-Android and the web). The web job installs the WebAssembly target and the
-wasm-bindgen-cli of the `wasm-bindgen` in `Cargo.lock`, and builds without a cloud
-project, so its page offers no cloud saves. The Android job signs the app with the keystore in the repository's secrets
-(a release fails without it; a run by hand then uses the debug key) and starts it on an
-emulator with `tools/package/android-smoke.sh`, without a ROM, before keeping it. Publishing a
-GitHub release, with its tag (`v0.1.0`), title, notes and prerelease mark written
-by hand, builds the packages from the release's tag and attaches them to it; the
-workflow runs as it is at that tag's commit. Running the workflow by hand only
-keeps the packages as the run's artifacts. Every package goes with a
-`<package>.sha256` file, its SHA-256 checksum in the format `shasum -a 256 -c` and
-`sha256sum -c` check, among the artifacts and the release's files alike.
+[.github/workflows/release.yml](../.github/workflows/release.yml) runs the five scripts
+on GitHub's runners (macOS 14, Windows, Ubuntu 22.04, and Ubuntu 24.04 for Android and
+the web). The web job installs the WebAssembly target and the wasm-bindgen-cli of the
+`wasm-bindgen` in `Cargo.lock`; its zip has no cloud project, so its page offers no
+cloud saves. A release also publishes the web version's site on Cloudflare, with the
+cloud project the repository's variables name (see [web.md](web.md), Published). The
+Android job signs the app with the keystore in the repository's secrets (a release fails
+without it; a run by hand then uses the debug key) and starts it on an emulator with
+`tools/package/android-smoke.sh`, without a ROM, before keeping it. Publishing a GitHub
+release, with its tag (`v0.1.0`), title, notes and prerelease mark written by hand,
+builds the packages from the release's tag and attaches them to it; the workflow runs as
+it is at that tag's commit. Running the workflow by hand only keeps the packages as the
+run's artifacts. Every package goes with a `<package>.sha256` file, its SHA-256 checksum
+in the format `shasum -a 256 -c` and `sha256sum -c` check, among the artifacts and the
+release's files alike.

@@ -24,6 +24,7 @@ desktop and on Android. The plan, in phases:
 4. **Saves in the cloud** (done, below): optional, with an account signed in by a link
    sent by email; the saves and the achievements kept by the player's account, never
    the ROM.
+5. **Published** (below): each release puts the site on Cloudflare.
 
 ## The core in WebAssembly
 
@@ -148,7 +149,8 @@ whole screen, where the browser lets a page take it (not every phone's does). Wh
 game plays, Esc or the button at the screen's corner pauses it under a menu: resume, the
 volume, the scaling, the pad's opacity and whether it shows, and the way back to the
 launcher, which loses what was not saved. It links to the source code, as the GPL asks
-of a program handed to the browser.
+of a program handed to the browser: a GitHub button in the header (only its mark on a
+phone) and, in Help, a note asking the players who enjoy it for a star.
 
 To build it and play it locally:
 
@@ -285,8 +287,58 @@ its links back to (`services/cloud/supabase/config.toml`).
    - set the site URL and the redirect URLs to the page's address (HTTPS);
    - set an SMTP server for the emails, since Supabase's own sends very few an hour.
 3. Build the page with `SUPABASE_URL` and `SUPABASE_ANON_KEY` from the project's API
-   settings.
+   settings: the release workflow does when the repository has them as variables (see
+   Published, below).
 
 The anon key is meant for browsers: the rules are what keep each player to their own
 rows. The service role key must never reach the page.
 
+## Published
+
+Implemented in `services/site/wrangler.jsonc`, `apps/web/static/_headers` and the
+release workflow's `deploy-web` job. The site is served by
+[Cloudflare](https://www.cloudflare.com) as a Worker with static assets and no code of
+its own: its network serves `dist/web` as it is, with no charge for the traffic on the
+free plan, over HTTPS (which the service worker and the sign-in link need), and under a
+domain of the owner's own if wanted. Supabase stays for the cloud saves alone; its
+storage does not serve a site's pages.
+
+**The headers** (`_headers`, which Cloudflare reads and does not serve):
+
+- `Cache-Control: no-cache` on every file, since their names carry no version: the
+  browser asks whether each changed before using it, and the service worker still keeps
+  them all for offline play.
+- A content security policy: the page's own scripts and styles, the game's WebAssembly
+  (`'wasm-unsafe-eval'`), and requests to the page itself, the translations' repository
+  and Supabase's projects (`https://*.supabase.co`) alone; no frames, no plugins. A
+  cloud project under a domain of its own must be added to `connect-src`.
+- `nosniff`, no referrer, the window kept from other sites' pages, and no camera,
+  microphone or location.
+
+Checked: served locally with these headers, the page loaded the ROM, offered the
+translations' languages, showed every tab and played the game with its pause menu, with
+no request or style the policy refused.
+
+**Publishing it**, once, on the owner's Cloudflare account:
+
+1. In Cloudflare, create an API token from the "Edit Cloudflare Workers" template, and
+   note the account ID (Workers & Pages, at the side).
+2. In the repository's settings (Secrets and variables › Actions), add the secret
+   `CLOUDFLARE_API_TOKEN` and the variable `CLOUDFLARE_ACCOUNT_ID`; for the cloud saves,
+   also the variables `SUPABASE_URL` and `SUPABASE_ANON_KEY` (see Saves in the cloud).
+3. Publish a GitHub release: the workflow builds the site, with the cloud project when
+   the variables name one, and deploys it as the Worker `re-zoids-saga`, at
+   `re-zoids-saga.<account's subdomain>.workers.dev`. Without the token it only notes
+   that it published nothing.
+4. The Worker answers at `https://re-zoids-saga.serivt.com`, a custom domain named in
+   `wrangler.jsonc` (`routes`), whose DNS record and certificate Cloudflare keeps; the
+   domain must be one of the account's. That address goes in Supabase's site URL and
+   redirect URLs.
+
+By hand, from the repository's root: `tools/package/web.sh`, then `npx wrangler deploy
+--config services/site/wrangler.jsonc`, which signs in to Cloudflare in the browser the
+first time.
+
+The release's zip never carries the cloud project, only the published site does: a copy
+served elsewhere could not sign in anyway, since Supabase sends its links only to the
+addresses it lists.

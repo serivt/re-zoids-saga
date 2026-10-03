@@ -147,8 +147,10 @@ re-zoids-saga/
 │                                # debugging (inspect/dump extracted data)
 │
 ├── services/
-│   └── cloud/                   # the web version's cloud saves: the Supabase project's
-│                                # database, rules, tests and local settings (docs/web.md)
+│   ├── cloud/                   # the web version's cloud saves: the Supabase project's
+│   │                            # database, rules, tests and local settings (docs/web.md)
+│   └── site/                    # the web version's site on Cloudflare: the Worker that
+│                                # serves dist/web (docs/web.md, Published)
 │
 ├── assets/                      # original assets created for this project (committable)
 │   └── fonts/
