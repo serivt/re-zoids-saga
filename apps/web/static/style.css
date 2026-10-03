@@ -258,6 +258,21 @@ dialog::backdrop { background: rgba(4, 7, 20, .8); }
 .quick .row > label.auto { width: auto; }
 .conflict { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid rgba(255, 145, 128, .42); border-radius: var(--radius); background: rgba(255, 145, 128, .08); color: #ffd0c8; font-size: 14px; }
 .conflict .slot-a { margin-top: 0; }
+.toggles { display: flex; flex-direction: column; }
+.toggle { display: flex; align-items: center; gap: 16px; padding-block: 12px; border-bottom: 1px solid var(--line); }
+.toggle:first-child { padding-top: 0; }
+.toggle .grow { display: flex; flex-direction: column; gap: 2px; }
+fieldset.group > legend { width: 100%; padding: 0; margin-bottom: 16px; }
+.fold > .fold-h { display: flex; align-items: center; gap: 12px; cursor: pointer; list-style: none; border-radius: 6px; }
+.fold > .fold-h::-webkit-details-marker { display: none; }
+.fold > .fold-h::before { content: ""; order: 1; flex: 1; height: 1px; background: var(--line); min-width: 16px; }
+.fold-sum { order: 2; text-align: right; }
+.fold-chev { order: 3; flex: none; color: var(--muted); transition: transform .15s; }
+.fold[open] .fold-chev { transform: rotate(180deg); }
+.fold[open] .fold-sum { display: none; }
+.fold-h:hover .eyebrow, .fold-h:hover .fold-chev { color: var(--text); }
+.fold-body { display: flex; flex-direction: column; gap: 16px; padding-top: 16px; }
+.fold:not([open]) { gap: 0; }
 .note-inline { margin-left: 8px; text-transform: none; letter-spacing: 0; }
 
 /* ---------- Mobile ---------- */

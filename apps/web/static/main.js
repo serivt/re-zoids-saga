@@ -11,14 +11,19 @@ import * as sync from './sync.js';
 
 const OPTIONS_KEY = 're-zoids-saga/page-options';
 const TAB_KEY = 're-zoids-saga/page-tab';
+const PICTURE_OPEN_KEY = 're-zoids-saga/page-picture-open';
 const TRANSLATIONS = 'https://raw.githubusercontent.com/serivt/re-zoids-saga-translations/main/';
 const INDEX = 'po/languages.json';
 const SYNC_EVERY_MS = 60_000;
+// The enhanced mode's settings, by the launcher's names.
+const ENHANCEMENTS = [
+  'battle-animations', 'damage-numbers', 'auto-text', 'autosave', 'weapon-reach', 'fast-forward',
+];
 // The options the page keeps, by the form fields' names; `muted` is the
 // Mute button's.
 const OPTIONS = [
   'language', 'mode', 'scaling', 'color', 'trail', 'upscale', 'volume',
-  'touch', 'touch-size', 'touch-opacity',
+  'touch', 'touch-size', 'touch-opacity', ...ENHANCEMENTS,
 ];
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -238,12 +243,18 @@ const translationStatus = $('#translation-status');
 const volume = $('#volume');
 
 function option(name) {
-  return form.elements[name]?.value;
+  const field = form.elements[name];
+  if (field?.type === 'checkbox') return field.checked ? '1' : '0';
+  return field?.value;
 }
 
 function setOption(name, value) {
   const field = form.elements[name];
   if (!field || value === undefined || value === null) return;
+  if (field.type === 'checkbox') {
+    field.checked = value === '1';
+    return;
+  }
   if (field.tagName === 'SELECT' && ![...field.options].some((each) => each.value === value)) return;
   if (field instanceof RadioNodeList && ![...field].some((each) => each.value === value)) return;
   field.value = value;
@@ -269,6 +280,14 @@ function saveOptions() {
   const line = `${lang} · ${picked('mode')} · ${picked('scaling')} · ${colors === 'Original' ? 'Original colors' : `${colors} colors`}`;
   $('#setup-summary').textContent = `${line}.`;
   $('#playbar-summary').textContent = line;
+  const trail = picked('trail');
+  const upscaler = picked('upscale');
+  $('#picture-summary').textContent = [
+    picked('scaling'),
+    colors === 'Original' ? 'Original colors' : `${colors} colors`,
+    trail === 'Off' ? 'No trail' : `${trail} trail`,
+    upscaler === 'Off' ? 'No upscaler' : upscaler,
+  ].join(' · ');
 }
 
 function restoreOptions() {
@@ -278,10 +297,23 @@ function restoreOptions() {
   }
   setMuted(Boolean(kept.muted));
   $('#volume-out').value = `${volume.value}%`;
+  showEnhanced();
+}
+
+// The picture's options fold away; the page remembers whether they were
+// open.
+const picture = $('#picture');
+picture.open = readJson(PICTURE_OPEN_KEY, false);
+picture.addEventListener('toggle', () => writeJson(PICTURE_OPEN_KEY, picture.open));
+
+// The enhanced mode's settings, shown only while it is chosen.
+function showEnhanced() {
+  $('#enhanced-group').hidden = option('mode') !== 'enhanced';
 }
 
 form.addEventListener('submit', (event) => event.preventDefault());
 form.addEventListener('change', (event) => {
+  if (event.target.name === 'mode') showEnhanced();
   if (event.target !== language) saveOptions();
 });
 volume.addEventListener('input', () => {
@@ -791,6 +823,7 @@ function begin() {
   saveOptions();
   const settings = [
     `mode=${option('mode')}`,
+    ...ENHANCEMENTS.map((name) => `${name}=${option(name)}`),
     `color=${option('color')}`,
     `trail=${option('trail')}`,
     `upscale=${option('upscale')}`,
@@ -828,6 +861,15 @@ play.addEventListener('click', begin);
 $('#playbar-play').addEventListener('click', begin);
 // Leaving the game, from its own menu or the page's, starts the page anew.
 addEventListener('re-zoids-saga:left', () => window.location.reload());
+// The enhanced mode's settings changed in the game's pause menu: kept for
+// the next game.
+addEventListener('re-zoids-saga:enhancements', (event) => {
+  for (const line of String(event.detail).split('\n')) {
+    const [name, value] = line.split('=');
+    if (ENHANCEMENTS.includes(name)) setOption(name, value);
+  }
+  saveOptions();
+});
 
 function openPause() {
   if (!session || pause.open) return;

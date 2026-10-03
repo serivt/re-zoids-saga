@@ -22,6 +22,7 @@ use std::fmt::Write as _;
 use std::rc::Rc;
 
 use extraction::{IdentifyError, Title};
+use game_core::extension::{Event as GameEvent, Extension};
 use game_core::port_text::{
     LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
     LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, default_text,
@@ -39,7 +40,7 @@ use platform_web::{
 use screen_filters::ScreenFilters;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::{Closure, JsValue, wasm_bindgen};
-use web_sys::{CustomEvent, HtmlCanvasElement, HtmlElement, Window};
+use web_sys::{CustomEvent, CustomEventInit, HtmlCanvasElement, HtmlElement, Window};
 
 pub use options::Options;
 pub use pacing::Pacer;
@@ -50,6 +51,9 @@ const SLOTS: usize = game_core::slots::DEFAULT_SLOTS;
 const AUDIO_QUEUE_FRAMES: usize = 6;
 /// The event the page hears when the player leaves the game.
 const LEFT_EVENT: &str = "re-zoids-saga:left";
+/// The event the page hears when the enhanced mode's settings change in
+/// the game's pause menu; its detail holds them as settings lines.
+const ENHANCEMENTS_EVENT: &str = "re-zoids-saga:enhancements";
 
 /// What the ROM is, as the launcher tells it: whether the port plays it,
 /// and the message for the player.
@@ -221,6 +225,9 @@ pub fn start(
         game.set_translation(translation).map_err(error)?;
     }
     game.set_play_mode(options.mode);
+    game.extensions()
+        .borrow_mut()
+        .insert(Box::new(ModeReporter(window.clone())));
     let audio = WebAudio::new(SAMPLE_RATE).map_err(error)?;
     audio.resume();
     let stage = canvas
@@ -314,6 +321,29 @@ impl Session {
     pub fn set_touch_opacity(&self, opacity: u8) {
         let opacity = f32::from(opacity) / f32::from(options::USUAL_TOUCH);
         self.runner.borrow_mut().stage.set_opacity(opacity);
+    }
+}
+
+/// Tells the page when the enhanced mode's settings change in the game's
+/// pause menu, so it remembers them for the next game.
+struct ModeReporter(Window);
+
+impl Extension for ModeReporter {
+    fn name(&self) -> &'static str {
+        "web-mode-reporter"
+    }
+
+    fn on_event(&mut self, event: &GameEvent) {
+        let GameEvent::EnhancementsChanged(enhancements) = event else {
+            return;
+        };
+        let init = CustomEventInit::new();
+        init.set_detail(&JsValue::from_str(&options::enhancement_lines(
+            *enhancements,
+        )));
+        if let Ok(event) = CustomEvent::new_with_event_init_dict(ENHANCEMENTS_EVENT, &init) {
+            let _ = self.0.dispatch_event(&event);
+        }
     }
 }
 

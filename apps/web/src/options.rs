@@ -1,17 +1,22 @@
 //! The page's options, given as the launcher's settings file writes them,
-//! one `key=value` line each: `mode` (`classic` or `enhanced`), `color`,
+//! one `key=value` line each: `mode` (`classic` or `enhanced`) and the
+//! enhanced mode's `battle-animations`, `damage-numbers`, `auto-text`,
+//! `autosave`, `weapon-reach` (`1` or `0`) and `fast-forward` (2 to 4), as
+//! the launcher's, `color`,
 //! `trail` and `upscale` (the display's, as the launcher's), `volume` (0 to
 //! 100), `muted` (`1` to start without sound), `scaling` (`sharp`, `fill`
 //! or `smooth`), and the on-screen pad's
 //! `touch` (`auto`, `on` or `off`), `touch-size` (60 to 140, percent) and
 //! `touch-opacity` (20 to 100, percent), as Android's. Unknown keys and
-//! values keep the defaults: the enhanced mode, the original colors, no
-//! trail, no upscaler, full volume, sharp whole multiples, and the pad on
-//! touch screens at its usual size and opacity.
+//! values keep the defaults: the classic mode (as the launcher's), the
+//! enhanced mode's own defaults, the original colors, no trail, no
+//! upscaler, full volume, sharp whole multiples, and the pad on touch
+//! screens at its usual size and opacity.
 //!
 //! Source of knowledge: this project's own design (see
 //! `apps/launcher/src/settings.rs`).
 
+use game_core::play_mode::FAST_FORWARD_SPEEDS;
 use game_core::{Enhancements, PlayMode};
 use platform_web::{PadMode, Scaling};
 use screen_filters::{ColorProfile, TrailMode, Upscaler};
@@ -54,7 +59,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
-            mode: PlayMode::Enhanced(Enhancements::default()),
+            mode: PlayMode::Classic,
             color: ColorProfile::Original,
             trail: TrailMode::Off,
             upscaler: Upscaler::None,
@@ -73,13 +78,29 @@ impl Options {
     #[must_use]
     pub fn parse(text: &str) -> Self {
         let mut options = Self::default();
+        let mut enhanced = false;
+        let mut enhancements = Enhancements::default();
         for (key, value) in text
             .lines()
             .filter_map(|line| line.split_once('='))
             .map(|(key, value)| (key.trim(), value.trim()))
         {
             match key {
-                "mode" if value == "classic" => options.mode = PlayMode::Classic,
+                "mode" => enhanced = value == "enhanced",
+                "battle-animations" => enhancements.battle_animations = value != "0",
+                "damage-numbers" => enhancements.damage_numbers = value == "1",
+                "auto-text" => enhancements.auto_text = value == "1",
+                "autosave" => enhancements.autosave = value != "0",
+                "weapon-reach" => enhancements.weapon_reach = value != "0",
+                "fast-forward" => {
+                    if let Some(speed) = value
+                        .parse()
+                        .ok()
+                        .filter(|speed| FAST_FORWARD_SPEEDS.contains(speed))
+                    {
+                        enhancements.fast_forward = speed;
+                    }
+                }
                 "color" => options.color = ColorProfile::from_key(value).unwrap_or_default(),
                 "trail" => options.trail = TrailMode::from_key(value).unwrap_or_default(),
                 "upscale" => options.upscaler = Upscaler::from_key(value).unwrap_or_default(),
@@ -109,8 +130,29 @@ impl Options {
                 _ => {}
             }
         }
+        options.mode = if enhanced {
+            PlayMode::Enhanced(enhancements)
+        } else {
+            PlayMode::Classic
+        };
         options
     }
+}
+
+/// The enhanced mode's settings as the page keeps them, one line each, as
+/// [`Options::parse`] reads them.
+#[must_use]
+pub fn enhancement_lines(enhancements: Enhancements) -> String {
+    let flag = |on: bool| if on { "1" } else { "0" };
+    format!(
+        "battle-animations={}\ndamage-numbers={}\nauto-text={}\nautosave={}\nweapon-reach={}\nfast-forward={}\n",
+        flag(enhancements.battle_animations),
+        flag(enhancements.damage_numbers),
+        flag(enhancements.auto_text),
+        flag(enhancements.autosave),
+        flag(enhancements.weapon_reach),
+        enhancements.fast_forward,
+    )
 }
 
 #[cfg(test)]
@@ -131,6 +173,27 @@ mod tests {
             Options::parse("upscale=scale2x").upscaler,
             Upscaler::Scale2x
         );
+    }
+
+    #[test]
+    fn the_enhanced_mode_s_settings_come_and_go_as_lines() {
+        let chosen = Enhancements {
+            battle_animations: false,
+            damage_numbers: true,
+            auto_text: true,
+            autosave: false,
+            weapon_reach: false,
+            fast_forward: 4,
+        };
+        let options = Options::parse(&format!("mode=enhanced\n{}", enhancement_lines(chosen)));
+        assert_eq!(options.mode, PlayMode::Enhanced(chosen));
+        let odd = Options::parse("fast-forward=9\nbattle-animations=x\nmode=classic\n");
+        assert_eq!(odd.mode, PlayMode::Classic);
+        assert_eq!(
+            Options::parse("mode=enhanced\nfast-forward=9\n").mode,
+            PlayMode::Enhanced(Enhancements::default())
+        );
+        assert_eq!(Options::parse("mode=other\n").mode, PlayMode::Classic);
     }
 
     #[test]
