@@ -862,6 +862,86 @@ $('#install').addEventListener('click', async () => {
   $('#install').hidden = true;
 });
 
+// Whether this page is the latest version the site serves -----------------
+
+const RUNNING = $('meta[name="version"]')?.content ?? '';
+const CHECK_EVERY_MS = 30 * 60_000;
+const UPDATE_WAIT_MS = 8_000;
+
+// The version the site serves now, or null when it cannot be asked.
+async function latestVersion() {
+  try {
+    const response = await fetch('version.json', { cache: 'no-store' });
+    return response.ok ? (await response.json()).version ?? null : null;
+  } catch {
+    return null;
+  }
+}
+
+async function checkVersion() {
+  if (!navigator.onLine) return;
+  const latest = await latestVersion();
+  if (!latest) return;
+  const newer = latest !== RUNNING;
+  $('#update').hidden = !newer;
+  $('#update-title').textContent = `Version ${latest} is out; this page is ${RUNNING}.`;
+  $('#version-state').textContent = newer ? ' · update available' : ' · up to date';
+}
+
+// The version the service worker keeps for offline play, or null.
+function workerVersion() {
+  const worker = navigator.serviceWorker?.controller;
+  if (!worker) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = (event) => resolve(event.data?.version ?? null);
+    worker.postMessage('version', [channel.port2]);
+    setTimeout(() => resolve(null), 1000);
+  });
+}
+
+// Waits until a new service worker takes over the page, or `ms` pass.
+function workerChange(ms) {
+  return new Promise((resolve) => {
+    navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true });
+    setTimeout(resolve, ms);
+  });
+}
+
+// Loads the latest version: the service worker updated and the page
+// reloaded from it, or, when it does not update, every kept file dropped so
+// the reload asks the site for each one anew (the worker keeps them again
+// as they come).
+async function updateNow() {
+  const button = $('#update-now');
+  button.disabled = true;
+  button.textContent = 'Updating…';
+  const latest = await latestVersion();
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration();
+    if (registration && (await workerVersion()) !== latest) {
+      const changed = workerChange(UPDATE_WAIT_MS);
+      await registration.update();
+      await changed;
+    }
+    if (!registration || (await workerVersion()) !== latest) {
+      const kept = await caches.keys();
+      await Promise.all(kept.filter((key) => key.startsWith('re-zoids-saga-')).map((key) => caches.delete(key)));
+    }
+  } catch {
+    // Whatever failed, the reload below still asks the site.
+  }
+  window.location.reload();
+}
+
+$('#update-now').addEventListener('click', updateNow);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && !session) checkVersion();
+});
+setInterval(() => {
+  if (!session) checkVersion();
+}, CHECK_EVERY_MS);
+
 // Touch screens show the pad's options in the pause menu and its help.
 const markTouch = () => document.documentElement.classList.add('touch');
 if (matchMedia('(pointer: coarse)').matches) markTouch();
@@ -1124,3 +1204,4 @@ await openCloud();
 const savedTab = $(`#${readJson(TAB_KEY, 'tab-options')}`);
 if (savedTab && !savedTab.hidden) selectTab(savedTab);
 netState();
+checkVersion();

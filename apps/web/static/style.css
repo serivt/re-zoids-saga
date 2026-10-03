@@ -292,6 +292,10 @@ fieldset.group > legend { width: 100%; padding: 0; margin-bottom: 16px; }
   box-shadow: 4px 4px 0 var(--shadow);
 }
 .sprite { position: absolute; }
+.update { background: var(--accent); color: var(--accent-ink); padding-top: env(safe-area-inset-top); }
+.update-in { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; padding-block: 10px; }
+.update .btn-primary { background: var(--accent-ink); border-color: var(--accent-ink); color: var(--accent); box-shadow: none; }
+.update-note { opacity: .8; }
 .note-inline { margin-left: 8px; text-transform: none; letter-spacing: 0; }
 
 /* ---------- Mobile ---------- */

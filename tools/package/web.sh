@@ -2,7 +2,8 @@
 # Builds the web version: dist/web/, a folder any static web server can
 # serve (the page, its scripts and style, the game's WebAssembly and its
 # JavaScript glue, the manifest and the service worker that caches them
-# under this version, so the page installs and plays offline, and the
+# under this version, so the page installs and plays offline, version.json,
+# which tells a page kept offline whether a newer version is out, and the
 # headers Cloudflare serves them with), and the same folder as
 # dist/re-zoids-saga-<version>-web.zip.
 # Usage: tools/package/web.sh [version]
@@ -27,6 +28,7 @@ for FILE in sw.js index.html; do
     sed -i.bak "s/__VERSION__/$VERSION/" "$OUT/$FILE"
     rm "$OUT/$FILE.bak"
 done
+printf '{ "version": "%s" }\n' "$VERSION" > "$OUT/version.json"
 cp assets/icons/re-zoids-saga.png "$OUT/icon.png"
 cp LICENSE "$OUT/LICENSE.txt"
 ARCHIVE="$EXECUTABLE-$VERSION-web.zip"
