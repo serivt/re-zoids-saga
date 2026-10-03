@@ -4,7 +4,7 @@ A FOSS native runtime for preserving *Zoids Saga* (Game Boy Advance, Japan), wri
 Rust.
 
 The game is *re*implemented, hence the *Re:* in its name, as a native, cross-platform
-application (Windows, macOS, Linux and Android) with a modern localization
+application (Windows, macOS, Linux, Android and web browsers) with a modern localization
 layer (Japanese, English, Spanish), while preserving the original gameplay behavior.
 
 This is **not** an emulator and **not** a ROM hack. The original ROM is never modified
@@ -19,6 +19,24 @@ battles against roaming and story enemies, the pause menu, saves compatible with
 original and translations.
 
 ## Play
+
+### In your browser
+
+Open **[re-zoids-saga.serivt.com](https://re-zoids-saga.serivt.com)**, choose your Zoids
+Saga ROM (Japan, Rev 1) and press Play. Nothing to install and no security warnings: it
+runs on computers, phones and tablets (Android, iPhone and iPad) alike.
+
+- Phones and tablets get an on-screen pad; keyboards and gamepads work too.
+- The ROM is checked and kept in the browser alone, never uploaded; the translation, the
+  options and the saves stay there too, so the next visit needs nothing chosen.
+- Once loaded it plays offline, and the browser can install it as an app.
+- The Saves tab exports each save for an emulator, RetroArch or a flash cart and imports
+  theirs; signing in by email (optional, no password) keeps the saves in the cloud for
+  any browser.
+
+See [docs/web.md](docs/web.md) for how it works.
+
+### On your computer or Android
 
 1. Download the package for your system from the
    [Releases](https://github.com/serivt/re-zoids-saga/releases) page: a disk image for
@@ -67,6 +85,10 @@ cargo run -p launcher                       # the launcher's screen
 cargo run -p launcher -- path/to/rom.gba    # straight into the game
 ```
 
+The web version builds with `tools/package/web.sh` into `dist/web`, a folder any static
+web server can serve; it needs the `wasm32-unknown-unknown` target and
+`wasm-bindgen-cli` (see [docs/web.md](docs/web.md)).
+
 Before submitting a change:
 
 ```bash
@@ -76,8 +98,9 @@ cargo test
 ```
 
 The launcher's options, controls and command line are in
-[docs/launcher.md](docs/launcher.md), the packages in [docs/packaging.md](docs/packaging.md),
-and the architecture, rules and project structure in [AGENTS.md](AGENTS.md).
+[docs/launcher.md](docs/launcher.md), the web version in [docs/web.md](docs/web.md), the
+packages in [docs/packaging.md](docs/packaging.md), and the architecture, rules and
+project structure in [AGENTS.md](AGENTS.md).
 
 ## Supported ROM
 
