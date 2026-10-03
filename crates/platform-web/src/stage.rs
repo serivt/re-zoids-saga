@@ -11,7 +11,8 @@
 //!
 //! The pad shows on touch screens (a coarse pointer, or once the screen is
 //! touched) and hides while a gamepad is connected; the page can also
-//! always show it or never.
+//! always show it or never. The page's own menu button, if it has one, is
+//! kept at the screen's top left corner, wherever the screen goes.
 
 use std::cell::{Cell, RefCell};
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
@@ -29,6 +30,10 @@ use web_sys::{
 };
 
 use crate::web_error;
+
+/// How far inside the screen's corner the page's menu button sits, in CSS
+/// pixels.
+const MENU_INSET: f32 = 8.0;
 
 /// How the screen fills the window when the pad is not shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -136,6 +141,19 @@ pub fn fit_screen(window: (f32, f32), frame: (f32, f32), whole: bool) -> Area {
     }
 }
 
+/// The page's elements the game plays in.
+pub struct StageElements {
+    /// The element over the whole window holding the others, which takes
+    /// the fingers.
+    pub stage: HtmlElement,
+    /// The game's screen.
+    pub screen: HtmlCanvasElement,
+    /// The canvas the pad is drawn on, over the whole window.
+    pub pad: HtmlCanvasElement,
+    /// The page's menu button, kept at the screen's top left corner.
+    pub menu: Option<HtmlElement>,
+}
+
 /// The window the screen and the pad were laid out for.
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Laid {
@@ -151,6 +169,7 @@ pub struct WebStage {
     stage: HtmlElement,
     screen: HtmlCanvasElement,
     pad: HtmlCanvasElement,
+    menu: Option<HtmlElement>,
     context: CanvasRenderingContext2d,
     fingers: Rc<RefCell<Fingers>>,
     /// Whether the screen is a touch screen: a coarse pointer, or a touch
@@ -167,9 +186,9 @@ pub struct WebStage {
 }
 
 impl WebStage {
-    /// Places the game's `screen` canvas in `stage`, the element over the
-    /// whole window holding it and the `pad` canvas, for frames of `frame`
-    /// (width, height); listens to the fingers on `stage`.
+    /// Places the game's screen and the page's menu button among the
+    /// `elements`, for frames of `frame` (width, height); listens to the
+    /// fingers on the stage.
     ///
     /// # Errors
     ///
@@ -177,13 +196,17 @@ impl WebStage {
     /// the listeners cannot be added.
     pub fn new(
         window: Window,
-        stage: HtmlElement,
-        screen: HtmlCanvasElement,
-        pad: HtmlCanvasElement,
+        elements: StageElements,
         frame: (usize, usize),
         scaling: Scaling,
         style: PadStyle,
     ) -> Result<Self, PlatformError> {
+        let StageElements {
+            stage,
+            screen,
+            pad,
+            menu,
+        } = elements;
         let context = pad
             .get_context("2d")
             .map_err(web_error)?
@@ -203,6 +226,7 @@ impl WebStage {
             stage,
             screen,
             pad,
+            menu,
             context,
             fingers,
             touch,
@@ -213,6 +237,24 @@ impl WebStage {
             laid: None,
             drawn: None,
         })
+    }
+
+    /// Fills the window as `scaling` asks while the pad is hidden.
+    pub fn set_scaling(&mut self, scaling: Scaling) {
+        self.scaling = scaling;
+        self.laid = None;
+    }
+
+    /// Shows the pad as `mode` asks.
+    pub fn set_mode(&mut self, mode: PadMode) {
+        self.style.mode = mode;
+        self.laid = None;
+    }
+
+    /// Makes the pad `opacity` (0 to 1) as opaque as usual.
+    pub fn set_opacity(&mut self, opacity: f32) {
+        self.style.opacity = opacity.clamp(0.0, 1.0);
+        self.drawn = None;
     }
 
     /// Lays the screen and the pad out again when the window, its pixel
@@ -248,6 +290,11 @@ impl WebStage {
             fit_screen(window, self.frame, self.scaling == Scaling::Sharp)
         };
         place(&self.screen, area);
+        if let Some(menu) = &self.menu {
+            let style = menu.style();
+            let _ = style.set_property("left", &format!("{}px", area.x + MENU_INSET));
+            let _ = style.set_property("top", &format!("{}px", area.y + MENU_INSET));
+        }
         self.pad.set_hidden(!laid.shown);
         if laid.shown {
             self.pad.set_width(pixels(laid.width * laid.density));

@@ -1,7 +1,8 @@
 //! The page's options, given as the launcher's settings file writes them,
 //! one `key=value` line each: `mode` (`classic` or `enhanced`), `color`,
 //! `trail` and `upscale` (the display's, as the launcher's), `volume` (0 to
-//! 100), `scaling` (`sharp`, `fill` or `smooth`), and the on-screen pad's
+//! 100), `muted` (`1` to start without sound), `scaling` (`sharp`, `fill`
+//! or `smooth`), and the on-screen pad's
 //! `touch` (`auto`, `on` or `off`), `touch-size` (60 to 140, percent) and
 //! `touch-opacity` (20 to 100, percent), as Android's. Unknown keys and
 //! values keep the defaults: the enhanced mode, the original colors, no
@@ -38,6 +39,8 @@ pub struct Options {
     pub upscaler: Upscaler,
     /// The sound's volume, in percent.
     pub volume: u8,
+    /// Whether the game starts without sound.
+    pub muted: bool,
     /// How the screen fills the window without the pad.
     pub scaling: Scaling,
     /// When the on-screen pad shows.
@@ -56,6 +59,7 @@ impl Default for Options {
             trail: TrailMode::Off,
             upscaler: Upscaler::None,
             volume: FULL_VOLUME,
+            muted: false,
             scaling: Scaling::Sharp,
             touch: PadMode::Auto,
             touch_size: USUAL_TOUCH,
@@ -84,6 +88,7 @@ impl Options {
                         options.volume = volume.min(FULL_VOLUME);
                     }
                 }
+                "muted" => options.muted = value == "1",
                 "scaling" => options.scaling = Scaling::from_key(value).unwrap_or_default(),
                 "touch" => options.touch = PadMode::from_key(value).unwrap_or_default(),
                 "touch-size" => {
@@ -137,6 +142,7 @@ mod tests {
             (Scaling::Smooth, PadMode::Always)
         );
         assert_eq!((options.touch_size, options.touch_opacity), (120, 40));
+        assert!(Options::parse("muted=1").muted && !Options::parse("muted=0").muted);
         let wrong = Options::parse("touch=maybe\ntouch-size=200\ntouch-opacity=5\n");
         assert_eq!(wrong.touch, PadMode::Auto);
         assert_eq!(

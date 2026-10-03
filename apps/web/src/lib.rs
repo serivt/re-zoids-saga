@@ -8,7 +8,9 @@
 //! the player leaves the game from the pause menu's 終了.
 //!
 //! As in the launcher, M mutes the sound, and in the enhanced mode holding
-//! Space (or the gamepad's right stick) plays the fast forward.
+//! Space (or the gamepad's right stick) plays the fast forward. The page
+//! keeps a [`Session`] of the game it started, to pause it, resume it,
+//! leave it, and change the volume, the scaling and the pad while it plays.
 //!
 //! Source of knowledge: this project's own design (see `docs/web.md`).
 
@@ -30,7 +32,10 @@ use game_core::{Game, PlayMode, Translation};
 use gba_runtime::apu::{SAMPLE_RATE, SAMPLES_PER_FRAME};
 use gba_runtime::ppu::{SCREEN_HEIGHT, SCREEN_WIDTH};
 use platform::{AudioOut, Button, Frame, Input, Rgb, SaveStorage};
-use platform_web::{LocalStorage, PadStyle, WebAudio, WebCanvas, WebInput, WebStage};
+use platform_web::{
+    LocalStorage, PadMode, PadStyle, Scaling, StageElements, WebAudio, WebCanvas, WebInput,
+    WebStage,
+};
 use screen_filters::ScreenFilters;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::{Closure, JsValue, wasm_bindgen};
@@ -90,24 +95,85 @@ pub fn check_rom(rom: &[u8]) -> RomCheck {
     }
 }
 
-/// What the save `bytes` of the game whose ROM is `rom` holds, for the
-/// page's list and an import's question: `Lv 31, area 10, 4698050 G` and,
-/// when the port counted it, `, 87:23 played`; `None` when it holds no game
-/// to continue.
+/// What a save holds, for the page's cards and an import's question.
+#[wasm_bindgen]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveDetails {
+    level: u8,
+    area: u8,
+    money: u32,
+    played: Option<String>,
+}
+
+#[wasm_bindgen]
+impl SaveDetails {
+    /// The leader's level.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn level(&self) -> u8 {
+        self.level
+    }
+
+    /// The area saved in, 1 to 10.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn area(&self) -> u8 {
+        self.area
+    }
+
+    /// The party's money.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn money(&self) -> u32 {
+        self.money
+    }
+
+    /// The time played, `87:23`, when the port counted it.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn played(&self) -> Option<String> {
+        self.played.clone()
+    }
+}
+
+/// What the save `bytes` of the game whose ROM is `rom` holds; `None` when
+/// it holds no game to continue.
 #[wasm_bindgen]
 #[must_use]
-pub fn save_summary(rom: &[u8], bytes: &[u8]) -> Option<String> {
+pub fn save_details(rom: &[u8], bytes: &[u8]) -> Option<SaveDetails> {
     let layout = extraction::saga_save::save_layout(rom).ok()?;
     let found = SaveFile::new(layout).read(Some(bytes.to_vec()));
     let Slot::Game(game) = Slot::from_found(&found) else {
         return None;
     };
-    let mut summary = format!("Lv {}, area {}, {} G", game.level, game.area, game.money);
-    if let Found::Saved(saved) | Found::Restored(saved) = &found
-        && saved.stats.play_frames > 0
-    {
-        let (hours, minutes, _) = saved.stats.play_time();
-        let _ = write!(summary, ", {hours}:{minutes:02} played");
+    let played = match &found {
+        Found::Saved(saved) | Found::Restored(saved) if saved.stats.play_frames > 0 => {
+            let (hours, minutes, _) = saved.stats.play_time();
+            Some(format!("{hours}:{minutes:02}"))
+        }
+        _ => None,
+    };
+    Some(SaveDetails {
+        level: game.level,
+        area: game.area,
+        money: game.money,
+        played,
+    })
+}
+
+/// What the save `bytes` of the game whose ROM is `rom` holds, in a line:
+/// `Lv 31, area 10, 4698050 G` and, when the port counted it, `, 87:23
+/// played`; `None` when it holds no game to continue.
+#[wasm_bindgen]
+#[must_use]
+pub fn save_summary(rom: &[u8], bytes: &[u8]) -> Option<String> {
+    let details = save_details(rom, bytes)?;
+    let mut summary = format!(
+        "Lv {}, area {}, {} G",
+        details.level, details.area, details.money
+    );
+    if let Some(played) = &details.played {
+        let _ = write!(summary, ", {played} played");
     }
     Some(summary)
 }
@@ -127,9 +193,10 @@ pub fn cartridge_save(rom: &[u8], bytes: Vec<u8>) -> Vec<u8> {
 
 /// Starts the game of `rom` on `canvas` with the options `settings` (see
 /// [`Options`]) and the PO file `translation`, if any, the on-screen pad
-/// drawn on `pad`. Both canvases sit in one element over the whole window,
-/// which takes the fingers. Call it from the player's click, so the browser
-/// lets the sound play.
+/// drawn on `pad` and the page's `menu` button, if any, kept at the game
+/// screen's top left corner. They all sit in one element over the whole
+/// window, which takes the fingers. Call it from the player's click, so the
+/// browser lets the sound play.
 ///
 /// # Errors
 ///
@@ -142,7 +209,8 @@ pub fn start(
     translation: Option<String>,
     canvas: HtmlCanvasElement,
     pad: HtmlCanvasElement,
-) -> Result<(), JsValue> {
+    menu: Option<HtmlElement>,
+) -> Result<Session, JsValue> {
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
     let options = Options::parse(settings);
     let rom: &'static [u8] = Box::leak(rom.into_boxed_slice());
@@ -165,11 +233,15 @@ pub fn start(
         opacity: f32::from(options.touch_opacity) / f32::from(options::USUAL_TOUCH),
         fast_forward: matches!(options.mode, PlayMode::Enhanced(_)),
     };
+    let elements = StageElements {
+        stage,
+        screen: canvas.clone(),
+        pad,
+        menu,
+    };
     let stage = WebStage::new(
         window.clone(),
-        stage,
-        canvas.clone(),
-        pad,
+        elements,
         (SCREEN_WIDTH, SCREEN_HEIGHT),
         options.scaling,
         style,
@@ -184,12 +256,65 @@ pub fn start(
         volume: i32::from(options.volume),
         frame: Frame::new(SCREEN_WIDTH, SCREEN_HEIGHT, Rgb::default()),
         pacer: Pacer::new(),
-        muted: false,
+        muted: options.muted,
+        paused: false,
+        leaving: false,
         held: Input::default(),
         game,
     };
-    run(&window, runner);
-    Ok(())
+    let runner = Rc::new(RefCell::new(runner));
+    run(&window, Rc::clone(&runner));
+    Ok(Session { runner })
+}
+
+/// The game the page started, while it plays.
+#[wasm_bindgen]
+pub struct Session {
+    runner: Rc<RefCell<Runner>>,
+}
+
+#[wasm_bindgen]
+impl Session {
+    /// Stops the game where it is, its sound with it.
+    pub fn pause(&self) {
+        self.runner.borrow_mut().paused = true;
+    }
+
+    /// Plays the game on from where it stopped.
+    pub fn resume(&self) {
+        let mut runner = self.runner.borrow_mut();
+        runner.paused = false;
+        runner.pacer = Pacer::new();
+    }
+
+    /// Leaves the game: the page hears `re-zoids-saga:left`, as when the
+    /// player leaves from the pause menu. What was not saved is lost.
+    pub fn quit(&self) {
+        self.runner.borrow_mut().leaving = true;
+    }
+
+    /// Plays the sound at `volume` percent.
+    pub fn set_volume(&self, volume: u8) {
+        self.runner.borrow_mut().volume = i32::from(volume.min(options::FULL_VOLUME));
+    }
+
+    /// Fills the window as the settings' `scaling` line names it.
+    pub fn set_scaling(&self, key: &str) {
+        let scaling = Scaling::from_key(key).unwrap_or_default();
+        self.runner.borrow_mut().stage.set_scaling(scaling);
+    }
+
+    /// Shows the pad as the settings' `touch` line names it.
+    pub fn set_touch(&self, key: &str) {
+        let mode = PadMode::from_key(key).unwrap_or_default();
+        self.runner.borrow_mut().stage.set_mode(mode);
+    }
+
+    /// Makes the pad `opacity` percent as opaque as usual.
+    pub fn set_touch_opacity(&self, opacity: u8) {
+        let opacity = f32::from(opacity) / f32::from(options::USUAL_TOUCH);
+        self.runner.borrow_mut().stage.set_opacity(opacity);
+    }
 }
 
 /// Keeps the game's saves in the browser's storage: the slots, the
@@ -215,6 +340,10 @@ struct Runner {
     pacer: Pacer,
     volume: i32,
     muted: bool,
+    /// Stopped by the page's menu.
+    paused: bool,
+    /// Left from the page's menu.
+    leaving: bool,
     /// The buttons of the frame before, for the mute's press.
     held: Input,
 }
@@ -223,6 +352,12 @@ impl Runner {
     /// A picture of the screen at `now` (milliseconds): the frames due,
     /// their sound, then the picture; `false` once the player has left.
     fn tick(&mut self, now: f64) -> bool {
+        if self.leaving {
+            return false;
+        }
+        if self.paused {
+            return true;
+        }
         let due = self.pacer.due(now);
         if due == 0 {
             return true;
@@ -275,8 +410,7 @@ type FrameCallback = Closure<dyn FnMut(f64)>;
 
 /// Runs `runner` once for each picture the screen shows, until the player
 /// leaves; then tells the page.
-fn run(window: &Window, runner: Runner) {
-    let runner = Rc::new(RefCell::new(runner));
+fn run(window: &Window, runner: Rc<RefCell<Runner>>) {
     let frame: Rc<RefCell<Option<FrameCallback>>> = Rc::new(RefCell::new(None));
     let next = Rc::clone(&frame);
     let page = window.clone();
