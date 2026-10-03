@@ -1,6 +1,9 @@
 # Builds the packages players download, for macOS, Windows, Linux, Android
 # and web browsers, with the scripts in tools/package, each with a .sha256
-# file holding its SHA-256 checksum. The Android app is signed with the keystore in the
+# file holding its SHA-256 checksum. A release also publishes the web
+# version's site on Cloudflare (services/site) when the CLOUDFLARE_API_TOKEN
+# secret and the CLOUDFLARE_ACCOUNT_ID variable are set, with the cloud
+# saves when the SUPABASE_URL and SUPABASE_ANON_KEY variables are. The Android app is signed with the keystore in the
 # ANDROID_KEYSTORE_BASE64 secret (ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
 # ANDROID_KEY_PASSWORD), which a release needs; without it a run by hand
 # builds it with the debug key. It is then started on an emulator, without a
@@ -227,6 +230,9 @@ jobs:
           cargo install wasm-bindgen-cli --version "$BINDGEN" --locked
 
       - name: Package
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
         run: tools/package/web.sh "$VERSION"
 
       - name: Checksum
@@ -244,6 +250,39 @@ jobs:
             dist/*-web.zip
             dist/*-web.zip.sha256
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: site-web
+          path: dist/web/
+          if-no-files-found: error
+
+  deploy-web:
+    name: Publish the web version
+    if: github.event_name == 'release'
+    needs: [web]
+    runs-on: ubuntu-24.04
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: site-web
+          path: dist/web
+
+      - name: Deploy to Cloudflare
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy --config services/site/wrangler.jsonc
+
+      - name: No Cloudflare token
+        if: env.CLOUDFLARE_API_TOKEN == ''
+        run: echo "::notice::the CLOUDFLARE_API_TOKEN secret is not set, so the site was not published"
 
   release:
     name: Release

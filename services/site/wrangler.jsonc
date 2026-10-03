@@ -1,0 +1,16 @@
+// The web version's site on Cloudflare: a Worker that only serves the files
+// tools/package/web.sh builds into dist/web (static assets, no code of its
+// own), at https://re-zoids-saga.serivt.com, a custom domain whose DNS
+// record and certificate Cloudflare keeps. Deployed by the release
+// workflow, or by hand with
+// `npx wrangler deploy --config services/site/wrangler.jsonc`.
+{
+  "name": "re-zoids-saga",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "../../dist/web"
+  },
+  "routes": [
+    { "pattern": "re-zoids-saga.serivt.com", "custom_domain": true }
+  ]
+}

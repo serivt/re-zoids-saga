@@ -291,6 +291,7 @@ fieldset.group > legend { width: 100%; padding: 0; margin-bottom: 16px; }
   background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius);
   box-shadow: 4px 4px 0 var(--shadow);
 }
+.sprite { position: absolute; }
 .note-inline { margin-left: 8px; text-transform: none; letter-spacing: 0; }
 
 /* ---------- Mobile ---------- */
