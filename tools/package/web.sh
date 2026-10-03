@@ -2,7 +2,8 @@
 # Builds the web version: dist/web/, a folder any static web server can
 # serve (the page, its scripts and style, the game's WebAssembly and its
 # JavaScript glue, the manifest and the service worker that caches them
-# under this version, so the page installs and plays offline).
+# under this version, so the page installs and plays offline), and the same
+# folder as dist/re-zoids-saga-<version>-web.zip.
 # Usage: tools/package/web.sh [version]
 #
 # Needs the wasm32-unknown-unknown Rust target and wasm-bindgen-cli at the
@@ -30,4 +31,7 @@ for FILE in sw.js index.html; do
 done
 cp assets/icons/re-zoids-saga.png "$OUT/icon.png"
 cp LICENSE "$OUT/LICENSE.txt"
-echo "Built $OUT ($VERSION); serve it with, for example: python3 -m http.server -d $OUT"
+ARCHIVE="$EXECUTABLE-$VERSION-web.zip"
+rm -f "$DIST/$ARCHIVE"
+(cd "$OUT" && zip -qr "../$ARCHIVE" .)
+echo "Built $OUT and $DIST/$ARCHIVE ($VERSION); serve it with, for example: python3 -m http.server -d $OUT"

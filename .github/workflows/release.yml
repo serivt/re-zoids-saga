@@ -1,6 +1,6 @@
-# Builds the packages players download, for macOS, Windows, Linux and
-# Android, with the scripts in tools/package, each with a .sha256 file holding
-# its SHA-256 checksum. The Android app is signed with the keystore in the
+# Builds the packages players download, for macOS, Windows, Linux, Android
+# and web browsers, with the scripts in tools/package, each with a .sha256
+# file holding its SHA-256 checksum. The Android app is signed with the keystore in the
 # ANDROID_KEYSTORE_BASE64 secret (ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS,
 # ANDROID_KEY_PASSWORD), which a release needs; without it a run by hand
 # builds it with the debug key. It is then started on an emulator, without a
@@ -200,10 +200,55 @@ jobs:
           path: dist/smoke/
           if-no-files-found: ignore
 
+  web:
+    name: Package (web)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "VERSION=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+          fi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: web
+
+      - name: Install the WebAssembly target and wasm-bindgen
+        run: |
+          rustup target add wasm32-unknown-unknown
+          BINDGEN=$(awk '/^name = "wasm-bindgen"$/ { getline; gsub(/[^0-9.]/, ""); print }' Cargo.lock)
+          cargo install wasm-bindgen-cli --version "$BINDGEN" --locked
+
+      - name: Package
+        run: tools/package/web.sh "$VERSION"
+
+      - name: Checksum
+        working-directory: dist
+        run: |
+          for package in *-web.zip; do
+            sha256sum "$package" > "$package.sha256"
+            cat "$package.sha256"
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: package-web
+          path: |
+            dist/*-web.zip
+            dist/*-web.zip.sha256
+          if-no-files-found: error
+
   release:
     name: Release
     if: github.event_name == 'release'
-    needs: [package, android]
+    needs: [package, android, web]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8
