@@ -1,17 +1,20 @@
 //! What the frontends do to the game's picture before it reaches the
 //! screen, the player's choice in the launcher's options: the colors of
 //! the handheld's panels (see [`color`]), the trail its slow panel left
-//! (see [`trail`]) and pixel-art magnification (see [`upscale`]). The
-//! scaling to the window, and the LCD grid over it, stay the backend's.
+//! (see [`trail`]), pixel-art magnification (see [`upscale`]) and where the
+//! LCD grid's lines go over the scaled picture (see [`grid`]). The scaling
+//! to the window, and drawing the grid, stay the backend's.
 //!
 //! Source of knowledge: this project's own design (see
 //! `docs/launcher.md`, Options).
 
 pub mod color;
+pub mod grid;
 pub mod trail;
 pub mod upscale;
 
 pub use color::{ColorCorrection, ColorProfile};
+pub use grid::Grid;
 pub use trail::{Trail, TrailMode};
 pub use upscale::Upscaler;
 

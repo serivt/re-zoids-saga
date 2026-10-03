@@ -400,6 +400,7 @@ name = "platform-sdl3"
 version = "0.6.0"
 dependencies = [
  "platform",
+ "screen-filters",
  "sdl3",
  "sdl3-sys",
 ]

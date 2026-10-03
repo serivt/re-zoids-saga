@@ -11,6 +11,8 @@ pub use pad::{default_pad_buttons, pad_button_label, pad_button_name};
 pub use storage::{FileStorage, autosave_path, slot_path};
 
 use platform::{AudioOut, Button, Display, Event, Frame, Input, PlatformError};
+use screen_filters::Grid;
+use screen_filters::grid::Rect;
 use sdl3::audio::{AudioFormat, AudioSpec, AudioStreamOwner};
 use sdl3::event::Event as SdlEvent;
 use sdl3::keyboard::{Keycode, Scancode};
@@ -94,30 +96,10 @@ impl Filter {
     /// The lines drawn over the scaled frame, if any.
     const fn grid(self) -> Option<Grid> {
         match self {
-            Self::Lcd => Some(Grid {
-                shade: 0xB0,
-                share: 0.2,
-                columns: true,
-                least: 3.0,
-            }),
-            Self::LcdSoft => Some(Grid {
-                shade: 0xCC,
-                share: 0.2,
-                columns: true,
-                least: 3.0,
-            }),
-            Self::LcdFine => Some(Grid {
-                shade: 0xD8,
-                share: 0.12,
-                columns: true,
-                least: 3.0,
-            }),
-            Self::Scanlines => Some(Grid {
-                shade: 0xA8,
-                share: 0.4,
-                columns: false,
-                least: 2.0,
-            }),
+            Self::Lcd => Some(Grid::LCD),
+            Self::LcdSoft => Some(Grid::LCD_SOFT),
+            Self::LcdFine => Some(Grid::LCD_FINE),
+            Self::Scanlines => Some(Grid::SCANLINES),
             Self::Sharp | Self::PixelArt | Self::Smooth => None,
         }
     }
@@ -677,22 +659,6 @@ fn is_multiple(frame: (usize, usize), display: (usize, usize)) -> bool {
         && frame.1 == frame.0 / display.0 * display.1
 }
 
-/// Lines over the scaled frame: at the right and the bottom of each of the
-/// frame's pixels for an LCD's grid, at the bottom of each row for scan
-/// lines.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Grid {
-    /// How dark they leave what they cover: the color they multiply it by.
-    shade: u8,
-    /// The share of a pixel's output pixels a line takes, rounded to whole
-    /// ones, at least one.
-    share: f32,
-    /// Whether there are lines between the columns too.
-    columns: bool,
-    /// The output pixels a pixel of the frame must span for them to show.
-    least: f32,
-}
-
 /// Darkens `grid`'s lines over a frame of `frame` pixels drawn at `rect`,
 /// the canvas's units being `scale` output pixels each.
 fn draw_grid(
@@ -702,7 +668,17 @@ fn draw_grid(
     frame: (usize, usize),
     scale: f32,
 ) -> Result<(), PlatformError> {
-    let lines = grid_lines(grid, rect, frame, scale);
+    let area = Rect {
+        x: rect.x,
+        y: rect.y,
+        width: rect.w,
+        height: rect.h,
+    };
+    let lines: Vec<FRect> = grid
+        .lines(area, frame, scale)
+        .into_iter()
+        .map(|line| FRect::new(line.x, line.y, line.width, line.height))
+        .collect();
     if lines.is_empty() {
         return Ok(());
     }
@@ -712,31 +688,6 @@ fn draw_grid(
     let drawn = canvas.fill_rects(&lines).map_err(backend_error);
     canvas.set_blend_mode(blend);
     drawn
-}
-
-/// `grid`'s lines over a frame of `frame` pixels drawn at `rect`, the
-/// canvas's units being `scale` output pixels each: one at the bottom of
-/// each row and, for a grid with columns, at the right of each column,
-/// whole output pixels thick; none when a pixel spans fewer output pixels
-/// than the grid needs.
-fn grid_lines(grid: Grid, rect: FRect, frame: (usize, usize), scale: f32) -> Vec<FRect> {
-    let (columns, rows) = (f32_of_usize(frame.0), f32_of_usize(frame.1));
-    let cell = (rect.w / columns, rect.h / rows);
-    let pixels = cell.0 * scale;
-    if pixels < grid.least {
-        return Vec::new();
-    }
-    let thickness = (pixels * grid.share).round().max(1.0) / scale;
-    let column_count = if grid.columns { frame.0 } else { 0 };
-    let vertical = (1..=column_count).map(|column| {
-        let x = rect.x + f32_of_usize(column) * cell.0 - thickness;
-        FRect::new(x, rect.y, thickness, rect.h)
-    });
-    let horizontal = (1..=frame.1).map(|row| {
-        let y = rect.y + f32_of_usize(row) * cell.1 - thickness;
-        FRect::new(rect.x, y, rect.w, thickness)
-    });
-    vertical.chain(horizontal).collect()
 }
 
 /// Scales `texture` with SDL's pixel-art sampling (SDL 3.4), which the
@@ -826,42 +777,9 @@ mod tests {
     }
 
     #[test]
-    fn the_lcd_grid_lines_each_pixel_right_and_below() {
-        let lcd = Filter::Lcd.grid().unwrap_or(Grid {
-            shade: 0,
-            share: 0.0,
-            columns: false,
-            least: 0.0,
-        });
-        let frame = (240, 160);
-        let logical = FRect::new(0.0, 0.0, 240.0, 160.0);
-        let lines = grid_lines(lcd, logical, frame, 5.0);
-        assert_eq!(lines.len(), 240 + 160);
-        assert_eq!(
-            (lines[0].x, lines[0].w),
-            (0.8, 0.2),
-            "one output pixel of five"
-        );
-        assert_eq!((lines[239].x, lines[239].h), (239.8, 160.0));
-        assert_eq!((lines[240].y, lines[240].w), (0.8, 240.0));
-        let wide = grid_lines(lcd, FRect::new(10.0, 0.0, 2400.0, 1600.0), frame, 1.0);
-        assert_eq!((wide[0].x, wide[0].w), (18.0, 2.0), "two pixels of ten");
-        assert!(
-            grid_lines(lcd, logical, frame, 2.0).is_empty(),
-            "too small to show"
-        );
-    }
-
-    #[test]
-    fn scan_lines_darken_the_bottom_of_each_row_only() {
-        let frame = (240, 160);
-        let logical = FRect::new(0.0, 0.0, 240.0, 160.0);
-        let scan = Filter::Scanlines
-            .grid()
-            .map(|grid| grid_lines(grid, logical, frame, 5.0));
-        let lines = scan.unwrap_or_default();
-        assert_eq!(lines.len(), 160);
-        assert_eq!((lines[0].y, lines[0].h, lines[0].w), (0.6, 0.4, 240.0));
+    fn the_lcd_filters_draw_their_grids_and_scale_whole() {
+        assert_eq!(Filter::Lcd.grid(), Some(Grid::LCD));
+        assert_eq!(Filter::Scanlines.grid(), Some(Grid::SCANLINES));
         assert!(Filter::Scanlines.whole() && !Filter::PixelArt.whole());
         assert!(Filter::Sharp.grid().is_none());
     }
