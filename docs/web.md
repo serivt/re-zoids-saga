@@ -11,10 +11,10 @@ desktop and on Android. The plan, in phases:
 
 1. **The core in WebAssembly** (done, below).
 2. **The browser's backend and page** (done, below): the picture on a canvas, the sound
-   through Web Audio, the keyboard and gamepads, the saves in the browser's storage, and
-   an HTML page to choose the ROM, a translation and the options. Still to come in the
-   page: the filters that need more than the browser's scaling (the LCD grid, the scan
-   lines) through WebGL, and the on-screen pad for touch screens.
+   through Web Audio, the keyboard, gamepads and an on-screen pad for touch screens, the
+   saves in the browser's storage, and an HTML page to choose the ROM, a translation and
+   the options. Still to come in the page: the filters that need more than the
+   browser's scaling (the LCD grid, the scan lines) through WebGL.
 3. **Kept in the browser** (done, below):
    - the ROM, kept in the browser's database so it is chosen once, and never sent
      anywhere;
@@ -61,9 +61,10 @@ WebAssembly and the page in `apps/web/static/`).
 
 **The backend** (`platform-web`):
 
-- **Picture:** each frame's pixels are written into a canvas as large as the frame.
-  The page's style scales it to the window: sharp (`image-rendering: pixelated`) in
-  whole multiples or filling it, or smooth.
+- **Picture:** each frame's pixels are written into a canvas as large as the frame,
+  which the game places in the window itself: centered, as large as it fits, in whole
+  multiples for the sharp scaling, and around the on-screen pad while it shows. The
+  page's style draws it sharp (`image-rendering: pixelated`) or smooth.
 - **Sound:** each frame's samples become a Web Audio buffer at the game's own rate
   (31 536 Hz), which the browser converts to the device's. Each buffer is played right
   after the one before, 50 ms ahead at first, so they follow without gaps; as many
@@ -74,6 +75,20 @@ WebAssembly and the page in `apps/web/static/`).
   the launcher's do: the right face button A, the bottom one B, the shoulders L and R,
   Back SELECT, Start START, the D-pad or the left stick the arrows, the right stick's
   click the fast forward.
+- **On-screen pad:** on a touch screen the controls surround the game's screen as on
+  Android, laid out by the same `platform::touch` (see [android.md](android.md)): the
+  screen in the middle and the controls on its sides when the window is wider than
+  tall, the screen on top and the controls below it otherwise, the fast forward in the
+  enhanced mode alone. They are drawn on a canvas over the window in Android's style,
+  translucent and brighter while held, and the fingers come from the page's pointer
+  events, so several press at once and a quick tap still counts. The page then neither
+  scrolls nor zooms nor opens a menu. The pad shows when the screen's pointer is coarse
+  (a phone or a tablet) or once the screen is touched, and hides while a gamepad is
+  connected; the options can show it always or never, and make it 60 % to 140 % as
+  large and 20 % to 100 % as opaque, as Android's. Checked in a browser emulating a
+  phone's touch screen: upright, the screen took the top and the pad the rest, and
+  START held on it opened the title's menu; sideways, the screen sat between the
+  controls, and two fingers held the cross's right and A at once.
 - **Saves:** each one is kept in the browser's `localStorage` under
   `re-zoids-saga/<name>`, as Base64 text with the time it was stored: `slot-1` to
   `slot-4`, `autosave` and `achievements`. The storage answers at once, as the game's
@@ -83,9 +98,12 @@ WebAssembly and the page in `apps/web/static/`).
 
 - `check_rom(bytes)`: what the ROM is, as the launcher tells it (the supported dump or
   not), and whether the port plays it.
-- `start(rom, settings, translation, canvas)`: plays the game.
+- `start(rom, settings, translation, canvas, pad)`: plays the game, the on-screen pad
+  drawn on `pad`, a canvas beside the game's in the element over the window, which
+  takes the fingers.
   - The options are given as the launcher's settings lines: `mode`, `color`, `trail`,
-    `upscale`, `volume`.
+    `upscale`, `volume`, `scaling` (`sharp`, `fill` or `smooth`), and the pad's
+    `touch` (`auto`, `on` or `off`), `touch-size` and `touch-opacity`.
   - The loop runs once for each picture the screen shows (`requestAnimationFrame`) and
     plays the frames due at the hardware's pace, whatever the screen's refresh (at most
     four after a hold up, which is skipped rather than caught up).
@@ -96,8 +114,10 @@ WebAssembly and the page in `apps/web/static/`).
 **The page** reads the ROM chosen or dropped on it in the browser, never sending it
 anywhere, and plays it only when it is the supported dump. It also takes an optional PO
 file and the options, which it remembers. The sound starts on its Play button, since a
-browser lets a page make sound only after the player has pressed something. It links to
-the source code, as the GPL asks of a program handed to the browser.
+browser lets a page make sound only after the player has pressed something; when the pad
+will show, the button also asks the browser for the whole screen, where the browser lets
+a page take it (not every phone's does). It links to the source code, as the GPL asks of
+a program handed to the browser.
 
 To build it and play it locally:
 

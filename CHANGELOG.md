@@ -13,7 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same rule as everywhere else: the player chooses the ROM, which is checked to be the
   supported dump and never leaves the browser. The page takes a translation (from the
   translations' repository or a PO file) and the options (mode, colors, trail,
-  upscaler, scaling, volume); the keyboard and gamepads play as on the desktop.
+  scaling, volume); the keyboard and gamepads play as on the desktop.
+  - **Touch screens.** On a phone or a tablet an on-screen pad surrounds the game as on
+    Android, beside the screen held sideways and below it held upright, with several
+    fingers at once; it hides while a gamepad is connected, and its size and opacity
+    are options.
   - **Kept in the browser.** The ROM, the translation, the saves and the achievements
     stay in the browser, so the next visit needs nothing chosen. The Saves list shows
     what each slot and the autosave hold, exports them for an emulator, RetroArch or
