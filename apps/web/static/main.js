@@ -336,6 +336,47 @@ const picture = $('#picture');
 picture.open = readJson(PICTURE_OPEN_KEY, false);
 picture.addEventListener('toggle', () => writeJson(PICTURE_OPEN_KEY, picture.open));
 
+// A tip on what the enhanced mode adds: over the info button while the
+// pointer or the focus is on it, and held open by a tap or a click.
+const info = $('#enhanced-info');
+const tip = $('#enhanced-tip');
+let tipHeld = false;
+
+function showTip(show) {
+  tip.hidden = !show;
+  info.setAttribute('aria-expanded', show);
+}
+
+info.addEventListener('pointerenter', (event) => {
+  if (event.pointerType === 'mouse') showTip(true);
+});
+info.addEventListener('pointerleave', (event) => {
+  if (event.pointerType === 'mouse' && !tipHeld) showTip(false);
+});
+info.addEventListener('focus', () => showTip(true));
+info.addEventListener('blur', () => {
+  tipHeld = false;
+  showTip(false);
+});
+info.addEventListener('click', (event) => {
+  event.preventDefault();
+  tipHeld = !tipHeld;
+  showTip(tipHeld);
+});
+info.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !tip.hidden) {
+    event.stopPropagation();
+    tipHeld = false;
+    showTip(false);
+  }
+});
+document.addEventListener('pointerdown', (event) => {
+  if (!tip.hidden && event.target !== info && !info.contains(event.target)) {
+    tipHeld = false;
+    showTip(false);
+  }
+});
+
 // The enhanced mode's settings, shown only while it is chosen.
 function showEnhanced() {
   $('#enhanced-group').hidden = option('mode') !== 'enhanced';

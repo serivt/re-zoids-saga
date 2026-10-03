@@ -276,6 +276,21 @@ fieldset.group > legend { width: 100%; padding: 0; margin-bottom: 16px; }
 .chip[data-preset] { border-style: solid; border-color: var(--line-strong); color: var(--text-2); cursor: pointer; }
 .chip[data-preset]:hover { background: var(--raised); color: var(--text); }
 .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.seg-wrap { position: relative; }
+.info {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  width: 28px; height: 28px; padding: 0; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: rgba(8, 13, 36, .35); cursor: help;
+  color: var(--text-2); touch-action: manipulation;
+}
+.seg-wrap:has(input[value="enhanced"]:checked) .info { color: var(--accent-ink); background: rgba(29, 22, 0, .12); }
+.info:hover, .info[aria-expanded="true"] { background: rgba(8, 13, 36, .6); color: var(--text); }
+.tip {
+  position: absolute; z-index: 15; right: 0; top: calc(100% + 8px); width: min(320px, 100%);
+  padding: 10px 12px; font-size: 13px; line-height: 1.45; color: var(--text);
+  background: var(--raised); border: 1px solid var(--line-strong); border-radius: var(--radius);
+  box-shadow: 4px 4px 0 var(--shadow);
+}
 .note-inline { margin-left: 8px; text-transform: none; letter-spacing: 0; }
 
 /* ---------- Mobile ---------- */
