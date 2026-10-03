@@ -301,8 +301,13 @@ fieldset.group > legend { width: 100%; padding: 0; margin-bottom: 16px; }
 @media (max-width: 640px) {
   body { font-size: 16px; }
   .wordmark { font-size: 24px; }
-  .badge { margin-left: auto; font-size: 10px; }
-  .top-end { display: none; }
+  .badge { font-size: 10px; }
+  .top-in { padding-block: 12px; }
+  .top-end { gap: 8px; }
+  .badge { order: 3; }
+  #net-state, .gh-label { display: none; }
+  .top .btn-sm { min-height: 40px; font-size: 14px; padding: 0 10px; }
+  .gh { width: 40px; padding: 0; }
   .layout { padding-block: 16px 96px; gap: 20px; }
   .start { padding: 20px; max-width: none; }
   .btn { min-height: 48px; font-size: 16px; }
