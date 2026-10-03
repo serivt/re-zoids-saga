@@ -12,14 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Web version.** The game plays in a web browser, compiled to WebAssembly, with the
   same rule as everywhere else: the player chooses the ROM, which is checked to be the
   supported dump and never leaves the browser. The page takes a translation (from the
-  translations' repository or a PO file) and the options (mode, colors, trail,
-  scaling, volume); the keyboard and gamepads play as on the desktop.
+  translations' repository or a PO file) and the options (mode, scaling, colors, trail,
+  upscaler, volume); the keyboard and gamepads play as on the desktop, and a gamepad
+  also moves through the page. Esc or a button over the game pauses it under a menu
+  with the volume, the scaling, the touch pad and the way back to the page.
   - **Touch screens.** On a phone or a tablet an on-screen pad surrounds the game as on
     Android, beside the screen held sideways and below it held upright, with several
     fingers at once; it hides while a gamepad is connected, and its size and opacity
     are options.
   - **Kept in the browser.** The ROM, the translation, the saves and the achievements
-    stay in the browser, so the next visit needs nothing chosen. The Saves list shows
+    stay in the browser, so the next visit needs nothing chosen. The Saves tab shows
     what each slot and the autosave hold, exports them for an emulator, RetroArch or
     the cartridge, and imports a save after asking.
   - **Offline and installable.** Once loaded, the page plays with no connection, and

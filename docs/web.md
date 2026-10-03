@@ -94,16 +94,25 @@ WebAssembly and the page in `apps/web/static/`).
   `slot-4`, `autosave` and `achievements`. The storage answers at once, as the game's
   saving expects, and a site's few megabytes hold every save many times over.
 
-**The game's WebAssembly** (`apps/web`) offers the page two calls:
+**The game's WebAssembly** (`apps/web`) offers the page these calls:
 
 - `check_rom(bytes)`: what the ROM is, as the launcher tells it (the supported dump or
   not), and whether the port plays it.
-- `start(rom, settings, translation, canvas, pad)`: plays the game, the on-screen pad
-  drawn on `pad`, a canvas beside the game's in the element over the window, which
-  takes the fingers.
+- `save_details(rom, bytes)` and `save_summary(rom, bytes)`: what a save holds (the
+  level, the area, the money and, when the port counted it, the time played), apart or
+  in a line, read as continuing reads it; `cartridge_save(rom, bytes)`: the save
+  without the port's notes.
+- `start(rom, settings, translation, canvas, pad, menu)`: plays the game, the on-screen
+  pad drawn on `pad`, a canvas beside the game's in the element over the window, which
+  takes the fingers; the page's `menu` button is kept at the game screen's top left
+  corner, wherever the screen goes.
   - The options are given as the launcher's settings lines: `mode`, `color`, `trail`,
-    `upscale`, `volume`, `scaling` (`sharp`, `fill` or `smooth`), and the pad's
-    `touch` (`auto`, `on` or `off`), `touch-size` and `touch-opacity`.
+    `upscale`, `volume`, `muted` (`1` to start without sound), `scaling` (`sharp`,
+    `fill` or `smooth`), and the pad's `touch` (`auto`, `on` or `off`), `touch-size`
+    and `touch-opacity`.
+  - It gives the page the game's session: `pause()`, `resume()`, `quit()` (the page
+    then hears `re-zoids-saga:left`), and `set_volume`, `set_scaling`, `set_touch` and
+    `set_touch_opacity`, which change those options while the game plays.
   - The loop runs once for each picture the screen shows (`requestAnimationFrame`) and
     plays the frames due at the hardware's pace, whatever the screen's refresh (at most
     four after a hold up, which is skipped rather than caught up).
@@ -111,13 +120,22 @@ WebAssembly and the page in `apps/web/static/`).
   - When the player leaves from the pause menu's 終了, the page hears
     `re-zoids-saga:left` and shows its menu again.
 
-**The page** reads the ROM chosen or dropped on it in the browser, never sending it
-anywhere, and plays it only when it is the supported dump. It also takes an optional PO
-file and the options, which it remembers. The sound starts on its Play button, since a
-browser lets a page make sound only after the player has pressed something; when the pad
-will show, the button also asks the browser for the whole screen, where the browser lets
-a page take it (not every phone's does). It links to the source code, as the GPL asks of
-a program handed to the browser.
+**The page** puts the ROM first: a first visit explains that the player brings their own
+copy, and the ROM chosen or dropped anywhere on the page is read in the browser, never
+sent anywhere, and played only when it is the supported dump. Play sits under it, with a
+line of what the options choose; on a phone a bar keeps Play in reach once the button
+scrolls away. The rest is in tabs: Options (the translation, the mode, the picture, the
+sound and the touch pad; the display presets and the LCD grid and scan lines are marked
+to come), Saves, Cloud (when the build has a cloud project) and Help (the keys, the
+gamepad, offline and installing). The options are remembered. A gamepad moves through
+the page too: the D-pad or the stick moves, A chooses, B goes back. The sound starts on
+Play, since a browser lets a page make sound only after the player has pressed
+something; when the pad will show, Play also asks the browser for the whole screen,
+where the browser lets a page take it (not every phone's does). While the game plays,
+Esc or the button at the screen's corner pauses it under a menu: resume, the volume, the
+scaling, the pad's opacity and whether it shows, and the way back to the launcher, which
+loses what was not saved. It links to the source code, as the GPL asks of a program
+handed to the browser.
 
 To build it and play it locally:
 
@@ -154,18 +172,19 @@ player's own. The one chosen is kept in the same database with its name, so it n
 connection afterwards. Offline, its line is offered again from what is kept.
 
 **The saves.** They stay in the page's storage as the game keeps them. Once the ROM is
-known, the Saves list shows each slot and the autosave with what it holds: the level,
-area and money and, when the port counted it, the time played (`save_summary`, read as
-continuing reads it). Each one exports, under the ROM's name:
+known, the Saves tab shows a card for each slot and the autosave with what it holds: the
+level, area and money and, when the port counted it, the time played (`save_details`).
+Each one exports, from a menu, under the ROM's name:
 
 - `.sav` for an emulator or a flash cart;
 - `.srm` for RetroArch, the same bytes;
 - **Cartridge:** without the port's notes (`cartridge_save`, see
   [formats/save.md](formats/save.md)).
 
-A slot imports a `.sav` or `.srm`, which must read as a save of the game. The browser
-asks first whether to replace the slot's save (what it holds, against what the file
-holds), and the slot's is kept as `<slot>.bak`. The autosave only exports.
+A slot imports a `.sav` or `.srm`, which must read as a save of the game. A dialog first
+shows what the file holds against what the slot holds, and offers to export the slot's
+before it is replaced; the slot's is also kept as `<slot>.bak`. The autosave only
+exports.
 
 **Offline and installed.** A service worker keeps the page, its scripts and style, the
 manifest, the icon and the game's WebAssembly in the browser's cache. It caches them
