@@ -110,7 +110,8 @@ re-zoids-saga/
 │   │                            # audio output, filesystem, timing) — zero SDL code
 │   ├── platform-sdl3/           # SDL3 implementation of the platform traits
 │   ├── screen-filters/          # what the frontends do to the picture before the
-│   │                            # screen (the panels' colors), pure and backend-free
+│   │                            # screen (the panels' colors, the LCD trail), pure
+│   │                            # and backend-free
 │   ├── gba-runtime/             # software GBA runtime
 │   │   └── src/
 │   │       ├── ppu/             # tile/sprite/background rendering to framebuffer

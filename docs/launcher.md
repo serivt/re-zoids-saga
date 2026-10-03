@@ -80,14 +80,18 @@ player changes there holds at once and the launcher remembers it.
 Options holds:
 
 - the window's size (×1 to ×6) and fullscreen;
-- the filter (left and right go through them):
-  - sharp keeps whole multiples of the screen, with black bars;
-  - pixel art fills the window keeping the screen's shape, each pixel a square with only
-    its edges blended where the scale is not whole (SDL 3.4's pixel-art sampling, which
-    the renderer does on the graphics card; linear where a renderer lacks it), so a
-    fullscreen picture is sharp without the bars;
-  - smooth fills the window blending the pixels;
-- the colors (see Colors, below): original, GBA or GBA SP;
+- Display, a screen of its own, with its filter and colors as the line's value:
+  - the filter (left and right go through them):
+    - sharp keeps whole multiples of the screen, with black bars;
+    - pixel art fills the window keeping the screen's shape, each pixel a square with
+      only its edges blended where the scale is not whole (SDL 3.4's pixel-art sampling,
+      which the renderer does on the graphics card; linear where a renderer lacks it), so
+      a fullscreen picture is sharp without the bars;
+    - LCD keeps whole multiples, as sharp, and darkens the lines between the pixels as the
+      handheld's panel showed them (see The LCD grid, below);
+    - smooth fills the window blending the pixels;
+  - the colors (see Colors, below): original, GBA or GBA SP;
+  - the LCD trail (see The LCD trail, below): on or off;
 - the volume;
 - the buttons: Keyboard and Gamepad list the pad's ten buttons, where you choose one and
   press its new key or button (Esc cancels; a button that had it swaps with it), or take
@@ -119,6 +123,33 @@ The picture's colors are the console's 15-bit ones, so a table of the 32,768 col
 built when the game starts, does the whole work. The launcher applies it to each picture
 the game draws, before its own marks (MUTE, the fast forward's) go over it. Its own
 screen keeps the original colors.
+
+### The LCD grid
+
+Source of knowledge: this project's own design. Implemented in
+`crates/platform-sdl3/src/lib.rs`.
+
+The LCD filter scales the picture by whole multiples, as sharp does, then darkens a line
+at the right and the bottom of every pixel of the game. The grid is drawn on the graphics
+card, over the scaled picture, as rectangles that multiply what they cover by `0xB0`
+(69 %). Each line is one output pixel thick for every five a pixel spans, at least one.
+Below three output pixels a pixel there is no room for a line, and the grid is left out.
+
+With the on-screen pad the picture is placed by the pad, and the lines fall on whole
+output pixels of that place.
+
+### The LCD trail
+
+Source of knowledge: this project's own design. Implemented in
+`crates/screen-filters/src/trail.rs`.
+
+The handheld's liquid crystals took longer than a frame to change, so the picture before
+lingered under the new one. With the trail on, each picture shown is half its own and
+half the picture the game drew before it. A picture the game alternates every other
+frame, as some effects do to look see-through, then shows as the mix of the two.
+
+The trail goes after the colors and before the launcher's own marks. It mixes the
+pictures shown, so with the fast forward it mixes those the player sees.
 
 About shows the version and the license, and the project's pages: the port's repository
 and the translations' ([re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations)),

@@ -52,7 +52,8 @@ stop until it comes back; the screen stays on while the app is in front.
 
 ## Options
 
-Android's Options holds the gamepad's buttons, the filter, the colors, the volume and:
+Android's Options holds the gamepad's buttons, Display (the filter, the colors and the LCD
+trail, see [launcher.md](launcher.md)), the volume and:
 
 - **Pad size:** 60 % to 140 % of the pad's usual size, in steps of 10;
 - **Pad opacity:** 20 % to 100 %;
