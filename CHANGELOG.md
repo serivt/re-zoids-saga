@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   soon as it is continued. Each unlock slides a window down at the field's top, and the
   pause menu has an Achievements line before Quit that lists them in pages, unlocked or
   not. They are shared by every save of the ROM, in a `.achievements` file beside them.
+- **Display filters.** Options has new ways to show the picture:
+  - **Pixel art filter.** Besides sharp and smooth, the picture can fill the window or
+    the screen keeping its shape, its pixels square and sharp, blended only at their
+    edges where the scale is not whole, so fullscreen no longer means black bars or a
+    blurry picture.
+  - **Colors.** The game can be shown with the colors of the original Game Boy Advance's
+    unlit screen (darker and paler, as the games were drawn for) or of the GBA SP's lit
+    one, besides the original colors.
 
 ## [0.5.0] - 2026-10-02
 

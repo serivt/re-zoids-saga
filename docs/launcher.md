@@ -80,12 +80,45 @@ player changes there holds at once and the launcher remembers it.
 Options holds:
 
 - the window's size (×1 to ×6) and fullscreen;
-- the filter: sharp keeps whole multiples of the screen, smooth fills the window
-  blending the pixels;
+- the filter (left and right go through them):
+  - sharp keeps whole multiples of the screen, with black bars;
+  - pixel art fills the window keeping the screen's shape, each pixel a square with only
+    its edges blended where the scale is not whole (SDL 3.4's pixel-art sampling, which
+    the renderer does on the graphics card; linear where a renderer lacks it), so a
+    fullscreen picture is sharp without the bars;
+  - smooth fills the window blending the pixels;
+- the colors (see Colors, below): original, GBA or GBA SP;
 - the volume;
 - the buttons: Keyboard and Gamepad list the pad's ten buttons, where you choose one and
   press its new key or button (Esc cancels; a button that had it swaps with it), or take
   the defaults back.
+
+### Colors
+
+Source of knowledge: this project's own design, chosen by eye against the panels'
+well-known look; no other emulator's values. Implemented in
+`crates/screen-filters/src/color.rs`.
+
+The Game Boy Advance's own screen showed the games darker and paler than a modern display
+does, and they were drawn bright to make up for it. The colors option shows the game as
+such a panel did, or as it draws it (original, the default):
+
+- **GBA:** the original console's unlit reflective panel.
+- **GBA SP:** the SP's lit panel, a little paler than the original colors.
+
+A profile models its panel:
+
+1. A channel's level of 0 to 31 turns into light along a curve steeper than a modern
+   display's: gamma 2.8 for the GBA, 2.4 for the SP.
+2. The channels bleed into each other through a mix whose rows sum to one, so greys stay
+   grey. The GBA keeps 80 % of each channel's own light, the SP 90 %.
+3. White is dimmer (93 % and 98 %) and black lets some light through (0.4 % and 0.2 %).
+4. The light is written back for a display of gamma 2.2.
+
+The picture's colors are the console's 15-bit ones, so a table of the 32,768 colors,
+built when the game starts, does the whole work. The launcher applies it to each picture
+the game draws, before its own marks (MUTE, the fast forward's) go over it. Its own
+screen keeps the original colors.
 
 About shows the version and the license, and the project's pages: the port's repository
 and the translations' ([re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations)),
