@@ -11,7 +11,7 @@
 //! keeps the player's statistics (see [`crate::stats`]).
 
 use formats::progress::{STATE_LEN, decode_name};
-use formats::save::checksum;
+use formats::save::{ERASED, checksum};
 use formats::{Progress, SaveLayout, SaveMemory};
 
 use crate::stats::{STATS_LEN, Stats};
@@ -158,6 +158,21 @@ impl SaveFile {
         write_note(memory.spare_mut(&self.layout), state, player_name);
         write_stats(memory.spare_mut(&self.layout), state, statistics);
         Ok(memory.bytes().to_vec())
+    }
+
+    /// `image` without this port's notes (the player's name in full and the
+    /// statistics): the bytes after the copies erased, as the original
+    /// leaves them, so the memory is the one the cartridge would hold. An
+    /// image that is not a save memory comes back as it is.
+    #[must_use]
+    pub fn without_port_notes(&self, image: Vec<u8>) -> Vec<u8> {
+        match SaveMemory::from_bytes(image.clone(), &self.layout) {
+            Ok(mut memory) => {
+                memory.spare_mut(&self.layout).fill(ERASED);
+                memory.bytes().to_vec()
+            }
+            Err(_) => image,
+        }
     }
 
     fn saved_game(&self, memory: &SaveMemory, state: &[u8]) -> SavedGame {
@@ -364,5 +379,31 @@ mod tests {
             .expect("fits");
         let found = file.read(Some(memory.bytes().to_vec()));
         assert_eq!(found.game().expect("saved").stats, Stats::default());
+    }
+
+    #[test]
+    fn the_notes_can_be_left_out_and_the_game_stays() {
+        let file = SaveFile::new(layout());
+        let stats = Stats {
+            battles_won: 3,
+            ..Stats::default()
+        };
+        let image = file
+            .write(None, &state("ア"), "Atory", &stats)
+            .expect("fits");
+        let strict = file.without_port_notes(image.clone());
+        assert_eq!(strict.len(), image.len());
+        let game = file
+            .read(Some(strict.clone()))
+            .game()
+            .cloned()
+            .expect("saved");
+        assert_eq!(
+            (game.player_name.as_str(), game.stats),
+            ("ア", Stats::default())
+        );
+        let memory = SaveMemory::from_bytes(strict, &layout()).expect("image");
+        assert!(memory.spare(&layout()).iter().all(|&byte| byte == ERASED));
+        assert_eq!(file.without_port_notes(vec![1, 2]), vec![1, 2]);
     }
 }
