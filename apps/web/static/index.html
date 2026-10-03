@@ -2,128 +2,392 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0d1430">
+  <meta name="description" content="An unofficial port of Zoids Saga (Game Boy Advance) to play in the browser, from your own ROM.">
   <title>Re:Zoids Saga</title>
   <link rel="icon" href="icon.png">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <main id="menu">
-    <h1>Re:Zoids Saga</h1>
-    <p class="subtitle">An unofficial port of Zoids Saga (Game Boy Advance) to play in the browser.</p>
+<body data-rom-ready="false">
 
-    <section id="drop" class="drop" tabindex="0">
-      <p><strong>Choose your Zoids Saga ROM</strong> (Japan, Rev 1), or drop it here.</p>
-      <p class="note">It is read in this browser and kept only here, so you choose it once;
-        it is never sent anywhere.</p>
-      <input id="rom" type="file" accept=".gba,.bin,application/octet-stream">
-      <p id="rom-status" class="status" role="status"></p>
-      <button id="forget-rom" class="small" hidden>Forget the ROM</button>
-    </section>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-file" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l3 3v15H6z"/><path d="M9 12h6v6H9z"/><path d="M9 7h4"/></g></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16.5v.5"/></g></symbol>
+  <symbol id="i-busy" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 1-9 9" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 20V9M7 14l5-5 5 5M5 4h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5 19.5 12 7 19.5z" fill="currentColor"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
+  <symbol id="i-sync" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v5h-5"/></g></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></symbol>
+  <symbol id="i-mail" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></g></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7"/></g></symbol>
+</svg>
 
-    <section class="options">
-      <label>Translation
-        <select id="language">
-          <option value="">None (Japanese)</option>
-          <option value="file">From a .po file…</option>
-        </select>
-      </label>
-      <label id="translation-file-line" hidden>PO file
-        <input id="translation-file" type="file" accept=".po,text/plain">
-      </label>
-      <label>Game mode
-        <select id="mode">
-          <option value="enhanced">Enhanced</option>
-          <option value="classic">Classic</option>
-        </select>
-      </label>
-      <label>Scaling
-        <select id="scaling">
-          <option value="sharp">Sharp (whole multiples)</option>
-          <option value="fill">Sharp, filling the window</option>
-          <option value="smooth">Smooth</option>
-        </select>
-      </label>
-      <label>Colors
-        <select id="color">
-          <option value="original">Original</option>
-          <option value="gba">GBA</option>
-          <option value="gba-sp-frontlit">GBA SP AGS-001</option>
-          <option value="gba-sp">GBA SP AGS-101</option>
-          <option value="micro">Micro</option>
-          <option value="ds">DS</option>
-        </select>
-      </label>
-      <label>LCD trail
-        <select id="trail">
-          <option value="0">Off</option>
-          <option value="1">Mix</option>
-          <option value="fade">Fade</option>
-        </select>
-      </label>
-      <label>Volume <input id="volume" type="range" min="0" max="100" step="10" value="100"></label>
-      <label>Touch pad
-        <select id="touch">
-          <option value="auto">On touch screens</option>
-          <option value="on">Always</option>
-          <option value="off">Never</option>
-        </select>
-      </label>
-      <label>Pad size <input id="touch-size" type="range" min="60" max="140" step="10" value="100"></label>
-      <label>Pad opacity <input id="touch-opacity" type="range" min="20" max="100" step="10" value="100"></label>
-    </section>
-    <p id="translation-status" class="status" role="status"></p>
-
-    <button id="play" disabled>Play</button>
-
-    <section id="saves" class="saves" hidden>
-      <h2>Saves</h2>
-      <p class="note">Kept in this browser. Export one for an emulator (.sav), RetroArch
-        (.srm) or as the cartridge would hold it, or import one from them.</p>
-      <table>
-        <tbody id="save-rows"></tbody>
-      </table>
-      <input id="import-file" type="file" accept=".sav,.srm,application/octet-stream" hidden>
-      <p id="save-status" class="status" role="status"></p>
-    </section>
-
-    <section id="cloud" class="saves" hidden>
-      <h2>Cloud saves</h2>
-      <div id="cloud-out">
-        <p class="note">Sign in with your email to keep your saves and achievements in the
-          cloud and play them in any browser. <a href="privacy.html">What is kept, and how to
-          delete it</a>.</p>
-        <form id="cloud-form">
-          <input id="cloud-email" type="email" required placeholder="you@example.com"
-            autocomplete="email">
-          <button class="small" type="submit">Send me a sign-in link</button>
-        </form>
+<div id="launcher">
+  <header class="top">
+    <div class="wrap top-in">
+      <h1 class="wordmark"><span>Re:</span>Zoids Saga</h1>
+      <span class="badge">Unofficial fan port</span>
+      <div class="top-end">
+        <span class="lcd" id="net-state"><span class="px"></span><span>Online</span></span>
+        <button class="btn btn-sm" id="install" type="button" hidden>Install app</button>
       </div>
-      <div id="cloud-in" hidden>
-        <p>Signed in as <strong id="cloud-account"></strong>. The saves sync when the page
-          opens, every minute while you play, and when you leave it.</p>
-        <button class="small" id="cloud-sync">Sync now</button>
-        <button class="small" id="cloud-sign-out">Sign out</button>
-        <button class="small" id="cloud-delete">Delete my account</button>
+    </div>
+  </header>
+
+  <main class="wrap layout">
+    <section class="card start" aria-labelledby="start-h">
+      <div class="intro" id="start-intro">
+        <p class="eyebrow">Step 1 · Your ROM</p>
+        <h2 id="start-h" class="intro-h">Bring your own copy of the game</h2>
+        <p class="muted">Re:Zoids Saga plays from a ROM you provide: a dump of <strong class="strong">Zoids Saga (Japan, Rev 1)</strong>. It is checked and kept in this browser, and never uploaded.</p>
       </div>
-      <p id="cloud-status" class="status" role="status"></p>
+
+      <div id="rom-drop" class="drop" data-state="empty">
+        <div class="drop-ic" aria-hidden="true">
+          <svg class="i-file" width="28" height="28"><use href="#i-file"/></svg>
+          <svg class="i-drop" width="28" height="28"><use href="#i-down"/></svg>
+          <svg class="i-busy" width="28" height="28"><use href="#i-busy"/></svg>
+          <svg class="i-ok" width="22" height="22"><use href="#i-check"/></svg>
+          <svg class="i-err" width="22" height="22"><use href="#i-alert"/></svg>
+        </div>
+        <div class="drop-text">
+          <p class="drop-title" id="rom-status" role="status">Drop your ROM here</p>
+          <p class="hint" id="rom-detail">A .gba file · Japan, Rev 1</p>
+        </div>
+        <div class="drop-actions">
+          <input class="vh" type="file" id="rom-file" accept=".gba,.bin,application/octet-stream">
+          <label class="btn" for="rom-file" id="rom-choose">Choose a file…</label>
+          <button class="btn btn-ghost" type="button" id="rom-forget" hidden>Forget the ROM</button>
+        </div>
+      </div>
+
+      <details class="faq" id="rom-faq">
+        <summary>Why isn't the game included?</summary>
+        <p class="hint">The game belongs to its owners. This project only provides the code that runs it, so you play from your own copy.</p>
+      </details>
+
+      <div class="start-play">
+        <p class="eyebrow" id="step2">Step 2 · Play</p>
+        <button class="btn btn-primary play" type="button" id="play" disabled aria-describedby="play-hint setup-summary">
+          <svg class="icon" width="20" height="20" aria-hidden="true"><use href="#i-play"/></svg>Play
+        </button>
+        <p class="hint" id="play-hint">Choose your ROM first.</p>
+        <p class="hint"><span id="setup-summary"></span> <a href="#options" data-goto="tab-options">Change</a></p>
+      </div>
     </section>
 
-    <p class="keys">Arrows move, X = A, Z = B, Return = START, Backspace = SELECT, A = L, S = R,
-      M mutes, Space holds the enhanced mode's fast forward; gamepads work too. On a touch
-      screen an on-screen pad surrounds the game; it hides while a gamepad is connected.</p>
-    <p class="note">Works offline once loaded, and can be installed from the browser's menu.
-      Free software under the GPL-3.0: <a href="https://github.com/serivt/re-zoids-saga">source
-      code</a>. Not affiliated with the game's owners. <span id="version">Version __VERSION__.</span></p>
+    <section class="card sections" aria-label="Settings and saves">
+      <div class="tabs" role="tablist" aria-label="Launcher sections">
+        <button class="tab" role="tab" type="button" id="tab-options" aria-controls="options" aria-selected="true">Options</button>
+        <button class="tab" role="tab" type="button" id="tab-saves" aria-controls="saves" aria-selected="false" tabindex="-1">Saves <span class="count" id="saves-count" hidden></span></button>
+        <button class="tab" role="tab" type="button" id="tab-cloud" aria-controls="cloud" aria-selected="false" tabindex="-1" hidden>Cloud</button>
+        <button class="tab" role="tab" type="button" id="tab-help" aria-controls="help" aria-selected="false" tabindex="-1">Help</button>
+      </div>
+
+      <form class="panel" role="tabpanel" id="options" aria-labelledby="tab-options" tabindex="0">
+        <div class="group">
+          <h3 class="eyebrow group-h">Language and game</h3>
+          <div class="grid2">
+            <div class="field">
+              <label class="lbl" for="language">Translation</label>
+              <div class="sel">
+                <select id="language" name="language">
+                  <option value="">None (Japanese)</option>
+                  <option value="file">From a .po file…</option>
+                </select>
+                <svg width="16" height="16" aria-hidden="true"><use href="#i-chev"/></svg>
+              </div>
+              <input class="vh" type="file" id="po-file" accept=".po,text/plain" tabindex="-1" aria-hidden="true">
+              <p class="line-status" id="translation-status" role="status">Downloaded once, then kept for offline use.</p>
+            </div>
+            <fieldset class="field">
+              <legend class="lbl">Game mode</legend>
+              <div class="seg">
+                <label><input type="radio" name="mode" value="enhanced" checked><span>Enhanced</span></label>
+                <label><input type="radio" name="mode" value="classic"><span>Classic</span></label>
+              </div>
+              <p class="hint">Enhanced adds the port's extras, such as the fast forward and the achievements.</p>
+            </fieldset>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3 class="eyebrow group-h">Picture</h3>
+          <div class="field">
+            <div class="row-tight"><span class="lbl" id="presets-l">Display presets</span><span class="soon">Soon</span></div>
+            <div class="chips" role="group" aria-labelledby="presets-l">
+              <button class="chip" type="button" disabled>GBA</button><button class="chip" type="button" disabled>GBA SP</button><button class="chip" type="button" disabled>Micro</button><button class="chip" type="button" disabled>DS</button><button class="chip" type="button" disabled>Game Boy Player</button><button class="chip" type="button" disabled>Modern</button><button class="chip" type="button" disabled>Smooth pixel art</button>
+            </div>
+          </div>
+          <div class="grid2">
+            <fieldset class="field">
+              <legend class="lbl">Scaling</legend>
+              <div class="seg">
+                <label><input type="radio" name="scaling" value="sharp" checked><span>Sharp</span></label>
+                <label><input type="radio" name="scaling" value="fill"><span>Fill</span></label>
+                <label><input type="radio" name="scaling" value="smooth"><span>Smooth</span></label>
+              </div>
+              <p class="hint">Sharp uses whole multiples. Fill stays sharp and fills the window.</p>
+            </fieldset>
+            <div class="field">
+              <label class="lbl" for="color">Colors</label>
+              <div class="sel">
+                <select id="color" name="color">
+                  <option value="original">Original</option>
+                  <option value="gba">GBA</option>
+                  <option value="gba-sp-frontlit">GBA SP AGS-001</option>
+                  <option value="gba-sp">GBA SP AGS-101</option>
+                  <option value="micro">Micro</option>
+                  <option value="ds">DS</option>
+                </select>
+                <svg width="16" height="16" aria-hidden="true"><use href="#i-chev"/></svg>
+              </div>
+              <p class="hint">Imitates how each screen showed color.</p>
+            </div>
+            <fieldset class="field">
+              <legend class="lbl">LCD trail</legend>
+              <div class="seg">
+                <label><input type="radio" name="trail" value="0" checked><span>Off</span></label>
+                <label><input type="radio" name="trail" value="1"><span>Mix</span></label>
+                <label><input type="radio" name="trail" value="fade"><span>Fade</span></label>
+              </div>
+            </fieldset>
+            <fieldset class="field">
+              <legend class="lbl">Upscaler</legend>
+              <div class="seg">
+                <label><input type="radio" name="upscale" value="none" checked><span>Off</span></label>
+                <label><input type="radio" name="upscale" value="scale2x"><span>Scale2x</span></label>
+                <label><input type="radio" name="upscale" value="scale3x"><span>Scale3x</span></label>
+              </div>
+              <p class="hint">Rounds diagonal edges off without blurring.</p>
+            </fieldset>
+            <fieldset class="field" disabled>
+              <legend class="lbl">Screen filter <span class="soon">Soon</span></legend>
+              <div class="seg">
+                <label><input type="radio" name="filter" value="off" checked><span>Off</span></label>
+                <label><input type="radio" name="filter" value="grid"><span>LCD grid</span></label>
+                <label><input type="radio" name="filter" value="scanlines"><span>Scan lines</span></label>
+              </div>
+            </fieldset>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3 class="eyebrow group-h">Sound</h3>
+          <div class="vol">
+            <label class="lbl" for="volume">Volume</label>
+            <input class="range" type="range" id="volume" name="volume" min="0" max="100" step="5" value="100">
+            <output id="volume-out" for="volume">100%</output>
+            <button class="btn btn-sm" type="button" id="mute" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-vol"/></svg><span>Mute</span></button>
+          </div>
+        </div>
+
+        <div class="group">
+          <h3 class="eyebrow group-h">Touch pad</h3>
+          <div class="grid2">
+            <fieldset class="field">
+              <legend class="lbl">Show it</legend>
+              <div class="seg">
+                <label><input type="radio" name="touch" value="auto" checked><span>On touch</span></label>
+                <label><input type="radio" name="touch" value="on"><span>Always</span></label>
+                <label><input type="radio" name="touch" value="off"><span>Never</span></label>
+              </div>
+              <p class="hint">It hides while a gamepad is connected.</p>
+            </fieldset>
+            <div class="field">
+              <label class="lbl" for="touch-size">Size</label>
+              <input class="range" type="range" id="touch-size" name="touch-size" min="60" max="140" step="10" value="100">
+              <label class="lbl" for="touch-opacity">Opacity</label>
+              <input class="range" type="range" id="touch-opacity" name="touch-opacity" min="20" max="100" step="10" value="100">
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <div class="panel" role="tabpanel" id="saves" aria-labelledby="tab-saves" tabindex="0" hidden>
+        <p class="muted">Kept in this browser. Export a slot for an emulator, or import one from it.</p>
+        <p class="status" id="saves-status" role="status"></p>
+        <p class="hint" id="saves-norom">Choose your ROM to see your saves.</p>
+        <ul class="slots" id="saves-list" aria-label="Save slots"></ul>
+        <input class="vh" type="file" id="save-file" accept=".sav,.srm,application/octet-stream" tabindex="-1" aria-hidden="true">
+      </div>
+
+      <div class="panel" role="tabpanel" id="cloud" aria-labelledby="tab-cloud" tabindex="0" data-state="signed-out" hidden>
+        <div class="group" data-when="signed-out">
+          <h3 class="eyebrow group-h">Cloud saves</h3>
+          <p class="muted">Sign in with your email to keep your saves and achievements in the cloud and play them in any browser. No password needed.</p>
+          <form class="field" id="cloud-form" novalidate>
+            <label class="lbl" for="cloud-email">Email</label>
+            <div class="email-row">
+              <input class="input" type="email" id="cloud-email" name="email" autocomplete="email" placeholder="you@example.com" required aria-describedby="cloud-form-status">
+              <button class="btn btn-primary" type="submit" id="cloud-send">Send me a sign-in link</button>
+            </div>
+            <p class="line-status" id="cloud-form-status" role="status"></p>
+          </form>
+          <p class="hint"><a href="privacy.html">What is kept, and how to delete it</a></p>
+        </div>
+
+        <div class="group" data-when="link-sent" hidden>
+          <h3 class="eyebrow group-h">Cloud saves</h3>
+          <div class="row row-top">
+            <div class="drop-ic small" aria-hidden="true"><svg width="22" height="22"><use href="#i-mail"/></svg></div>
+            <div>
+              <p class="big">Check your email</p>
+              <p class="muted">We sent a sign-in link to <strong class="strong" id="cloud-sent-to"></strong>. Open it in this browser.</p>
+            </div>
+          </div>
+          <div class="row">
+            <button class="btn btn-sm" type="button" id="cloud-resend">Send again</button>
+            <button class="btn btn-sm btn-ghost" type="button" id="cloud-other">Use another email</button>
+          </div>
+          <p class="line-status" id="cloud-sent-status" role="status"></p>
+        </div>
+
+        <div class="stack" data-when="signed-in" hidden>
+          <div class="group">
+            <h3 class="eyebrow group-h">Account</h3>
+            <div class="row">
+              <div class="avatar" id="cloud-avatar" aria-hidden="true">?</div>
+              <div class="grow"><p class="hint">Signed in as</p><p class="big wraps" id="cloud-user"></p></div>
+              <button class="btn btn-ghost" type="button" id="cloud-signout">Sign out</button>
+            </div>
+          </div>
+          <div class="group">
+            <h3 class="eyebrow group-h">Sync</h3>
+            <div class="box row">
+              <div class="grow column">
+                <p class="lcd lcd-text"><span class="px off" id="cloud-px"></span><span id="cloud-sync-state" role="status">Not synced yet</span></p>
+                <p class="hint">Your saves and achievements follow you to any browser where you sign in. They sync when the page opens, every minute while you play, and when you leave it.</p>
+              </div>
+              <button class="btn" type="button" id="cloud-sync"><svg class="icon" aria-hidden="true"><use href="#i-sync"/></svg>Sync now</button>
+            </div>
+            <p class="status" id="cloud-status" role="status"></p>
+            <p class="hint"><a href="privacy.html">What is kept, and how to delete it</a></p>
+          </div>
+          <div class="group">
+            <h3 class="eyebrow group-h">Danger zone</h3>
+            <div class="danger-zone">
+              <div class="grow"><p class="strong-p">Delete my account</p><p class="hint">Removes your account and everything kept in the cloud; the saves in this browser stay. You will be asked to confirm.</p></div>
+              <button class="btn btn-danger" type="button" id="cloud-delete"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg>Delete my account</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" role="tabpanel" id="help" aria-labelledby="tab-help" tabindex="0" hidden>
+        <div class="group touch-only">
+          <h3 class="eyebrow group-h">Touch</h3>
+          <p class="muted">On phones and tablets a pad surrounds the game. The pause button at the game screen's top left corner opens quick settings and the way back here.</p>
+        </div>
+        <div class="group">
+          <h3 class="eyebrow group-h">Keyboard</h3>
+          <dl class="keys">
+            <div><dt>Move</dt><dd><span class="kbd">←</span><span class="kbd">↑</span><span class="kbd">↓</span><span class="kbd">→</span></dd></div>
+            <div><dt>A</dt><dd><span class="kbd">X</span></dd></div>
+            <div><dt>B</dt><dd><span class="kbd">Z</span></dd></div>
+            <div><dt>L / R</dt><dd><span class="kbd">A</span><span class="kbd">S</span></dd></div>
+            <div><dt>START</dt><dd><span class="kbd">Return</span></dd></div>
+            <div><dt>SELECT</dt><dd><span class="kbd">Backspace</span></dd></div>
+            <div><dt>Fast forward (hold)</dt><dd><span class="kbd">Space</span></dd></div>
+            <div><dt>Mute</dt><dd><span class="kbd">M</span></dd></div>
+            <div><dt>Pause menu</dt><dd><span class="kbd">Esc</span></dd></div>
+          </dl>
+        </div>
+        <div class="group">
+          <h3 class="eyebrow group-h">Gamepad</h3>
+          <p class="muted">Gamepads work in the game, and on this page too: move with the D-pad, choose with A, go back with B.</p>
+        </div>
+        <div class="group">
+          <h3 class="eyebrow group-h">Offline and install</h3>
+          <p class="muted">Once loaded it works without a connection. <span class="install-hint">Install it from the browser's menu to play it like an app.</span></p>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <div id="stage" hidden>
-    <canvas id="screen" width="240" height="160"></canvas>
-    <canvas id="pad" hidden></canvas>
-  </div>
+  <footer class="wrap foot">
+    <p>Re:Zoids Saga is an unofficial fan port. Not affiliated with the game's owners.</p>
+    <p>Free software under the GPL-3.0 · <a href="https://github.com/serivt/re-zoids-saga">Source code</a> · <a href="privacy.html">Privacy</a> · <span class="mono" id="version">__VERSION__</span></p>
+  </footer>
 
-  <script type="module" src="main.js"></script>
+  <div class="playbar" id="playbar">
+    <div class="grow"><p class="lcd"><span class="px"></span>ROM ready</p><p class="hint" id="playbar-summary"></p></div>
+    <button class="btn btn-primary" type="button" id="playbar-play"><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Play</button>
+  </div>
+</div>
+
+<div id="stage" class="game" hidden>
+  <canvas id="screen" width="240" height="160" aria-label="Game screen"></canvas>
+  <canvas id="pad" hidden></canvas>
+  <button class="pause-btn" type="button" id="game-menu" aria-label="Pause and menu" aria-haspopup="dialog"><svg width="18" height="18" aria-hidden="true"><use href="#i-pause"/></svg></button>
+</div>
+
+<dialog id="import-dialog" aria-labelledby="import-title" aria-describedby="import-desc">
+  <form method="dialog" class="dlg">
+    <div class="dlg-head">
+      <div><p class="eyebrow" id="import-eyebrow">Import</p><h2 class="dlg-title" id="import-title">Replace the save?</h2></div>
+      <button class="btn btn-ghost btn-sm icon-only" value="cancel" aria-label="Close"><svg width="20" height="20" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <p class="muted" id="import-desc"></p>
+    <table class="cmp">
+      <thead><tr><td></td><th scope="col" class="col-file">In the file<span class="fname" id="import-fname"></span></th><th scope="col" id="import-slot-h">In the slot now</th></tr></thead>
+      <tbody id="import-rows"></tbody>
+    </table>
+    <p class="hint" id="import-format"></p>
+    <div class="dlg-actions">
+      <button class="btn btn-ghost push" type="button" id="import-export-first"><svg class="icon" aria-hidden="true"><use href="#i-down"/></svg><span>Export first</span></button>
+      <button class="btn" value="cancel" autofocus>Cancel</button>
+      <button class="btn btn-danger-solid" value="confirm" id="import-confirm">Replace</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="delete-dialog" aria-labelledby="delete-title">
+  <form method="dialog" class="dlg">
+    <h2 class="dlg-title flush" id="delete-title">Delete your account?</h2>
+    <p class="muted">Your account and everything kept in the cloud will be removed. The saves in this browser stay. This can't be undone.</p>
+    <div class="field">
+      <label class="lbl" for="delete-confirm-text">Type DELETE to confirm</label>
+      <input class="input" id="delete-confirm-text" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    </div>
+    <div class="dlg-actions">
+      <button class="btn" value="cancel" autofocus>Cancel</button>
+      <button class="btn btn-danger-solid" value="confirm" id="delete-confirm" disabled>Delete account</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="pause-dialog" aria-labelledby="pause-title">
+  <form method="dialog" class="dlg quick">
+    <div class="dlg-head baseline"><h2 class="dlg-title flush" id="pause-title">Paused</h2><p class="eyebrow accent">Re:Zoids Saga</p></div>
+    <button class="btn btn-primary resume" value="resume" autofocus><svg class="icon" aria-hidden="true"><use href="#i-play"/></svg>Resume</button>
+    <div class="quick-part">
+      <p class="eyebrow">Quick settings</p>
+      <div class="row"><label for="q-volume">Volume</label><input class="range" type="range" id="q-volume" min="0" max="100" step="5"></div>
+      <div class="row touch-only"><label for="q-opacity">Pad opacity</label><input class="range" type="range" id="q-opacity" min="20" max="100" step="10"></div>
+      <div class="row"><span id="q-scaling-l">Scaling</span>
+        <fieldset class="seg" aria-labelledby="q-scaling-l">
+          <label><input type="radio" name="q-scaling" value="sharp"><span>Sharp</span></label>
+          <label><input type="radio" name="q-scaling" value="fill"><span>Fill</span></label>
+          <label><input type="radio" name="q-scaling" value="smooth"><span>Smooth</span></label>
+        </fieldset>
+      </div>
+      <div class="row touch-only"><label for="q-pad" class="auto">Show touch pad</label><span class="switch"><input type="checkbox" id="q-pad" role="switch"><span></span></span></div>
+    </div>
+    <div class="quick-part">
+      <button class="btn ghost-full" value="quit">Back to launcher</button>
+      <p class="hint centered">Progress since your last save or autosave is lost.</p>
+    </div>
+  </form>
+</dialog>
+
+<script type="module" src="main.js"></script>
 </body>
 </html>
