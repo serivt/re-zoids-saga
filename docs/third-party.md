@@ -14,6 +14,14 @@ description of the GBA's common sound driver's data formats and from the driver
 settings and buffers read out of the game's own RAM; see [sound.md](sound.md). No
 emulator or decompilation code was consulted for it.
 
+## Algorithms
+
+Written from their public descriptions, with no code consulted:
+
+| Component | Algorithm | Where |
+|---|---|---|
+| The launcher's upscaler | Scale2x and Scale3x, by Andrea Mazzoleni (AdvanceMAME) | `crates/screen-filters/src/upscale.rs` |
+
 ## Bundled as is
 
 | Component | Upstream | Where | Version | License |

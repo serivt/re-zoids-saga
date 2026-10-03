@@ -80,18 +80,25 @@ player changes there holds at once and the launcher remembers it.
 Options holds:
 
 - the window's size (×1 to ×6) and fullscreen;
-- Display, a screen of its own, with its filter and colors as the line's value:
+- Display, a screen of its own, with its preset, or its filter and colors, as the line's
+  value:
+  - the preset (see Presets, below): one of eight, or custom;
   - the filter (left and right go through them):
     - sharp keeps whole multiples of the screen, with black bars;
     - pixel art fills the window keeping the screen's shape, each pixel a square with
       only its edges blended where the scale is not whole (SDL 3.4's pixel-art sampling,
       which the renderer does on the graphics card; linear where a renderer lacks it), so
       a fullscreen picture is sharp without the bars;
-    - LCD keeps whole multiples, as sharp, and darkens the lines between the pixels as the
-      handheld's panel showed them (see The LCD grid, below);
+    - LCD, LCD soft and LCD fine keep whole multiples, as sharp, and darken the lines
+      between the pixels as a handheld's panel showed them, marked, lighter or thin and
+      light (see The LCD grid, below);
+    - scan lines keep whole multiples and darken a band under each row, as a television
+      showed the picture;
     - smooth fills the window blending the pixels;
-  - the colors (see Colors, below): original, GBA or GBA SP;
-  - the LCD trail (see The LCD trail, below): on or off;
+  - the upscaler (see Pixel-art magnification, below): off, Scale2x or Scale3x;
+  - the colors (see Colors, below): original, GBA, GBA SP AGS-001, GBA SP AGS-101, Micro
+    or DS;
+  - the LCD trail (see The LCD trail, below): off, mix or fade;
 - the volume;
 - the buttons: Keyboard and Gamepad list the pad's ten buttons, where you choose one and
   press its new key or button (Esc cancels; a button that had it swaps with it), or take
@@ -107,33 +114,79 @@ The Game Boy Advance's own screen showed the games darker and paler than a moder
 does, and they were drawn bright to make up for it. The colors option shows the game as
 such a panel did, or as it draws it (original, the default):
 
-- **GBA:** the original console's unlit reflective panel.
-- **GBA SP:** the SP's lit panel, a little paler than the original colors.
+- **GBA:** the original console's unlit reflective panel, darker and paler.
+- **GBA SP AGS-001:** the first SP's front light, washed out and cool, its black lit.
+- **GBA SP AGS-101:** the later SP's backlight, a little paler than the original colors.
+- **Micro:** the Game Boy Micro's small backlit screen, vivid.
+- **DS:** the Nintendo DS's screens, which play the cartridges in their own slot: bright,
+  a little vivid and cool.
 
 A profile models its panel:
 
-1. A channel's level of 0 to 31 turns into light along a curve steeper than a modern
-   display's: gamma 2.8 for the GBA, 2.4 for the SP.
-2. The channels bleed into each other through a mix whose rows sum to one, so greys stay
-   grey. The GBA keeps 80 % of each channel's own light, the SP 90 %.
-3. White is dimmer (93 % and 98 %) and black lets some light through (0.4 % and 0.2 %).
-4. The light is written back for a display of gamma 2.2.
+1. A channel's level of 0 to 31 turns into light along the panel's curve (its gamma).
+   The unlit panels' is steeper than a modern display's, darkening the middle tones.
+2. The channels bleed into each other through a mix. Rows that sum to one keep greys
+   grey; negative bleeds saturate.
+3. White may be dimmer than a display's, and black may let some light through.
+4. The light may lean warm or cool, a gain per channel.
+5. The light is written back for a display of gamma 2.2.
+
+| Profile | Gamma | Own share of each channel | White | Black | Lean |
+|---|---|---|---|---|---|
+| GBA | 2.8 | 80 % | 93 % | 0.4 % | none |
+| GBA SP AGS-001 | 2.6 | 84 % | 95 % | 1.5 % | cool (red 97 %, blue 104 %) |
+| GBA SP AGS-101 | 2.4 | 90 % | 98 % | 0.2 % | none |
+| Micro | 2.2 | 106–108 % | 100 % | 0 | none |
+| DS | 2.0 | 104 % | 100 % | 0.2 % | cool (red 98 %, blue 103 %) |
 
 The picture's colors are the console's 15-bit ones, so a table of the 32,768 colors,
 built when the game starts, does the whole work. The launcher applies it to each picture
 the game draws, before its own marks (MUTE, the fast forward's) go over it. Its own
 screen keeps the original colors.
 
+### Presets
+
+Source of knowledge: this project's own design, after the display modes of handhelds
+that play the cartridges on their own screen, which imitate each console's.
+
+A preset sets the display's options together, as a screen the game was played on showed
+it, or as today's screens suit it:
+
+| Preset | Filter | Upscaler | Colors | Trail |
+|---|---|---|---|---|
+| GBA | LCD | off | GBA | fade |
+| GBA SP AGS-001 | LCD soft | off | GBA SP AGS-001 | mix |
+| GBA SP AGS-101 | LCD soft | off | GBA SP AGS-101 | mix |
+| Game Boy Micro | LCD fine | off | Micro | off |
+| Nintendo DS | pixel art | off | DS | off |
+| Game Boy Player | scan lines | off | original | off |
+| modern | pixel art | off | original | off |
+| smooth pixel art | pixel art | Scale3x | original | off |
+
+The handhelds' presets leave the upscaler off, so the grid lines the game's own pixels.
+
+The preset is not kept apart. The line reads it from the options as they stand, and shows
+custom once any of them differs. Left and right go from one preset to the next, and from
+custom to the first or the last.
+
 ### The LCD grid
 
 Source of knowledge: this project's own design. Implemented in
 `crates/platform-sdl3/src/lib.rs`.
 
-The LCD filter scales the picture by whole multiples, as sharp does, then darkens a line
-at the right and the bottom of every pixel of the game. The grid is drawn on the graphics
-card, over the scaled picture, as rectangles that multiply what they cover by `0xB0`
-(69 %). Each line is one output pixel thick for every five a pixel spans, at least one.
-Below three output pixels a pixel there is no room for a line, and the grid is left out.
+The LCD filters scale the picture by whole multiples, as sharp does, then darken a line
+at the right and the bottom of every pixel of the game. The scan lines filter darkens
+only the band under each row. The lines are drawn on the graphics card, over the scaled
+picture, as rectangles that multiply what they cover. A line takes a share of the output
+pixels a pixel spans, rounded to whole ones and at least one. When a pixel spans fewer
+output pixels than a line needs, the lines are left out.
+
+| Filter | Multiplies by | Share of a pixel | Lines | Shows from |
+|---|---|---|---|---|
+| LCD | `0xB0` (69 %) | 1/5 | columns and rows | 3 output pixels a pixel |
+| LCD soft | `0xCC` (80 %) | 1/5 | columns and rows | 3 |
+| LCD fine | `0xD8` (85 %) | 12 % | columns and rows | 3 |
+| scan lines | `0xA8` (66 %) | 40 % | rows | 2 |
 
 With the on-screen pad the picture is placed by the pad, and the lines fall on whole
 output pixels of that place.
@@ -144,12 +197,37 @@ Source of knowledge: this project's own design. Implemented in
 `crates/screen-filters/src/trail.rs`.
 
 The handheld's liquid crystals took longer than a frame to change, so the picture before
-lingered under the new one. With the trail on, each picture shown is half its own and
-half the picture the game drew before it. A picture the game alternates every other
-frame, as some effects do to look see-through, then shows as the mix of the two.
+lingered under the new one. The trail comes in two kinds:
+
+- **Mix:** each picture shown is half its own and half the picture the game drew before
+  it. A picture the game alternates every other frame, as some effects do to look
+  see-through, then shows as the mix of the two.
+- **Fade:** each picture shown is half its own and half the one shown before it. What
+  moves leaves a trail that fades over two or three frames (a half, a quarter, an
+  eighth), as the original GBA's slow panel did.
 
 The trail goes after the colors and before the launcher's own marks. It mixes the
 pictures shown, so with the fast forward it mixes those the player sees.
+
+### Pixel-art magnification
+
+Source of knowledge: the Scale2x and Scale3x algorithms (Andrea Mazzoleni, of the
+AdvanceMAME project), written from the public description of their rules, not from any
+implementation. Implemented in `crates/screen-filters/src/upscale.rs`.
+
+The upscaler makes the picture two or three times larger before the filter fits it to the
+window. Each new pixel copies the pixel it comes from or one of its four neighbors,
+chosen by which neighbors are equal. Flat areas and straight edges stay as drawn, while a
+stair of single pixels becomes a smoother line. Nothing is blurred, since no color is
+mixed.
+
+It works on the whole picture, the launcher's marks included, after the colors and the
+trail. The display takes the larger picture in place of the screen's, so the filter
+still decides how it reaches the window; pixel art suits it best. The LCD grid keeps
+lining the game's own pixels.
+
+The game's font is shaded, so on text the rules see some shading as diagonals and leave
+small specks along the strokes.
 
 About shows the version and the license, and the project's pages: the port's repository
 and the translations' ([re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations)),

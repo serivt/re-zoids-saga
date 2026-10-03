@@ -19,17 +19,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pause menu has an Achievements line before Quit that lists them in pages, unlocked or
   not. They are shared by every save of the ROM, in a `.achievements` file beside them.
 - **Display filters.** Options has a Display screen with new ways to show the picture:
+  - **Presets.** Eight set the screen up at once: GBA, GBA SP AGS-001 and AGS-101, Game
+    Boy Micro, Nintendo DS and Game Boy Player as those showed the game (their grid,
+    colors and trail), and modern and smooth pixel art for today's screens.
   - **Pixel art filter.** Besides sharp and smooth, the picture can fill the window or
     the screen keeping its shape, its pixels square and sharp, blended only at their
     edges where the scale is not whole, so fullscreen no longer means black bars or a
     blurry picture.
   - **Colors.** The game can be shown with the colors of the original Game Boy Advance's
-    unlit screen (darker and paler, as the games were drawn for) or of the GBA SP's lit
-    one, besides the original colors.
-  - **LCD grid.** A filter that scales by whole multiples and darkens the lines between
-    the pixels, as the handheld's screen showed them.
-  - **LCD trail.** Each picture can linger a frame under the next, as on the handheld's
-    slow screen, which also blends effects the game flickers to look see-through.
+    unlit screen (darker and paler, as the games were drawn for), of either GBA SP, of
+    the Game Boy Micro or of the Nintendo DS, besides the original colors.
+  - **LCD grid.** Filters that scale by whole multiples and darken the lines between
+    the pixels, as a handheld's screen showed them: marked, soft or fine; and scan
+    lines, as a television showed the picture.
+  - **Upscaler.** Scale2x or Scale3x make the picture two or three times larger with
+    its diagonal edges rounded off and nothing blurred, before the filter fits it to
+    the window.
+  - **LCD trail.** Each picture can linger under the next, as on the handheld's slow
+    screen: mixed with the one before, which also blends effects the game flickers to
+    look see-through, or fading over two or three frames.
 
 ## [0.5.0] - 2026-10-02
 
