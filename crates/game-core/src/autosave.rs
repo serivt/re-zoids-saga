@@ -1,7 +1,9 @@
 //! The enhanced mode's autosave queue, a port feature: each autosave the
 //! game asks for waits its turn and a worker thread writes them in the
 //! order asked, so the field never waits for the disk and quick changes of
-//! map are all kept, the last one last.
+//! map are all kept, the last one last. Where there are no threads to
+//! start (WebAssembly in a browser), each is written as it is queued
+//! instead, and reported the same way; an image is a few kilobytes.
 //!
 //! Source of knowledge: this project's own design; the image written is
 //! the save memory the pause menu writes (see `docs/formats/save.md`).
@@ -33,12 +35,18 @@ struct Job {
 /// written if it was not.
 pub type Written = (usize, Result<(), String>);
 
-/// The queue and the worker that empties it.
+/// Whether the platform starts threads: WebAssembly in a browser does not.
+const THREADS: bool = !cfg!(target_family = "wasm");
+
+/// The queue and the worker that empties it, or the layout each job is
+/// written with at once where there is no worker.
 pub struct Autosaver {
     storage: SharedStorage,
     jobs: Option<Sender<Job>>,
     written: Receiver<Written>,
     worker: Option<JoinHandle<()>>,
+    /// The layout to write with as each job is queued, without a worker.
+    inline: Option<SaveFile>,
     /// Jobs queued and not yet reported written.
     pending: Cell<usize>,
     /// Jobs written while waiting for the queue, until they are polled.
@@ -46,9 +54,14 @@ pub struct Autosaver {
 }
 
 impl Autosaver {
-    /// Starts the worker that writes into `storage` with `save`'s layout.
+    /// Starts the worker that writes into `storage` with `save`'s layout;
+    /// where the platform starts no threads, writes as each job is queued
+    /// (see [`Self::inline`]).
     #[must_use]
     pub fn new(storage: Box<dyn SaveStorage + Send>, save: SaveFile) -> Self {
+        if !THREADS {
+            return Self::inline(storage, save);
+        }
         let storage: SharedStorage = Arc::new(Mutex::new(storage));
         let (jobs, queue) = channel::<Job>();
         let (report, written) = channel();
@@ -66,6 +79,23 @@ impl Autosaver {
             jobs: Some(jobs),
             written,
             worker: Some(worker),
+            inline: None,
+            pending: Cell::new(0),
+            waited: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Writes into `storage` with `save`'s layout as each job is queued,
+    /// without a thread; [`Self::poll`] reports them as the worker's are.
+    #[must_use]
+    pub fn inline(storage: Box<dyn SaveStorage + Send>, save: SaveFile) -> Self {
+        let (_, written) = channel();
+        Self {
+            storage: Arc::new(Mutex::new(storage)),
+            jobs: None,
+            written,
+            worker: None,
+            inline: Some(save),
             pending: Cell::new(0),
             waited: RefCell::new(Vec::new()),
         }
@@ -80,6 +110,11 @@ impl Autosaver {
             stats: statistics,
             map,
         };
+        if let Some(save) = &self.inline {
+            let result = write(&self.storage, save, &job);
+            self.waited.borrow_mut().push((job.map, result));
+            return;
+        }
         if self
             .jobs
             .as_ref()
@@ -295,6 +330,26 @@ mod tests {
         let image = autosaver.load().expect("readable").expect("stored");
         assert_eq!(map_of(&image), 5);
         assert!(autosaver.poll().is_empty());
+    }
+
+    #[test]
+    fn without_a_worker_each_game_is_written_as_it_is_queued() {
+        let recorder = Recorder::default();
+        let autosaver = Autosaver::inline(Box::new(recorder.clone()), save());
+        for map in [3, 7] {
+            autosaver.queue(
+                state(map),
+                "Atory".to_owned(),
+                Stats::default(),
+                usize::from(map),
+            );
+            assert!(!autosaver.is_busy(), "nothing waits");
+        }
+        assert_eq!(recorder.0.lock().expect("lock").len(), 2);
+        assert_eq!(autosaver.poll(), [(3, Ok(())), (7, Ok(()))]);
+        assert!(autosaver.poll().is_empty());
+        let image = autosaver.load().expect("readable").expect("stored");
+        assert_eq!(map_of(&image), 7);
     }
 
     #[test]
