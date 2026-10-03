@@ -13,6 +13,7 @@ gba-runtime.workspace = true
 platform.workspace = true
 extraction.workspace = true
 platform-sdl3.workspace = true
+screen-filters.workspace = true
 game-saga.workspace = true
 game-legacy.workspace = true
 game-fuzors.workspace = true

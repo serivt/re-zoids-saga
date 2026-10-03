@@ -65,6 +65,11 @@ impl Frame {
         }
     }
 
+    /// The pixels, row-major, to change in place.
+    pub fn pixels_mut(&mut self) -> &mut [Rgb] {
+        &mut self.pixels
+    }
+
     /// Fills the whole frame.
     pub fn fill(&mut self, color: Rgb) {
         self.pixels.fill(color);

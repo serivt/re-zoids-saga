@@ -54,12 +54,37 @@ pub enum Filter {
     /// Whole multiples of the frame, each pixel a sharp square.
     #[default]
     Sharp,
+    /// As large as the window allows, each pixel a square whose edges
+    /// alone blend with the next where the scale is not whole (SDL's
+    /// pixel-art scaling, linear where the renderer lacks it).
+    PixelArt,
     /// As large as the window allows, blended between pixels.
     Smooth,
 }
 
+impl Filter {
+    /// Every filter, in the options' order.
+    pub const ALL: [Self; 3] = [Self::Sharp, Self::PixelArt, Self::Smooth];
+
+    /// The next filter in the options' order, or the one before, round
+    /// from the last to the first.
+    #[must_use]
+    pub fn step(self, forward: bool) -> Self {
+        let count = Self::ALL.len();
+        let at = Self::ALL
+            .iter()
+            .position(|&filter| filter == self)
+            .unwrap_or(0);
+        Self::ALL[if forward {
+            (at + 1) % count
+        } else {
+            (at + count - 1) % count
+        }]
+    }
+}
+
 /// A window backed by SDL3 that shows frames of a fixed size, scaled up
-/// with nearest-neighbor sampling unless a smooth filter is chosen, and
+/// with nearest-neighbor sampling unless another filter is chosen, and
 /// reads the keyboard, every gamepad connected and, with the on-screen pad
 /// on, the fingers on a touch screen.
 pub struct Sdl3Display {
@@ -219,10 +244,11 @@ impl Sdl3Display {
                 dimension(self.frame_height)?,
             )
             .map_err(backend_error)?;
-        texture.set_scale_mode(match self.filter {
-            Filter::Sharp => ScaleMode::Nearest,
-            Filter::Smooth => ScaleMode::Linear,
-        });
+        match self.filter {
+            Filter::Sharp => texture.set_scale_mode(ScaleMode::Nearest),
+            Filter::PixelArt => set_pixel_art_scaling(&mut texture),
+            Filter::Smooth => texture.set_scale_mode(ScaleMode::Linear),
+        }
         texture
             .update(None, &frame.to_rgb24(), frame.width() * BYTES_PER_PIXEL)
             .map_err(backend_error)?;
@@ -418,7 +444,8 @@ impl Sdl3Display {
 
     /// Shows the frame `scale` times its size in a window, or on the whole
     /// screen when `fullscreen`, scaled with `filter`: sharp keeps whole
-    /// multiples, smooth fills the window keeping the frame's shape.
+    /// multiples, pixel art and smooth fill the window keeping the frame's
+    /// shape.
     ///
     /// # Errors
     ///
@@ -505,7 +532,7 @@ impl Sdl3Display {
         let presentation = match (self.touch.is_some(), self.filter) {
             (true, _) => SDL_LOGICAL_PRESENTATION_DISABLED,
             (false, Filter::Sharp) => SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
-            (false, Filter::Smooth) => SDL_LOGICAL_PRESENTATION_LETTERBOX,
+            (false, Filter::PixelArt | Filter::Smooth) => SDL_LOGICAL_PRESENTATION_LETTERBOX,
         };
         self.canvas
             .set_logical_size(width, height, presentation)
@@ -567,6 +594,23 @@ fn function_key(keycode: Keycode) -> Option<u8> {
     u8::try_from(index + 1).ok()
 }
 
+/// Scales `texture` with SDL's pixel-art sampling (SDL 3.4), which the
+/// bindings do not name; linear where the renderer refuses it.
+#[allow(unsafe_code)]
+fn set_pixel_art_scaling(texture: &mut sdl3::render::Texture<'_>) {
+    // SAFETY: `texture.raw()` is the live texture `texture` owns, and the
+    // call only changes how SDL samples it.
+    let set = unsafe {
+        sdl3::sys::render::SDL_SetTextureScaleMode(
+            texture.raw(),
+            sdl3::sys::surface::SDL_SCALEMODE_PIXELART,
+        )
+    };
+    if !set {
+        texture.set_scale_mode(ScaleMode::Linear);
+    }
+}
+
 /// Where a frame of `frame` pixels goes in an output of `output` pixels:
 /// centered, as large as it fits, in whole multiples with the sharp filter.
 fn fitted(output: (u32, u32), frame: (usize, usize), filter: Filter) -> FRect {
@@ -619,12 +663,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_filters_go_round() {
+        assert_eq!(Filter::Sharp.step(true), Filter::PixelArt);
+        assert_eq!(Filter::Smooth.step(true), Filter::Sharp);
+        assert_eq!(Filter::Sharp.step(false), Filter::Smooth);
+    }
+
+    #[test]
     fn a_fitted_frame_is_centered_and_sharp_in_whole_multiples() {
         let sharp = fitted((2400, 1080), (240, 160), Filter::Sharp);
         assert_eq!((sharp.w, sharp.h), (1440.0, 960.0));
         assert_eq!((sharp.x, sharp.y), (480.0, 60.0));
         let smooth = fitted((2400, 1080), (240, 160), Filter::Smooth);
         assert_eq!((smooth.w, smooth.h), (1620.0, 1080.0));
+        let pixel_art = fitted((2400, 1080), (240, 160), Filter::PixelArt);
+        assert_eq!(pixel_art, smooth);
         let small = fitted((200, 100), (240, 160), Filter::Sharp);
         assert!(small.w <= 200.0 && small.h <= 100.0);
     }

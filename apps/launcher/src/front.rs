@@ -23,7 +23,8 @@ use game_core::FAST_FORWARD_SPEEDS;
 use game_core::port_text::{
     LAUNCHER_ABOUT, LAUNCHER_ABOUT_HELP, LAUNCHER_AUTO_TEXT, LAUNCHER_AUTOSAVE, LAUNCHER_BACK,
     LAUNCHER_BATTLE_ANIMATIONS, LAUNCHER_CHOOSE_TRANSLATION, LAUNCHER_CLASSIC,
-    LAUNCHER_CLASSIC_NOTE, LAUNCHER_CONTROLS_HELP, LAUNCHER_COPY_FAILED, LAUNCHER_DAMAGE_NUMBERS,
+    LAUNCHER_CLASSIC_NOTE, LAUNCHER_COLOR_GBA, LAUNCHER_COLOR_GBA_SP, LAUNCHER_COLOR_ORIGINAL,
+    LAUNCHER_COLORS, LAUNCHER_CONTROLS_HELP, LAUNCHER_COPY_FAILED, LAUNCHER_DAMAGE_NUMBERS,
     LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED, LAUNCHER_DOWNLOADED,
     LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS, LAUNCHER_ENHANCED, LAUNCHER_ENHANCED_NOTE,
     LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED, LAUNCHER_FAST_FORWARD,
@@ -34,17 +35,17 @@ use game_core::port_text::{
     LAUNCHER_NO_TRANSLATION, LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON,
     LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED,
     LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_MODE, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM,
-    LAUNCHER_PICK_TOUCH_OPTIONS, LAUNCHER_PICK_TRANSLATION, LAUNCHER_PLAY, LAUNCHER_PRESS_KEY,
-    LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_RIGHT,
-    LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER,
-    LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SAVES,
-    LAUNCHER_SAVES_HELP, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY, LAUNCHER_SLOT_SAVED,
-    LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP, LAUNCHER_TOUCH_HELP,
-    LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY, LAUNCHER_TOUCH_OPTIONS_HELP,
-    LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP,
-    LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE,
-    LAUNCHER_UP, LAUNCHER_UPDATE, LAUNCHER_UPDATE_HELP, LAUNCHER_VERSION, LAUNCHER_VOLUME,
-    LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
+    LAUNCHER_PICK_TOUCH_OPTIONS, LAUNCHER_PICK_TRANSLATION, LAUNCHER_PIXEL_ART, LAUNCHER_PLAY,
+    LAUNCHER_PRESS_KEY, LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY,
+    LAUNCHER_RIGHT, LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE,
+    LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED,
+    LAUNCHER_SAVES, LAUNCHER_SAVES_HELP, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY,
+    LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP,
+    LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY,
+    LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION,
+    LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE,
+    LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_UPDATE, LAUNCHER_UPDATE_HELP,
+    LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
 };
 use game_core::{Enhancement, TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -52,6 +53,7 @@ use platform_sdl3::{
     FileChoice, Filter, KeyMap, Sdl3Display, default_keys, default_pad_buttons, key_name, open_url,
     pad_button_label, pad_button_name,
 };
+use screen_filters::ColorProfile;
 
 use crate::download::{Answer, Download, Language};
 use crate::quit::QuitPrompt;
@@ -193,6 +195,7 @@ enum Setting {
     Window,
     Fullscreen,
     Filter,
+    Colors,
     Volume,
     TouchSize,
     TouchOpacity,
@@ -201,12 +204,13 @@ enum Setting {
 }
 
 /// The options on the desktop.
-const DESKTOP_SETTINGS: [Setting; 7] = [
+const DESKTOP_SETTINGS: [Setting; 8] = [
     Setting::Keyboard,
     Setting::Gamepad,
     Setting::Window,
     Setting::Fullscreen,
     Setting::Filter,
+    Setting::Colors,
     Setting::Volume,
     Setting::Back,
 ];
@@ -214,9 +218,10 @@ const DESKTOP_SETTINGS: [Setting; 7] = [
 /// The options on Android: the window always fills the screen and there
 /// is no keyboard; the on-screen pad has its size and opacity, and the
 /// saves, out of reach in the app's folder, can be copied out or in.
-const ANDROID_SETTINGS: [Setting; 7] = [
+const ANDROID_SETTINGS: [Setting; 8] = [
     Setting::Gamepad,
     Setting::Filter,
+    Setting::Colors,
     Setting::Volume,
     Setting::TouchSize,
     Setting::TouchOpacity,
@@ -376,6 +381,7 @@ pub struct Front {
     scale: u32,
     fullscreen: bool,
     filter: Filter,
+    color: ColorProfile,
     volume: u8,
     touch_size: u8,
     touch_opacity: u8,
@@ -448,6 +454,7 @@ impl Front {
             scale: settings.scale,
             fullscreen: settings.fullscreen,
             filter: settings.filter,
+            color: settings.color,
             volume: settings.volume,
             touch_size: settings.touch_size,
             touch_opacity: settings.touch_opacity,
@@ -494,6 +501,7 @@ impl Front {
             scale: self.scale,
             fullscreen: self.fullscreen,
             filter: self.filter,
+            color: self.color,
             volume: self.volume,
             touch_size: self.touch_size,
             touch_opacity: self.touch_opacity,
@@ -1107,12 +1115,8 @@ impl Front {
             Setting::Window if less && self.scale > *SCALES.start() => self.scale -= 1,
             Setting::Window if more && self.scale < *SCALES.end() => self.scale += 1,
             Setting::Fullscreen if less || more || chosen => self.fullscreen = !self.fullscreen,
-            Setting::Filter if less || more || chosen => {
-                self.filter = match self.filter {
-                    Filter::Sharp => Filter::Smooth,
-                    Filter::Smooth => Filter::Sharp,
-                };
-            }
+            Setting::Filter if less || more || chosen => self.filter = self.filter.step(!less),
+            Setting::Colors if less || more || chosen => self.color = self.color.step(!less),
             Setting::Volume if less => self.volume = self.volume.saturating_sub(VOLUME_STEP),
             Setting::Volume if more => {
                 self.volume = self.volume.saturating_add(VOLUME_STEP).min(FULL_VOLUME);
@@ -1690,6 +1694,14 @@ impl Front {
                 (self.text(key), TEXT)
             }
             Setting::Filter => (self.filter_name(), TEXT),
+            Setting::Colors => (
+                self.text(match self.color {
+                    ColorProfile::Original => LAUNCHER_COLOR_ORIGINAL,
+                    ColorProfile::Gba => LAUNCHER_COLOR_GBA,
+                    ColorProfile::GbaSp => LAUNCHER_COLOR_GBA_SP,
+                }),
+                TEXT,
+            ),
             Setting::Volume => (format!("{}%", self.volume), TEXT),
             Setting::TouchSize => (format!("{}%", self.touch_size), TEXT),
             Setting::TouchOpacity => (format!("{}%", self.touch_opacity), TEXT),
@@ -1701,6 +1713,7 @@ impl Front {
     fn filter_name(&self) -> String {
         self.text(match self.filter {
             Filter::Sharp => LAUNCHER_SHARP,
+            Filter::PixelArt => LAUNCHER_PIXEL_ART,
             Filter::Smooth => LAUNCHER_SMOOTH,
         })
     }
@@ -1907,6 +1920,7 @@ impl Setting {
             Self::Window => LAUNCHER_WINDOW,
             Self::Fullscreen => LAUNCHER_FULLSCREEN,
             Self::Filter => LAUNCHER_FILTER,
+            Self::Colors => LAUNCHER_COLORS,
             Self::Volume => LAUNCHER_VOLUME,
             Self::TouchSize => LAUNCHER_TOUCH_SIZE,
             Self::TouchOpacity => LAUNCHER_TOUCH_OPACITY,
@@ -2480,6 +2494,8 @@ mod tests {
         }
         assert_eq!(front.scale, *SCALES.end());
         front.update_options(line_of(Setting::Filter), press(Button::A));
+        front.update_options(line_of(Setting::Filter), press(Button::Right));
+        front.update_options(line_of(Setting::Colors), press(Button::Left));
         front.update_options(line_of(Setting::Fullscreen), press(Button::Left));
         let volume = line_of(Setting::Volume);
         front.update_options(volume, press(Button::Left));
@@ -2489,6 +2505,7 @@ mod tests {
             (settings.filter, settings.fullscreen, settings.volume),
             (Filter::Smooth, true, 80)
         );
+        assert_eq!(settings.color, ColorProfile::GbaSp);
         front.update_options(volume, press(Button::B));
         assert_eq!(front.screen, Screen::Main);
     }

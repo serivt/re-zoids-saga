@@ -284,6 +284,7 @@ dependencies = [
  "localization",
  "platform",
  "platform-sdl3",
+ "screen-filters",
  "serde",
  "serde_json",
  "ureq",
@@ -435,6 +436,13 @@ dependencies = [
  "ring",
  "rustls-pki-types",
  "untrusted",
+]
+
+[[package]]
+name = "screen-filters"
+version = "0.5.0"
+dependencies = [
+ "platform",
 ]
 
 [[package]]

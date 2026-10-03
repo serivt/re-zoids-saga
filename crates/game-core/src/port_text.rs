@@ -312,7 +312,17 @@ pub const LAUNCHER_FILTER: &str = "port/launcher/filter";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_SHARP: &str = "port/launcher/sharp";
 /// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_PIXEL_ART: &str = "port/launcher/pixel-art";
+/// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_SMOOTH: &str = "port/launcher/smooth";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_COLORS: &str = "port/launcher/colors";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_COLOR_ORIGINAL: &str = "port/launcher/color-original";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_COLOR_GBA: &str = "port/launcher/color-gba";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_COLOR_GBA_SP: &str = "port/launcher/color-gba-sp";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_ON: &str = "port/launcher/on";
 /// See [`LAUNCHER_KEYBOARD`].
@@ -426,7 +436,32 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         "sharp",
         "Scaled by whole multiples, square pixels",
     ),
+    launcher(
+        LAUNCHER_PIXEL_ART,
+        "pixel art",
+        "Scaled to fill, square pixels blended only at their edges",
+    ),
     launcher(LAUNCHER_SMOOTH, "smooth", "Scaled to fill, blended pixels"),
+    launcher(
+        LAUNCHER_COLORS,
+        "Colors",
+        "The line of the colors the game is shown with",
+    ),
+    launcher(
+        LAUNCHER_COLOR_ORIGINAL,
+        "original",
+        "The game's colors as it draws them",
+    ),
+    launcher(
+        LAUNCHER_COLOR_GBA,
+        "GBA",
+        "The colors of the original Game Boy Advance's unlit screen: darker and paler",
+    ),
+    launcher(
+        LAUNCHER_COLOR_GBA_SP,
+        "GBA SP",
+        "The colors of the Game Boy Advance SP's lit screen: a little paler",
+    ),
     launcher(LAUNCHER_ON, "on", "A setting that is on"),
     launcher(LAUNCHER_OFF, "off", "A setting that is off"),
     launcher(LAUNCHER_VOLUME, "Volume", "The line of the sound's volume"),

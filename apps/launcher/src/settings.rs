@@ -1,8 +1,8 @@
 //! What the launcher remembers between runs: the ROM and the translation
 //! last played, the window, the sound, the keys and gamepad buttons chosen
-//! for the pad's buttons, the on-screen pad's size and opacity, and the
-//! game mode with its enhancements, one `key=value` line each, in the
-//! user's settings folder.
+//! for the pad's buttons, the on-screen pad's size and opacity, the
+//! picture's filter and colors, and the game mode with its enhancements,
+//! one `key=value` line each, in the user's settings folder.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use game_core::{Enhancements, FAST_FORWARD_SPEEDS, PlayMode};
 use platform::Button;
 use platform_sdl3::Filter;
+use screen_filters::ColorProfile;
 
 const ROM_KEY: &str = "rom";
 const TRANSLATION_KEY: &str = "translation";
@@ -40,7 +41,10 @@ const WEAPON_REACH_KEY: &str = "weapon-reach";
 /// The enhanced mode's fast forward's speed, 2 to 4.
 const FAST_FORWARD_KEY: &str = "fast-forward";
 const SHARP: &str = "sharp";
+const PIXEL_ART: &str = "pixel-art";
 const SMOOTH: &str = "smooth";
+/// The colors the game is shown with: `original`, `gba` or `gba-sp`.
+const COLOR_KEY: &str = "color";
 /// The window's size in multiples of the screen, its default and the
 /// sound's volume in percent.
 pub const SCALES: std::ops::RangeInclusive<u32> = 1..=6;
@@ -80,6 +84,8 @@ pub struct Settings {
     pub fullscreen: bool,
     /// How the screen is scaled up.
     pub filter: Filter,
+    /// The colors the game is shown with.
+    pub color: ColorProfile,
     /// The sound's volume, in percent.
     pub volume: u8,
     /// The on-screen pad's size, in percent of its usual one.
@@ -123,6 +129,7 @@ impl Default for Settings {
             scale: DEFAULT_SCALE,
             fullscreen: false,
             filter: Filter::Sharp,
+            color: ColorProfile::Original,
             volume: FULL_VOLUME,
             touch_size: USUAL_TOUCH,
             touch_opacity: USUAL_TOUCH,
@@ -168,7 +175,9 @@ impl Settings {
                 }
                 FULLSCREEN_KEY => settings.fullscreen = value == "1",
                 FILTER_KEY if value == SMOOTH => settings.filter = Filter::Smooth,
+                FILTER_KEY if value == PIXEL_ART => settings.filter = Filter::PixelArt,
                 FILTER_KEY => settings.filter = Filter::Sharp,
+                COLOR_KEY => settings.color = ColorProfile::from_key(value).unwrap_or_default(),
                 VOLUME_KEY => {
                     if let Ok(volume) = value.parse::<u8>() {
                         settings.volume = volume.min(FULL_VOLUME);
@@ -228,13 +237,15 @@ impl Settings {
         );
         let filter = match self.filter {
             Filter::Sharp => SHARP,
+            Filter::PixelArt => PIXEL_ART,
             Filter::Smooth => SMOOTH,
         };
         let _ = writeln!(
             text,
-            "{SCALE_KEY}={}\n{FULLSCREEN_KEY}={}\n{FILTER_KEY}={filter}\n{VOLUME_KEY}={}",
+            "{SCALE_KEY}={}\n{FULLSCREEN_KEY}={}\n{FILTER_KEY}={filter}\n{COLOR_KEY}={}\n{VOLUME_KEY}={}",
             self.scale,
             u8::from(self.fullscreen),
+            self.color.key(),
             self.volume
         );
         let _ = writeln!(
@@ -300,7 +311,8 @@ mod tests {
             pad_buttons: vec![(Button::B, "a".to_owned())],
             scale: 4,
             fullscreen: true,
-            filter: Filter::Smooth,
+            filter: Filter::PixelArt,
+            color: ColorProfile::GbaSp,
             volume: 70,
             touch_size: 120,
             touch_opacity: 40,
@@ -324,7 +336,7 @@ mod tests {
         let keys = Settings::parse("key.b=Q\nkey.b=E\nkey.turbo=T\nkey.a=\n").keys;
         assert_eq!(keys, [(Button::B, "E".to_owned())]);
         let odd = Settings::parse(
-            "scale=40\nvolume=250\nfilter=blurry\nfullscreen=yes\ntouch-size=300\ntouch-opacity=5\n",
+            "scale=40\nvolume=250\nfilter=blurry\nfullscreen=yes\ntouch-size=300\ntouch-opacity=5\ncolor=sepia\n",
         );
         assert_eq!(
             (odd.touch_size, odd.touch_opacity),
@@ -334,6 +346,7 @@ mod tests {
             (odd.scale, odd.volume, odd.filter, odd.fullscreen),
             (DEFAULT_SCALE, FULL_VOLUME, Filter::Sharp, false)
         );
+        assert_eq!(odd.color, ColorProfile::Original);
     }
 
     #[test]
