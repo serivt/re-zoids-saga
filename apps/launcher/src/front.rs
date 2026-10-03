@@ -25,13 +25,13 @@ use game_core::port_text::{
     LAUNCHER_BATTLE_ANIMATIONS, LAUNCHER_CHOOSE_TRANSLATION, LAUNCHER_CLASSIC,
     LAUNCHER_CLASSIC_NOTE, LAUNCHER_COLOR_GBA, LAUNCHER_COLOR_GBA_SP, LAUNCHER_COLOR_ORIGINAL,
     LAUNCHER_COLORS, LAUNCHER_CONTROLS_HELP, LAUNCHER_COPY_FAILED, LAUNCHER_DAMAGE_NUMBERS,
-    LAUNCHER_DEFAULT_KEYS, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED, LAUNCHER_DOWNLOADED,
-    LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS, LAUNCHER_ENHANCED, LAUNCHER_ENHANCED_NOTE,
-    LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED, LAUNCHER_FAST_FORWARD,
-    LAUNCHER_FILTER, LAUNCHER_FROM_FILE, LAUNCHER_FULLSCREEN, LAUNCHER_GAMEPAD, LAUNCHER_HELP,
-    LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP, LAUNCHER_IMPORTED, LAUNCHER_KEYBOARD,
-    LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LEFT, LAUNCHER_LICENSE,
-    LAUNCHER_LOOKING_UP, LAUNCHER_MODE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM,
+    LAUNCHER_DEFAULT_KEYS, LAUNCHER_DISPLAY, LAUNCHER_DOWN, LAUNCHER_DOWNLOAD_FAILED,
+    LAUNCHER_DOWNLOADED, LAUNCHER_DOWNLOADING, LAUNCHER_DOWNLOADS, LAUNCHER_ENHANCED,
+    LAUNCHER_ENHANCED_NOTE, LAUNCHER_EXPORT, LAUNCHER_EXPORT_HELP, LAUNCHER_EXPORTED,
+    LAUNCHER_FAST_FORWARD, LAUNCHER_FILTER, LAUNCHER_FROM_FILE, LAUNCHER_FULLSCREEN,
+    LAUNCHER_GAMEPAD, LAUNCHER_HELP, LAUNCHER_IMPORT, LAUNCHER_IMPORT_HELP, LAUNCHER_IMPORTED,
+    LAUNCHER_KEYBOARD, LAUNCHER_KEYS_CUSTOM, LAUNCHER_KEYS_DEFAULT, LAUNCHER_LCD, LAUNCHER_LEFT,
+    LAUNCHER_LICENSE, LAUNCHER_LOOKING_UP, LAUNCHER_MODE, LAUNCHER_NO_GAMEPAD, LAUNCHER_NO_ROM,
     LAUNCHER_NO_TRANSLATION, LAUNCHER_NOT_A_SAVE, LAUNCHER_OFF, LAUNCHER_OFFLINE, LAUNCHER_ON,
     LAUNCHER_OPENS_PAGE, LAUNCHER_OPTIONS, LAUNCHER_OPTIONS_HELP, LAUNCHER_PAGE_UNOPENED,
     LAUNCHER_PICK_ABOUT, LAUNCHER_PICK_MODE, LAUNCHER_PICK_OPTIONS, LAUNCHER_PICK_ROM,
@@ -42,7 +42,7 @@ use game_core::port_text::{
     LAUNCHER_SAVES, LAUNCHER_SAVES_HELP, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY,
     LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP,
     LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY,
-    LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRANSLATION,
+    LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRAIL, LAUNCHER_TRANSLATION,
     LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE,
     LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_UPDATE, LAUNCHER_UPDATE_HELP,
     LAUNCHER_VERSION, LAUNCHER_VOLUME, LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
@@ -194,8 +194,11 @@ enum Setting {
     Gamepad,
     Window,
     Fullscreen,
+    /// Opens the display's own screen.
+    Display,
     Filter,
     Colors,
+    Trail,
     Volume,
     TouchSize,
     TouchOpacity,
@@ -204,13 +207,12 @@ enum Setting {
 }
 
 /// The options on the desktop.
-const DESKTOP_SETTINGS: [Setting; 8] = [
+const DESKTOP_SETTINGS: [Setting; 7] = [
     Setting::Keyboard,
     Setting::Gamepad,
     Setting::Window,
     Setting::Fullscreen,
-    Setting::Filter,
-    Setting::Colors,
+    Setting::Display,
     Setting::Volume,
     Setting::Back,
 ];
@@ -218,14 +220,22 @@ const DESKTOP_SETTINGS: [Setting; 8] = [
 /// The options on Android: the window always fills the screen and there
 /// is no keyboard; the on-screen pad has its size and opacity, and the
 /// saves, out of reach in the app's folder, can be copied out or in.
-const ANDROID_SETTINGS: [Setting; 8] = [
+const ANDROID_SETTINGS: [Setting; 7] = [
     Setting::Gamepad,
-    Setting::Filter,
-    Setting::Colors,
+    Setting::Display,
     Setting::Volume,
     Setting::TouchSize,
     Setting::TouchOpacity,
     Setting::Saves,
+    Setting::Back,
+];
+
+/// The display's screen: how the picture is scaled, its colors and its
+/// trail.
+const DISPLAY_SETTINGS: [Setting; 4] = [
+    Setting::Filter,
+    Setting::Colors,
+    Setting::Trail,
     Setting::Back,
 ];
 
@@ -341,6 +351,8 @@ enum Screen {
     Main,
     /// The options, with the line under the cursor.
     Options(usize),
+    /// The display's options, with the line under the cursor.
+    Display(usize),
     /// The game mode and its enhancements, with the line under the cursor.
     Mode(usize),
     /// The screen about the port, with the line under the cursor.
@@ -372,6 +384,14 @@ enum Step {
     Quit,
 }
 
+/// How the game's picture is shown: the display's options.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Picture {
+    filter: Filter,
+    color: ColorProfile,
+    trail: bool,
+}
+
 /// The launcher's screen.
 pub struct Front {
     rom: Option<(PathBuf, RomKind)>,
@@ -380,8 +400,7 @@ pub struct Front {
     pad_buttons: KeyMap,
     scale: u32,
     fullscreen: bool,
-    filter: Filter,
-    color: ColorProfile,
+    picture: Picture,
     volume: u8,
     touch_size: u8,
     touch_opacity: u8,
@@ -453,8 +472,11 @@ impl Front {
             pad_buttons: bound(default_pad_buttons(), &settings.pad_buttons),
             scale: settings.scale,
             fullscreen: settings.fullscreen,
-            filter: settings.filter,
-            color: settings.color,
+            picture: Picture {
+                filter: settings.filter,
+                color: settings.color,
+                trail: settings.trail,
+            },
             volume: settings.volume,
             touch_size: settings.touch_size,
             touch_opacity: settings.touch_opacity,
@@ -500,8 +522,9 @@ impl Front {
             pad_buttons: changed(&self.pad_buttons, &default_pad_buttons()),
             scale: self.scale,
             fullscreen: self.fullscreen,
-            filter: self.filter,
-            color: self.color,
+            filter: self.picture.filter,
+            color: self.picture.color,
+            trail: self.picture.trail,
             volume: self.volume,
             touch_size: self.touch_size,
             touch_opacity: self.touch_opacity,
@@ -602,6 +625,7 @@ impl Front {
                     self.screen = Screen::Main;
                 }
                 (Event::Back, Screen::Saves(_)) => self.screen = saves_option(),
+                (Event::Back, Screen::Display(_)) => self.screen = display_option(),
                 (Event::Back, Screen::Slot { slot, .. }) => self.screen = Screen::Saves(slot),
                 (Event::Back, Screen::Main) if self.choosing.is_none() => {
                     self.quitting = match self.quitting {
@@ -701,6 +725,7 @@ impl Front {
             Screen::Saves(line) => self.update_saves(line, pressed),
             Screen::Slot { slot, line } => self.update_slot(display, slot, line, pressed)?,
             Screen::Options(line) => self.update_options(line, pressed),
+            Screen::Display(line) => self.update_display(line, pressed),
             Screen::Mode(line) => self.update_mode(line, pressed),
             Screen::About(line) => self.update_about(line, pressed),
             Screen::Bindings {
@@ -757,6 +782,18 @@ impl Front {
                     | Setting::TouchOpacity => Input::default().with(Button::Right),
                     _ => chosen,
                 }
+            }
+            Screen::Display(_) => {
+                let Some(line) = row_at(
+                    y,
+                    OPTIONS_FIRST_LINE_Y,
+                    OPTION_LINE_HEIGHT,
+                    DISPLAY_SETTINGS.len(),
+                ) else {
+                    return Input::default();
+                };
+                self.screen = Screen::Display(line);
+                chosen
             }
             Screen::Mode(_) => {
                 let Some(line) =
@@ -1092,15 +1129,23 @@ impl Front {
             self.screen = Screen::Main;
             return;
         }
-        let mut line = line;
-        if pressed.is_held(Button::Up) {
-            line = line.saturating_sub(1);
-        }
-        if pressed.is_held(Button::Down) {
-            line = (line + 1).min(SETTINGS.len() - 1);
-        }
+        let line = moved(line, pressed, SETTINGS.len());
         self.screen = Screen::Options(line);
         self.change(SETTINGS[line], pressed);
+    }
+
+    /// The display's screen: up and down move, left, right and X change
+    /// the filter, the colors and the trail; Z, and X on the last line, go
+    /// back to the options.
+    fn update_display(&mut self, line: usize, pressed: Input) {
+        let line = moved(line, pressed, DISPLAY_SETTINGS.len());
+        let setting = DISPLAY_SETTINGS[line];
+        if pressed.is_held(Button::B) || (setting == Setting::Back && pressed.is_held(Button::A)) {
+            self.screen = display_option();
+            return;
+        }
+        self.screen = Screen::Display(line);
+        self.change(setting, pressed);
     }
 
     /// What `pressed` does on the option `setting`: left and right change
@@ -1115,8 +1160,14 @@ impl Front {
             Setting::Window if less && self.scale > *SCALES.start() => self.scale -= 1,
             Setting::Window if more && self.scale < *SCALES.end() => self.scale += 1,
             Setting::Fullscreen if less || more || chosen => self.fullscreen = !self.fullscreen,
-            Setting::Filter if less || more || chosen => self.filter = self.filter.step(!less),
-            Setting::Colors if less || more || chosen => self.color = self.color.step(!less),
+            Setting::Display if chosen => self.screen = Screen::Display(0),
+            Setting::Filter if less || more || chosen => {
+                self.picture.filter = self.picture.filter.step(!less);
+            }
+            Setting::Colors if less || more || chosen => {
+                self.picture.color = self.picture.color.step(!less);
+            }
+            Setting::Trail if less || more || chosen => self.picture.trail = !self.picture.trail,
             Setting::Volume if less => self.volume = self.volume.saturating_sub(VOLUME_STEP),
             Setting::Volume if more => {
                 self.volume = self.volume.saturating_add(VOLUME_STEP).min(FULL_VOLUME);
@@ -1297,10 +1348,9 @@ impl Front {
                 self.centered(frame, STATUS_Y, &status, status_color);
                 self.centered(frame, HELP_Y, &self.text(MAIN_HELP), DIM);
             }
-            Screen::Options(line) => {
-                self.centered(frame, SUBTITLE_Y, &self.text(LAUNCHER_OPTIONS), DIM);
-                self.draw_options(frame, line);
-                self.centered(frame, HELP_Y, &self.text(OPTIONS_HELP), DIM);
+            Screen::Options(line) => self.draw_options(frame, LAUNCHER_OPTIONS, SETTINGS, line),
+            Screen::Display(line) => {
+                self.draw_options(frame, LAUNCHER_DISPLAY, &DISPLAY_SETTINGS, line);
             }
             Screen::Mode(line) => self.draw_mode(frame, line),
             Screen::Translations(line) => {
@@ -1443,13 +1493,23 @@ impl Front {
         }
     }
 
-    fn draw_options(&self, frame: &mut Frame, selected: usize) {
-        let labels: Vec<String> = SETTINGS
+    /// A screen of options under `heading`: `settings`, a line each with
+    /// its value, the line `selected` under the cursor, and the keys.
+    fn draw_options(
+        &self,
+        frame: &mut Frame,
+        heading: &str,
+        settings: &[Setting],
+        selected: usize,
+    ) {
+        self.centered(frame, SUBTITLE_Y, &self.text(heading), DIM);
+        self.centered(frame, HELP_Y, &self.text(OPTIONS_HELP), DIM);
+        let labels: Vec<String> = settings
             .iter()
             .map(|setting| self.text(setting.label()))
             .collect();
         let value_x = self.value_column(&labels);
-        for (index, setting) in SETTINGS.iter().enumerate() {
+        for (index, setting) in settings.iter().enumerate() {
             let y = OPTIONS_FIRST_LINE_Y + index * OPTION_LINE_HEIGHT;
             let is_selected = index == selected;
             let color = if is_selected { TEXT } else { DIM };
@@ -1685,6 +1745,14 @@ impl Front {
                 None => (self.text(LAUNCHER_NO_GAMEPAD), DIM),
             },
             Setting::Window => (format!("x{}", self.scale), TEXT),
+            Setting::Trail => {
+                let key = if self.picture.trail {
+                    LAUNCHER_ON
+                } else {
+                    LAUNCHER_OFF
+                };
+                (self.text(key), TEXT)
+            }
             Setting::Fullscreen => {
                 let key = if self.fullscreen {
                     LAUNCHER_ON
@@ -1693,15 +1761,12 @@ impl Front {
                 };
                 (self.text(key), TEXT)
             }
-            Setting::Filter => (self.filter_name(), TEXT),
-            Setting::Colors => (
-                self.text(match self.color {
-                    ColorProfile::Original => LAUNCHER_COLOR_ORIGINAL,
-                    ColorProfile::Gba => LAUNCHER_COLOR_GBA,
-                    ColorProfile::GbaSp => LAUNCHER_COLOR_GBA_SP,
-                }),
-                TEXT,
+            Setting::Display => (
+                format!("{}, {}", self.filter_name(), self.color_name()),
+                DIM,
             ),
+            Setting::Filter => (self.filter_name(), TEXT),
+            Setting::Colors => (self.color_name(), TEXT),
             Setting::Volume => (format!("{}%", self.volume), TEXT),
             Setting::TouchSize => (format!("{}%", self.touch_size), TEXT),
             Setting::TouchOpacity => (format!("{}%", self.touch_opacity), TEXT),
@@ -1710,11 +1775,20 @@ impl Front {
         Some(value)
     }
 
+    fn color_name(&self) -> String {
+        self.text(match self.picture.color {
+            ColorProfile::Original => LAUNCHER_COLOR_ORIGINAL,
+            ColorProfile::Gba => LAUNCHER_COLOR_GBA,
+            ColorProfile::GbaSp => LAUNCHER_COLOR_GBA_SP,
+        })
+    }
+
     fn filter_name(&self) -> String {
-        self.text(match self.filter {
+        self.text(match self.picture.filter {
             Filter::Sharp => LAUNCHER_SHARP,
             Filter::PixelArt => LAUNCHER_PIXEL_ART,
             Filter::Smooth => LAUNCHER_SMOOTH,
+            Filter::Lcd => LAUNCHER_LCD,
         })
     }
 
@@ -1919,8 +1993,10 @@ impl Setting {
             Self::Gamepad => LAUNCHER_GAMEPAD,
             Self::Window => LAUNCHER_WINDOW,
             Self::Fullscreen => LAUNCHER_FULLSCREEN,
+            Self::Display => LAUNCHER_DISPLAY,
             Self::Filter => LAUNCHER_FILTER,
             Self::Colors => LAUNCHER_COLORS,
+            Self::Trail => LAUNCHER_TRAIL,
             Self::Volume => LAUNCHER_VOLUME,
             Self::TouchSize => LAUNCHER_TOUCH_SIZE,
             Self::TouchOpacity => LAUNCHER_TOUCH_OPACITY,
@@ -2077,6 +2153,27 @@ const SLOT_ACTIONS: [SlotLine; 3] = [
     SlotLine::Action(SaveAction::Import),
     SlotLine::Back,
 ];
+
+/// The options' screen with the cursor on the display's line.
+fn display_option() -> Screen {
+    Screen::Options(
+        SETTINGS
+            .iter()
+            .position(|setting| *setting == Setting::Display)
+            .unwrap_or(0),
+    )
+}
+
+/// `line` moved up or down a list of `count` lines as `pressed` asks.
+fn moved(line: usize, pressed: Input, count: usize) -> usize {
+    if pressed.is_held(Button::Up) {
+        line.saturating_sub(1)
+    } else if pressed.is_held(Button::Down) {
+        (line + 1).min(count - 1)
+    } else {
+        line
+    }
+}
 
 /// The options' screen with the cursor on the saves' line.
 fn saves_option() -> Screen {
@@ -2493,9 +2590,20 @@ mod tests {
             front.update_options(window, press(Button::Right));
         }
         assert_eq!(front.scale, *SCALES.end());
-        front.update_options(line_of(Setting::Filter), press(Button::A));
-        front.update_options(line_of(Setting::Filter), press(Button::Right));
-        front.update_options(line_of(Setting::Colors), press(Button::Left));
+        front.update_options(line_of(Setting::Display), press(Button::A));
+        assert_eq!(front.screen, Screen::Display(0));
+        let display = |setting| {
+            DISPLAY_SETTINGS
+                .iter()
+                .position(|shown| *shown == setting)
+                .expect("listed")
+        };
+        front.update_display(display(Setting::Filter), press(Button::A));
+        front.update_display(display(Setting::Filter), press(Button::Right));
+        front.update_display(display(Setting::Colors), press(Button::Left));
+        front.update_display(display(Setting::Trail), press(Button::A));
+        front.update_display(display(Setting::Back), press(Button::A));
+        assert_eq!(front.screen, display_option());
         front.update_options(line_of(Setting::Fullscreen), press(Button::Left));
         let volume = line_of(Setting::Volume);
         front.update_options(volume, press(Button::Left));
@@ -2503,9 +2611,10 @@ mod tests {
         let settings = front.settings();
         assert_eq!(
             (settings.filter, settings.fullscreen, settings.volume),
-            (Filter::Smooth, true, 80)
+            (Filter::Lcd, true, 80)
         );
         assert_eq!(settings.color, ColorProfile::GbaSp);
+        assert!(settings.trail);
         front.update_options(volume, press(Button::B));
         assert_eq!(front.screen, Screen::Main);
     }

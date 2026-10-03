@@ -60,11 +60,14 @@ pub enum Filter {
     PixelArt,
     /// As large as the window allows, blended between pixels.
     Smooth,
+    /// Whole multiples of the frame, as sharp's, with the dark lines
+    /// between the pixels of the handheld's panel over them.
+    Lcd,
 }
 
 impl Filter {
     /// Every filter, in the options' order.
-    pub const ALL: [Self; 3] = [Self::Sharp, Self::PixelArt, Self::Smooth];
+    pub const ALL: [Self; 4] = [Self::Sharp, Self::PixelArt, Self::Lcd, Self::Smooth];
 
     /// The next filter in the options' order, or the one before, round
     /// from the last to the first.
@@ -245,7 +248,7 @@ impl Sdl3Display {
             )
             .map_err(backend_error)?;
         match self.filter {
-            Filter::Sharp => texture.set_scale_mode(ScaleMode::Nearest),
+            Filter::Sharp | Filter::Lcd => texture.set_scale_mode(ScaleMode::Nearest),
             Filter::PixelArt => set_pixel_art_scaling(&mut texture),
             Filter::Smooth => texture.set_scale_mode(ScaleMode::Linear),
         }
@@ -260,21 +263,35 @@ impl Sdl3Display {
         let frame_size = (self.frame_width, self.frame_height);
         let filter = self.filter;
         if let Some(touch) = self.touch.as_mut() {
-            if pad_hidden {
-                self.canvas
-                    .copy(&texture, None, fitted(output, frame_size, filter))
-                    .map_err(backend_error)?;
+            let shown = if pad_hidden {
+                fitted(output, frame_size, filter)
             } else {
                 touch.fit(output);
-                self.canvas
-                    .copy(&texture, None, touch.screen())
-                    .map_err(backend_error)?;
+                touch.screen()
+            };
+            self.canvas
+                .copy(&texture, None, shown)
+                .map_err(backend_error)?;
+            if filter == Filter::Lcd {
+                draw_lcd_grid(&mut self.canvas, shown, frame_size, 1.0)?;
+            }
+            if !pad_hidden {
                 touch.draw(&mut self.canvas, held).map_err(backend_error)?;
             }
         } else {
             self.canvas
                 .copy(&texture, None, None)
                 .map_err(backend_error)?;
+            if filter == Filter::Lcd {
+                let whole = FRect::new(
+                    0.0,
+                    0.0,
+                    f32_of_usize(frame_size.0),
+                    f32_of_usize(frame_size.1),
+                );
+                let scale = fitted(output, frame_size, filter).w / whole.w;
+                draw_lcd_grid(&mut self.canvas, whole, frame_size, scale)?;
+            }
         }
         Ok(())
     }
@@ -531,7 +548,7 @@ impl Sdl3Display {
         let (width, height) = (dimension(self.frame_width)?, dimension(self.frame_height)?);
         let presentation = match (self.touch.is_some(), self.filter) {
             (true, _) => SDL_LOGICAL_PRESENTATION_DISABLED,
-            (false, Filter::Sharp) => SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
+            (false, Filter::Sharp | Filter::Lcd) => SDL_LOGICAL_PRESENTATION_INTEGER_SCALE,
             (false, Filter::PixelArt | Filter::Smooth) => SDL_LOGICAL_PRESENTATION_LETTERBOX,
         };
         self.canvas
@@ -594,6 +611,58 @@ fn function_key(keycode: Keycode) -> Option<u8> {
     u8::try_from(index + 1).ok()
 }
 
+/// How dark the lines between an LCD's pixels leave what they cover:
+/// the color they multiply it by.
+const LCD_GAP: u8 = 0xB0;
+/// The output pixels a pixel of the frame must span for the grid to show,
+/// and those each line takes for every so many of them.
+const LCD_LEAST_SCALE: f32 = 3.0;
+const LCD_PIXELS_PER_LINE: f32 = 5.0;
+
+/// Darkens the lines between the pixels of a frame of `frame` pixels
+/// drawn at `rect`, the canvas's units being `scale` output pixels each.
+fn draw_lcd_grid(
+    canvas: &mut WindowCanvas,
+    rect: FRect,
+    frame: (usize, usize),
+    scale: f32,
+) -> Result<(), PlatformError> {
+    let lines = lcd_lines(rect, frame, scale);
+    if lines.is_empty() {
+        return Ok(());
+    }
+    let blend = canvas.blend_mode();
+    canvas.set_blend_mode(BlendMode::Mod);
+    canvas.set_draw_color(sdl3::pixels::Color::RGB(LCD_GAP, LCD_GAP, LCD_GAP));
+    let drawn = canvas.fill_rects(&lines).map_err(backend_error);
+    canvas.set_blend_mode(blend);
+    drawn
+}
+
+/// The lines between the pixels of a frame of `frame` pixels drawn at
+/// `rect`, the canvas's units being `scale` output pixels each: one at the
+/// right and the bottom of each pixel, whole output pixels thick (one for
+/// every five the pixel spans, at least one); none when a pixel spans
+/// fewer than three.
+fn lcd_lines(rect: FRect, frame: (usize, usize), scale: f32) -> Vec<FRect> {
+    let (columns, rows) = (f32_of_usize(frame.0), f32_of_usize(frame.1));
+    let cell = (rect.w / columns, rect.h / rows);
+    let pixels = cell.0 * scale;
+    if pixels < LCD_LEAST_SCALE {
+        return Vec::new();
+    }
+    let thickness = (pixels / LCD_PIXELS_PER_LINE).round().max(1.0) / scale;
+    let vertical = (1..=frame.0).map(|column| {
+        let x = rect.x + f32_of_usize(column) * cell.0 - thickness;
+        FRect::new(x, rect.y, thickness, rect.h)
+    });
+    let horizontal = (1..=frame.1).map(|row| {
+        let y = rect.y + f32_of_usize(row) * cell.1 - thickness;
+        FRect::new(rect.x, y, rect.w, thickness)
+    });
+    vertical.chain(horizontal).collect()
+}
+
 /// Scales `texture` with SDL's pixel-art sampling (SDL 3.4), which the
 /// bindings do not name; linear where the renderer refuses it.
 #[allow(unsafe_code)]
@@ -618,7 +687,7 @@ fn fitted(output: (u32, u32), frame: (usize, usize), filter: Filter) -> FRect {
     let (frame_width, frame_height) = (f32_of_usize(frame.0), f32_of_usize(frame.1));
     let scale = (width / frame_width).min(height / frame_height);
     let scale = match filter {
-        Filter::Sharp if scale >= 1.0 => scale.floor(),
+        Filter::Sharp | Filter::Lcd if scale >= 1.0 => scale.floor(),
         _ => scale,
     };
     let (shown_width, shown_height) = (frame_width * scale, frame_height * scale);
@@ -665,8 +734,30 @@ mod tests {
     #[test]
     fn the_filters_go_round() {
         assert_eq!(Filter::Sharp.step(true), Filter::PixelArt);
+        assert_eq!(Filter::PixelArt.step(true), Filter::Lcd);
         assert_eq!(Filter::Smooth.step(true), Filter::Sharp);
         assert_eq!(Filter::Sharp.step(false), Filter::Smooth);
+    }
+
+    #[test]
+    fn the_lcd_grid_lines_each_pixel_right_and_below() {
+        let frame = (240, 160);
+        let logical = FRect::new(0.0, 0.0, 240.0, 160.0);
+        let lines = lcd_lines(logical, frame, 5.0);
+        assert_eq!(lines.len(), 240 + 160);
+        assert_eq!(
+            (lines[0].x, lines[0].w),
+            (0.8, 0.2),
+            "one output pixel of five"
+        );
+        assert_eq!((lines[239].x, lines[239].h), (239.8, 160.0));
+        assert_eq!((lines[240].y, lines[240].w), (0.8, 240.0));
+        let wide = lcd_lines(FRect::new(10.0, 0.0, 2400.0, 1600.0), frame, 1.0);
+        assert_eq!((wide[0].x, wide[0].w), (18.0, 2.0), "two pixels of ten");
+        assert!(
+            lcd_lines(logical, frame, 2.0).is_empty(),
+            "too small to show"
+        );
     }
 
     #[test]

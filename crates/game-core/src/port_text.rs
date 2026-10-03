@@ -308,6 +308,8 @@ pub const LAUNCHER_WINDOW: &str = "port/launcher/window";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_FULLSCREEN: &str = "port/launcher/fullscreen";
 /// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_DISPLAY: &str = "port/launcher/display";
+/// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_FILTER: &str = "port/launcher/filter";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_SHARP: &str = "port/launcher/sharp";
@@ -316,6 +318,8 @@ pub const LAUNCHER_PIXEL_ART: &str = "port/launcher/pixel-art";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_SMOOTH: &str = "port/launcher/smooth";
 /// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_LCD: &str = "port/launcher/lcd";
+/// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_COLORS: &str = "port/launcher/colors";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_COLOR_ORIGINAL: &str = "port/launcher/color-original";
@@ -323,6 +327,8 @@ pub const LAUNCHER_COLOR_ORIGINAL: &str = "port/launcher/color-original";
 pub const LAUNCHER_COLOR_GBA: &str = "port/launcher/color-gba";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_COLOR_GBA_SP: &str = "port/launcher/color-gba-sp";
+/// See [`LAUNCHER_KEYBOARD`].
+pub const LAUNCHER_TRAIL: &str = "port/launcher/trail";
 /// See [`LAUNCHER_KEYBOARD`].
 pub const LAUNCHER_ON: &str = "port/launcher/on";
 /// See [`LAUNCHER_KEYBOARD`].
@@ -427,6 +433,11 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         "The line that fills the screen",
     ),
     launcher(
+        LAUNCHER_DISPLAY,
+        "Display",
+        "The line that opens the display's options (the filter, the colors, the LCD trail), and that screen's heading; their summary follows",
+    ),
+    launcher(
         LAUNCHER_FILTER,
         "Filter",
         "The line of how the picture is scaled",
@@ -442,6 +453,11 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         "Scaled to fill, square pixels blended only at their edges",
     ),
     launcher(LAUNCHER_SMOOTH, "smooth", "Scaled to fill, blended pixels"),
+    launcher(
+        LAUNCHER_LCD,
+        "LCD",
+        "Scaled by whole multiples, with the dark lines between the handheld screen's pixels",
+    ),
     launcher(
         LAUNCHER_COLORS,
         "Colors",
@@ -461,6 +477,11 @@ pub const LAUNCHER_TEXTS: &[PortText] = &[
         LAUNCHER_COLOR_GBA_SP,
         "GBA SP",
         "The colors of the Game Boy Advance SP's lit screen: a little paler",
+    ),
+    launcher(
+        LAUNCHER_TRAIL,
+        "LCD trail",
+        "The line that lets each picture linger a frame, as the handheld's slow screen did; on or off follows",
     ),
     launcher(LAUNCHER_ON, "on", "A setting that is on"),
     launcher(LAUNCHER_OFF, "off", "A setting that is off"),

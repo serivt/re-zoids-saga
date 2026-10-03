@@ -65,6 +65,12 @@ impl Frame {
         }
     }
 
+    /// The pixels, row-major.
+    #[must_use]
+    pub fn pixels(&self) -> &[Rgb] {
+        &self.pixels
+    }
+
     /// The pixels, row-major, to change in place.
     pub fn pixels_mut(&mut self) -> &mut [Rgb] {
         &mut self.pixels

@@ -43,6 +43,9 @@ const FAST_FORWARD_KEY: &str = "fast-forward";
 const SHARP: &str = "sharp";
 const PIXEL_ART: &str = "pixel-art";
 const SMOOTH: &str = "smooth";
+const LCD: &str = "lcd";
+/// The LCD trail, `1` on or `0` off.
+const TRAIL_KEY: &str = "trail";
 /// The colors the game is shown with: `original`, `gba` or `gba-sp`.
 const COLOR_KEY: &str = "color";
 /// The window's size in multiples of the screen, its default and the
@@ -86,6 +89,9 @@ pub struct Settings {
     pub filter: Filter,
     /// The colors the game is shown with.
     pub color: ColorProfile,
+    /// Whether each picture keeps a trail of the one before, as the
+    /// handheld's slow panel did.
+    pub trail: bool,
     /// The sound's volume, in percent.
     pub volume: u8,
     /// The on-screen pad's size, in percent of its usual one.
@@ -130,6 +136,7 @@ impl Default for Settings {
             fullscreen: false,
             filter: Filter::Sharp,
             color: ColorProfile::Original,
+            trail: false,
             volume: FULL_VOLUME,
             touch_size: USUAL_TOUCH,
             touch_opacity: USUAL_TOUCH,
@@ -176,8 +183,10 @@ impl Settings {
                 FULLSCREEN_KEY => settings.fullscreen = value == "1",
                 FILTER_KEY if value == SMOOTH => settings.filter = Filter::Smooth,
                 FILTER_KEY if value == PIXEL_ART => settings.filter = Filter::PixelArt,
+                FILTER_KEY if value == LCD => settings.filter = Filter::Lcd,
                 FILTER_KEY => settings.filter = Filter::Sharp,
                 COLOR_KEY => settings.color = ColorProfile::from_key(value).unwrap_or_default(),
+                TRAIL_KEY => settings.trail = value == "1",
                 VOLUME_KEY => {
                     if let Ok(volume) = value.parse::<u8>() {
                         settings.volume = volume.min(FULL_VOLUME);
@@ -239,13 +248,15 @@ impl Settings {
             Filter::Sharp => SHARP,
             Filter::PixelArt => PIXEL_ART,
             Filter::Smooth => SMOOTH,
+            Filter::Lcd => LCD,
         };
         let _ = writeln!(
             text,
-            "{SCALE_KEY}={}\n{FULLSCREEN_KEY}={}\n{FILTER_KEY}={filter}\n{COLOR_KEY}={}\n{VOLUME_KEY}={}",
+            "{SCALE_KEY}={}\n{FULLSCREEN_KEY}={}\n{FILTER_KEY}={filter}\n{COLOR_KEY}={}\n{TRAIL_KEY}={}\n{VOLUME_KEY}={}",
             self.scale,
             u8::from(self.fullscreen),
             self.color.key(),
+            u8::from(self.trail),
             self.volume
         );
         let _ = writeln!(
@@ -311,8 +322,9 @@ mod tests {
             pad_buttons: vec![(Button::B, "a".to_owned())],
             scale: 4,
             fullscreen: true,
-            filter: Filter::PixelArt,
+            filter: Filter::Lcd,
             color: ColorProfile::GbaSp,
+            trail: true,
             volume: 70,
             touch_size: 120,
             touch_opacity: 40,
@@ -347,6 +359,11 @@ mod tests {
             (DEFAULT_SCALE, FULL_VOLUME, Filter::Sharp, false)
         );
         assert_eq!(odd.color, ColorProfile::Original);
+        assert!(!odd.trail);
+        assert_eq!(
+            Settings::parse("filter=pixel-art\n").filter,
+            Filter::PixelArt
+        );
     }
 
     #[test]

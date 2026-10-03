@@ -397,8 +397,8 @@ fn show(title: &str, frame: &Frame) -> Result<()> {
 
 /// Runs the game in `display`, the launcher's window that already has
 /// `settings`, or a new one given them; the sound plays at their volume and
-/// the picture with their colors (the marks the launcher draws over it keep
-/// their own).
+/// the picture with their colors and trail (the marks the launcher draws
+/// over it keep their own).
 /// Escape pauses the game to ask before closing; after staying, the game
 /// sees no button until all are released. Returns the window when the
 /// player chose to leave for the launcher, `None` when it closed.
@@ -414,7 +414,7 @@ fn play(
     };
     let mut fast = fast::FastForward::default();
     let mut mute = mute::Mute::default();
-    let colors = screen_filters::ColorCorrection::new(settings.color);
+    let mut filters = screen_filters::ScreenFilters::new(settings.color, settings.trail);
     display.set_touch_fast_forward(settings.mode.enhanced);
     display.set_touch_pad(touch)?;
     let volume = i32::from(settings.volume);
@@ -496,7 +496,7 @@ fn play(
             return Ok(Some(display));
         }
         game.draw(&mut frame);
-        colors.apply(&mut frame);
+        filters.apply(&mut frame);
         let taken = mute.draw(&mut frame, &metrics);
         fast.draw(&mut frame, &metrics, taken);
         if let Some(prompt) = quitting {
