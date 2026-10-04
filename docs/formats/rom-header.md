@@ -11,7 +11,7 @@ Implemented in `crates/formats/src/rom_header.rs`.
 | `0x0AC` | 4 | Game code | `ATZJ` Zoids Saga, `BZFJ` Zoids Saga Fuzors |
 | `0x0B0` | 2 | Maker code | `DA` = Tomy |
 | `0x0B2` | 1 | Fixed value | Must be `0x96` |
-| `0x0BC` | 1 | Software version | `1` for Zoids Saga Rev 1 |
+| `0x0BC` | 1 | Software version | `0` for Zoids Saga's first release, `1` for Rev 1 ([revisions](revisions.md)) |
 | `0x0BD` | 1 | Complement | `-(sum(bytes 0xA0..0xBD) + 0x19) & 0xFF` |
 
 Identification (`crates/extraction/src/identify.rs`) maps the game code to a title and

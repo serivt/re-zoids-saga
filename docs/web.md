@@ -108,8 +108,8 @@ WebAssembly and the page in `apps/web/static/`).
 
 **The game's WebAssembly** (`apps/web`) offers the page these calls:
 
-- `check_rom(bytes)`: what the ROM is, as the launcher tells it (the supported dump or
-  not), and whether the port plays it.
+- `check_rom(bytes)`: what the ROM is, as the launcher tells it (one of the supported
+  dumps or not), and whether the port plays it.
 - `save_details(rom, bytes)` and `save_summary(rom, bytes)`: what a save holds (the
   level, the area, the money and, when the port counted it, the time played), apart or
   in a line, read as continuing reads it; `cartridge_save(rom, bytes)`: the save
@@ -140,7 +140,7 @@ WebAssembly and the page in `apps/web/static/`).
 
 **The page** puts the ROM first: a first visit explains that the player brings their own
 copy, and the ROM chosen or dropped anywhere on the page is read in the browser, never
-sent anywhere, and played only when it is the supported dump. Play sits under it, with a
+sent anywhere, and played only when it is one of the supported dumps. Play sits under it, with a
 line of what the options choose; on a phone a bar keeps Play in reach once the button
 scrolls away. The rest is in tabs: Options (the translation, the mode, classic at first,
 with a tip on what the enhanced one adds, and, while it is the enhanced one, its
@@ -182,7 +182,7 @@ slows with it; a hidden tab pauses it.
 Implemented in `apps/web/static/` (`store.js`, `saves.js`, `main.js`, `sw.js`,
 `manifest.webmanifest`) and the game's WebAssembly's `save_summary` and `cartridge_save`.
 
-**The ROM.** Once the page has identified it as the supported dump, it keeps the file
+**The ROM.** Once the page has identified it as a supported dump, it keeps the file
 in the browser's database (IndexedDB, under `re-zoids-saga`), since it is too large for
 the page's storage. It also asks the browser not to clear the page's data when space runs
 low. The next visit finds it there and needs nothing chosen: the status line says it is

@@ -23,7 +23,7 @@ original and translations.
 ### In your browser
 
 Open **[re-zoids-saga.serivt.com](https://re-zoids-saga.serivt.com)**, choose your Zoids
-Saga ROM (Japan, Rev 1) and press Play. Nothing to install and no security warnings: it
+Saga ROM (Japan) and press Play. Nothing to install and no security warnings: it
 runs on computers, phones and tablets (Android, iPhone and iPad) alike.
 
 - Phones and tablets get an on-screen pad; keyboards and gamepads work too.
@@ -60,7 +60,7 @@ See [docs/web.md](docs/web.md) for how it works.
    - **Linux:** unpack the folder anywhere and run `./re-zoids-saga`.
    - **Android:** open the `.apk` on the phone and allow installing it (it is not in any
      store); an on-screen pad surrounds the game. See [docs/android.md](docs/android.md).
-3. Choose your Zoids Saga ROM (Japan, Rev 1) and, optionally, a translation: the
+3. Choose your Zoids Saga ROM (Japan) and, optionally, a translation: the
    Translation line downloads a language from
    [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations) or
    opens a `.po` file you already have. Then Play. Saves are kept next to the ROM, in the
@@ -102,15 +102,18 @@ The launcher's options, controls and command line are in
 packages in [docs/packaging.md](docs/packaging.md), and the architecture, rules and
 project structure in [AGENTS.md](AGENTS.md).
 
-## Supported ROM
+## Supported ROMs
 
 | Title | Region | Game code | SHA-1 |
 |---|---|---|---|
 | Zoids Saga (Rev 1) | Japan | `ATZJ` | `70bb546a7d00126d452c1d2c1ccddafb2cb91b37` |
+| Zoids Saga | Japan | `ATZJ` | `75d8c15ac281ea93c8ac7cc7641c490799557081` |
 
-Only this dump plays. The first release, Zoids Saga (Japan) without "Rev 1", keeps its
-data at other addresses and retouches texts and records, so the launcher names it and
-refuses it, as it refuses any other dump or game.
+Both releases play: the first one, Zoids Saga (Japan) without "Rev 1", keeps its data at
+other addresses, which the port follows, and shows its own text and records
+([docs/formats/revisions.md](docs/formats/revisions.md)). One translation serves both,
+and a save made with one loads with the other. The launcher refuses any other dump or
+game.
 
 ## License
 

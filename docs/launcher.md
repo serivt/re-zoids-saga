@@ -27,8 +27,8 @@ version, an *Update available* line with the new version shows in green after Qu
 lines then a pixel closer); choosing it opens the releases page
 (`github.com/serivt/re-zoids-saga/releases`) in the web browser. Without a connection, or
 with an answer it cannot read, nothing shows (`apps/launcher/src/update.rs`). These are
-the only times the launcher goes online. Only the verified dump,
-Zoids Saga (Japan, Rev 1), plays: for the first release (Rev 0), another dump of the
+the only times the launcher goes online. Only the verified dumps of
+Zoids Saga (Japan), the first release (Rev 0) and Rev 1, play: for another dump of the
 game or another game it says so and Play stays off, and the command line refuses them
 the same way. It speaks the chosen translation's language (English without one). The
 port's version shows in the top right corner.

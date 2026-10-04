@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The game's first release.** The launcher and the web page play Zoids Saga (Japan),
+  the first release (Rev 0), as well as Rev 1. That release keeps its data a few hundred
+  bytes earlier; the port finds each table where it is and shows the release's own text,
+  guide and records: the dialogue before Rev 1 split its long lines and retouched a few
+  words, the guide's Sinker among the Republic's Zoids, three Zoids developed without
+  another. One translation serves both releases, and a save made with one loads with the
+  other. An unknown dump's message no longer asks for Rev 1.
+
 ## [0.7.0] - 2026-10-03
 
 ### Added

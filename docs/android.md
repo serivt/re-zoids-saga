@@ -16,7 +16,7 @@ keys are SDL3's for Android (its `docs/README-android.md` and `src/core/android`
 2. Open it. Android asks to allow the browser or the file manager to install unknown
    apps: allow it, then Install. Play Protect may warn about an app it does not know;
    choose to install anyway.
-3. Open *Re:Zoids Saga*, choose your ROM (Japan, Rev 1) and, optionally, a translation,
+3. Open *Re:Zoids Saga*, choose your ROM (Japan) and, optionally, a translation,
    then Play.
 
 A newer version installs over the old one and keeps the ROM, the settings and the saves,

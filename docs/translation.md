@@ -50,7 +50,10 @@ Each message is keyed by its script table, string index and the message's offset
 the start of the string, e.g. `dialogue/40/0x2e` in `msgctxt`. The loader reads only
 `msgctxt` and `msgstr`: in a template the `msgid` is the Japanese text, in a published
 translation it repeats the key. A string can hold several messages (one per text box) and the key stays
-valid however the script branches.
+valid however the script branches. The offset is the one Rev 1 keeps the message at:
+where Rev 1 retouched a message, the first release keeps the ones after it a few bytes
+away, and the port gives them Rev 1's offsets, so a translation and a template serve
+both releases ([formats/revisions.md](formats/revisions.md)).
 
 Inside the text:
 
