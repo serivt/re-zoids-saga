@@ -15,8 +15,32 @@ legally obtained copy of the game.
 
 The whole of *Zoids Saga* can be played: from the title through its ten chapters and
 the staff credits to the last story battle, with the towns, their shops and Zoid labs,
-battles against roaming and story enemies, the pause menu, saves compatible with the
-original and translations.
+battles against roaming and story enemies, the pause menu, the title's Zoid and
+character guides, and saves compatible with the original. Both releases of the
+cartridge play (see [Supported ROMs](#supported-roms)).
+
+The title's two link-cable options, the battle and the Zi data exchange, are not
+available. What each version brought is in the [changelog](CHANGELOG.md).
+
+## Features
+
+- **Two ways to play.** *Classic*, the default, plays exactly as the original.
+  *Enhanced* adds conveniences the original never had, most of them turned on or off
+  one by one:
+  - a fast forward (2x to 4x) while its button is held;
+  - an autosave on each change of map, in a place of its own;
+  - 31 achievements and the records of what was played;
+  - battles without their attack scenes, damage shown as numbers, text boxes that go on
+    by themselves, and the reach of each weapon drawn on the battle's grid.
+- **Saves.** Four slots where the original has one, each a save in the original's
+  format, exported for an emulator, RetroArch or a flash cart and imported from them.
+- **Translations.** English and Spanish, downloaded from the launcher or the web page,
+  or any PO file of your own. What a translation does not cover stays in Japanese.
+- **Display.** Presets that show the game as a GBA, a GBA SP, a Game Boy Micro, a
+  Nintendo DS or a Game Boy Player did, with their LCD grid, colors and trail, or sharp
+  on a modern screen; and Scale2x and Scale3x for rounder pixels.
+- **Controls.** Keyboard, gamepads and, on touch screens, an on-screen pad; the launcher
+  lets every key and gamepad button be changed.
 
 ## Play
 
@@ -40,10 +64,12 @@ See [docs/web.md](docs/web.md) for how it works.
 
 1. Download the package for your system from the
    [Releases](https://github.com/serivt/re-zoids-saga/releases) page: a disk image for
-   macOS, a zip for Windows, an archive for Linux (x86-64, glibc 2.34 or later), an APK
-   for Android (5.0 or later). Nothing else needs installing. Each package has a `.sha256` file beside it with its SHA-256
-   checksum, to check the download (`shasum -a 256 -c <file>.sha256`, or
-   `Get-FileHash <file>` in PowerShell).
+   macOS (11 or later, Apple Silicon and Intel), a zip for Windows, an archive for Linux
+   (x86-64, glibc 2.34 or later), an APK for Android (5.0 or later). Nothing else needs
+   installing. Each package has a `.sha256` file beside it with its SHA-256 checksum, to
+   check the download (`shasum -a 256 -c <file>.sha256`, or `Get-FileHash <file>` in
+   PowerShell). The release also carries the web version as a zip, for anyone who wants
+   to serve it themselves.
 2. Start it:
    - **macOS:** drag *Re Zoids Saga* to Applications and open it. The app is not signed,
      so the first time right-click it and choose Open (on recent versions, System
@@ -63,16 +89,30 @@ See [docs/web.md](docs/web.md) for how it works.
 3. Choose your Zoids Saga ROM (Japan) and, optionally, a translation: the
    Translation line downloads a language from
    [re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations) or
-   opens a `.po` file you already have. Then Play. Saves are kept next to the ROM, in the
-   original's `.sav` format, with the enhanced mode's achievements in a `.achievements`
-   file beside them; Options › Saves exports them for an emulator, RetroArch or a flash
-   cart, and imports theirs.
+   opens a `.po` file you already have. Game mode chooses between Classic and Enhanced.
+   Then Play.
+
+Saves are in the original's `.sav` format: next to the ROM on a computer, in the app's
+own folder on Android. The enhanced mode's autosave and achievements are files of their
+own beside them. Options › Saves exports each save for an emulator, RetroArch or a flash
+cart, and imports theirs.
 
 Default keys: arrows move, X = A, Z = B, Return = START, Backspace = SELECT, A = L,
 S = R, holding Space fast-forwards in the enhanced mode, M mutes the sound and turns it
-back on, Esc (or Android's back
-button) asks whether to quit. Gamepads work too; keys and buttons can be changed in
-Options.
+back on, Esc (or Android's back button) asks whether to quit. Gamepads work too; keys
+and buttons can be changed in Options.
+
+When a newer version is out, the launcher shows an *Update available* line that opens
+the releases page.
+
+## Translate
+
+Translations are kept in their own repository,
+[re-zoids-saga-translations](https://github.com/serivt/re-zoids-saga-translations), as
+gettext PO files; its README covers correcting a line and translating with the
+Japanese alongside. The game's Japanese text is never published: a translator exports
+it from their own ROM as a template, with the launcher's `--export-template`. See
+[docs/translation.md](docs/translation.md).
 
 ## Build and run
 
@@ -87,7 +127,9 @@ cargo run -p launcher -- path/to/rom.gba    # straight into the game
 
 The web version builds with `tools/package/web.sh` into `dist/web`, a folder any static
 web server can serve; it needs the `wasm32-unknown-unknown` target and
-`wasm-bindgen-cli` (see [docs/web.md](docs/web.md)).
+`wasm-bindgen-cli` (see [docs/web.md](docs/web.md)). The Android app builds with
+`tools/package/android.sh`, which needs the Android SDK and NDK (see
+[docs/android.md](docs/android.md)).
 
 Before submitting a change:
 
@@ -99,8 +141,10 @@ cargo test
 
 The launcher's options, controls and command line are in
 [docs/launcher.md](docs/launcher.md), the web version in [docs/web.md](docs/web.md), the
-packages in [docs/packaging.md](docs/packaging.md), and the architecture, rules and
-project structure in [AGENTS.md](AGENTS.md).
+Android app in [docs/android.md](docs/android.md), the achievements in
+[docs/achievements.md](docs/achievements.md), the packages in
+[docs/packaging.md](docs/packaging.md), and the architecture, rules and project
+structure in [AGENTS.md](AGENTS.md).
 
 ## Supported ROMs
 
