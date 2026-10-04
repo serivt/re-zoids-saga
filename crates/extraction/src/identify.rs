@@ -52,6 +52,13 @@ const KNOWN_RELEASES: &[KnownRelease] = &[
         sha1: "70bb546a7d00126d452c1d2c1ccddafb2cb91b37",
     },
     KnownRelease {
+        title: Title::Saga,
+        game_code: "ATZJ",
+        region: "Japan",
+        version: 0,
+        sha1: "75d8c15ac281ea93c8ac7cc7641c490799557081",
+    },
+    KnownRelease {
         title: Title::Fuzors,
         game_code: "BZFJ",
         region: "Japan",

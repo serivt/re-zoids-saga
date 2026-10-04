@@ -24,8 +24,8 @@ use std::rc::Rc;
 use extraction::{IdentifyError, Title};
 use game_core::extension::{Event as GameEvent, Extension};
 use game_core::port_text::{
-    LAUNCHER_ROM_FIRST_RELEASE, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
-    LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, default_text,
+    LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED,
+    default_text,
 };
 use game_core::save::{Found, SaveFile};
 use game_core::slots::Slot;
@@ -80,15 +80,14 @@ impl RomCheck {
     }
 }
 
-/// What the ROM `rom` is: the supported dump, the game's first release,
-/// another revision, another game, or no ROM at all.
+/// What the ROM `rom` is: one of the supported dumps, another dump of the
+/// game, another game, or no ROM at all.
 #[wasm_bindgen]
 #[must_use]
 pub fn check_rom(rom: &[u8]) -> RomCheck {
     let (playable, key) = match extraction::identify(rom) {
         Ok(found) if found.title != Title::Saga => (false, LAUNCHER_ROM_OTHER),
         Ok(found) if found.known_release.is_some() => (true, LAUNCHER_ROM_VERIFIED),
-        Ok(found) if found.header.version == 0 => (false, LAUNCHER_ROM_FIRST_RELEASE),
         Ok(_) => (false, LAUNCHER_ROM_UNSUPPORTED),
         Err(IdentifyError::UnsupportedGame { .. }) => (false, LAUNCHER_ROM_OTHER),
         Err(_) => (false, LAUNCHER_ROM_UNREADABLE),

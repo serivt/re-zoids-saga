@@ -44,17 +44,16 @@ use game_core::port_text::{
     LAUNCHER_PRESET_GBA_SP_FRONTLIT, LAUNCHER_PRESET_MICRO, LAUNCHER_PRESET_MODERN,
     LAUNCHER_PRESET_PLAYER, LAUNCHER_PRESET_SMOOTH_PIXEL_ART, LAUNCHER_PRESS_KEY,
     LAUNCHER_PRESS_PAD, LAUNCHER_PROJECT_PAGE, LAUNCHER_QUIT, LAUNCHER_READY, LAUNCHER_REPLACE,
-    LAUNCHER_RIGHT, LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_FIRST_RELEASE,
-    LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE, LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED,
-    LAUNCHER_SAVE_LEVEL, LAUNCHER_SAVE_MONEY, LAUNCHER_SAVE_PLAYED, LAUNCHER_SAVES,
-    LAUNCHER_SAVES_HELP, LAUNCHER_SCANLINES, LAUNCHER_SHARP, LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY,
-    LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE, LAUNCHER_TOUCH_ABOUT_HELP,
-    LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP, LAUNCHER_TOUCH_OPACITY,
-    LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRAIL, LAUNCHER_TRAIL_FADE,
-    LAUNCHER_TRAIL_MIX, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP, LAUNCHER_TRANSLATION_READ,
-    LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE, LAUNCHER_UP, LAUNCHER_UPDATE,
-    LAUNCHER_UPDATE_HELP, LAUNCHER_UPSCALER, LAUNCHER_VERSION, LAUNCHER_VOLUME,
-    LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
+    LAUNCHER_RIGHT, LAUNCHER_ROM, LAUNCHER_ROM_FIRST, LAUNCHER_ROM_OTHER, LAUNCHER_ROM_UNREADABLE,
+    LAUNCHER_ROM_UNSUPPORTED, LAUNCHER_ROM_VERIFIED, LAUNCHER_SAVE_LEVEL, LAUNCHER_SAVE_MONEY,
+    LAUNCHER_SAVE_PLAYED, LAUNCHER_SAVES, LAUNCHER_SAVES_HELP, LAUNCHER_SCANLINES, LAUNCHER_SHARP,
+    LAUNCHER_SLOT, LAUNCHER_SLOT_EMPTY, LAUNCHER_SLOT_SAVED, LAUNCHER_SMOOTH, LAUNCHER_SUBTITLE,
+    LAUNCHER_TOUCH_ABOUT_HELP, LAUNCHER_TOUCH_HELP, LAUNCHER_TOUCH_LIST_HELP,
+    LAUNCHER_TOUCH_OPACITY, LAUNCHER_TOUCH_OPTIONS_HELP, LAUNCHER_TOUCH_SIZE, LAUNCHER_TRAIL,
+    LAUNCHER_TRAIL_FADE, LAUNCHER_TRAIL_MIX, LAUNCHER_TRANSLATION, LAUNCHER_TRANSLATION_HELP,
+    LAUNCHER_TRANSLATION_READ, LAUNCHER_TRANSLATION_UNREADABLE, LAUNCHER_TRANSLATIONS_PAGE,
+    LAUNCHER_UP, LAUNCHER_UPDATE, LAUNCHER_UPDATE_HELP, LAUNCHER_UPSCALER, LAUNCHER_VERSION,
+    LAUNCHER_VOLUME, LAUNCHER_WEAPON_REACH, LAUNCHER_WINDOW, default_text,
 };
 use game_core::{Enhancement, TextMetrics, Translation};
 use platform::{Button, Display, Event, Frame, Input, Rgb};
@@ -309,13 +308,13 @@ const BUTTON_ROWS: usize = 6;
 const DEFAULTS_ENTRY: usize = Button::ALL.len();
 const BACK_ENTRY: usize = DEFAULTS_ENTRY + 1;
 
-/// What the chosen ROM is. Only the verified dump of Zoids Saga (Japan,
-/// Rev 1) plays: every table the port reads sits where that release keeps
-/// it, and the first release (Rev 0) keeps its data elsewhere.
+/// What the chosen ROM is. Only the verified dumps of Zoids Saga (Japan),
+/// its first release (Rev 0) and its revision (Rev 1), play: the port
+/// finds every table it reads where each keeps it, and another dump may
+/// keep it anywhere.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RomKind {
     Verified,
-    FirstRelease,
     Unsupported,
     Other,
     Unreadable,
@@ -338,8 +337,6 @@ impl RomKind {
             Self::Other
         } else if found.known_release.is_some() {
             Self::Verified
-        } else if found.header.version == 0 {
-            Self::FirstRelease
         } else {
             Self::Unsupported
         }
@@ -354,7 +351,6 @@ impl RomKind {
     pub fn message(self) -> &'static str {
         match self {
             Self::Verified => LAUNCHER_ROM_VERIFIED,
-            Self::FirstRelease => LAUNCHER_ROM_FIRST_RELEASE,
             Self::Unsupported => LAUNCHER_ROM_UNSUPPORTED,
             Self::Other => LAUNCHER_ROM_OTHER,
             Self::Unreadable => LAUNCHER_ROM_UNREADABLE,
@@ -2681,7 +2677,7 @@ fn line_index(line: Line) -> usize {
 fn kind_color(kind: RomKind) -> Rgb {
     match kind {
         RomKind::Verified => GOOD,
-        RomKind::FirstRelease | RomKind::Unsupported | RomKind::Other | RomKind::Unreadable => BAD,
+        RomKind::Unsupported | RomKind::Other | RomKind::Unreadable => BAD,
     }
 }
 
@@ -2885,19 +2881,14 @@ mod tests {
     }
 
     #[test]
-    fn only_the_verified_dump_plays() {
+    fn only_the_verified_dumps_play() {
         let kind =
             |name, code: &[u8; 4], version| RomKind::of(&synthetic_rom(name, *code, version));
-        assert_eq!(kind("rev0.gba", b"ATZJ", 0), RomKind::FirstRelease);
+        assert_eq!(kind("rev0.gba", b"ATZJ", 0), RomKind::Unsupported);
         assert_eq!(kind("rev1.gba", b"ATZJ", 1), RomKind::Unsupported);
         assert_eq!(kind("fuzors.gba", b"BZFJ", 0), RomKind::Other);
         assert_eq!(kind("other.gba", b"AXYZ", 0), RomKind::Other);
-        for kind in [
-            RomKind::FirstRelease,
-            RomKind::Unsupported,
-            RomKind::Other,
-            RomKind::Unreadable,
-        ] {
+        for kind in [RomKind::Unsupported, RomKind::Other, RomKind::Unreadable] {
             assert!(!kind.playable());
             assert!(default_text(kind.message()).is_some());
         }

@@ -146,13 +146,13 @@ const drop = $('#rom-drop');
 const romStatus = $('#rom-status');
 const romDetail = $('#rom-detail');
 const ROM_STATES = {
-  empty: ['Drop your ROM here', 'A .gba file · Japan, Rev 1', 'Choose a file…'],
-  drag: ['Release to check it', 'Zoids Saga, Japan, Rev 1', 'Choose a file…'],
+  empty: ['Drop your ROM here', 'A .gba file · Japan', 'Choose a file…'],
+  drag: ['Release to check it', 'Zoids Saga, Japan', 'Choose a file…'],
   checking: ['Checking the ROM…', 'In this browser; nothing is sent.', 'Choose a file…'],
   ok: ['', '', 'Choose another…'],
   remembered: ['', 'Remembered from your last visit.', 'Choose another…'],
   forgotten: ['Drop your ROM here', 'The ROM is forgotten; the saves stay.', 'Choose a file…'],
-  error: ['', 'You need Zoids Saga, Japan, Rev 1.', 'Try another file…'],
+  error: ['', 'You need Zoids Saga, Japan.', 'Try another file…'],
 };
 let romState = 'empty';
 let beforeDrag = null;
