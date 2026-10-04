@@ -37,6 +37,7 @@ use formats::bgr555::parse_palette;
 use formats::lz77;
 use formats::tile::{TILE_PIXELS, Tileset};
 
+use crate::revision::locate;
 use crate::saga::{AnimationStep, read_steps, rom_offset};
 
 const SCENES: usize = 0x0066_429C;
@@ -172,7 +173,7 @@ pub fn weapon_sprite(rom: &[u8], part: u16, rack: usize) -> Option<EffectSprite>
 /// six.
 #[must_use]
 pub fn weapon_mount(rom: &[u8], zoid: u16, rack: usize) -> Option<(i16, i16)> {
-    let at = WEAPON_MOUNTS + usize::from(zoid) * MOUNT_LEN;
+    let at = locate(rom, WEAPON_MOUNTS + usize::from(zoid) * MOUNT_LEN);
     let record = rom.get(at..at + MOUNT_LEN)?;
     let value = |first: usize| {
         let read = |index: usize| i16::from_le_bytes([record[index], record[index + 1]]);
@@ -191,7 +192,10 @@ pub fn weapon_mount(rom: &[u8], zoid: u16, rack: usize) -> Option<(i16, i16)> {
 /// (`0x08041AA8`).
 #[must_use]
 pub fn weapon_mount_raw(rom: &[u8], zoid: u16, rack: usize) -> Option<i16> {
-    let at = WEAPON_MOUNTS + usize::from(zoid) * MOUNT_LEN + MOUNT_Y + rack.min(MOUNTS - 1) * 2;
+    let at = locate(
+        rom,
+        WEAPON_MOUNTS + usize::from(zoid) * MOUNT_LEN + MOUNT_Y + rack.min(MOUNTS - 1) * 2,
+    );
     let bytes = rom.get(at..at + 2)?;
     Some(i16::from_le_bytes([bytes[0], bytes[1]]))
 }
@@ -227,7 +231,7 @@ pub fn neighbours(rom: &[u8]) -> Vec<Vec<Vec<u8>>> {
         .map(|slot| {
             (0..NEIGHBOUR_WAYS)
                 .map(|way| {
-                    let at = NEIGHBOURS + (slot * NEIGHBOUR_WAYS + way) * 4;
+                    let at = locate(rom, NEIGHBOURS + (slot * NEIGHBOUR_WAYS + way) * 4);
                     rom.get(at..at + 4)
                         .and_then(rom_offset)
                         .and_then(|start| rom.get(start..))
@@ -266,8 +270,10 @@ const TILE_BYTES: usize = 32;
 /// The figures' tiles and palette.
 #[must_use]
 pub fn unit_labels(rom: &[u8]) -> Option<UnitLabels> {
-    let tiles = rom.get(LABEL_TILES..LABEL_TILES + LABEL_TILE_COUNT * TILE_BYTES)?;
-    let palette = parse_palette(rom.get(LABEL_PALETTE..LABEL_PALETTE + TILE_BYTES)?)?;
+    let tiles_at = locate(rom, LABEL_TILES);
+    let palette_at = locate(rom, LABEL_PALETTE);
+    let tiles = rom.get(tiles_at..tiles_at + LABEL_TILE_COUNT * TILE_BYTES)?;
+    let palette = parse_palette(rom.get(palette_at..palette_at + TILE_BYTES)?)?;
     Some(UnitLabels {
         tiles: Tileset::from_4bpp(tiles),
         palette,
@@ -307,12 +313,15 @@ fn sprite_record(rom: &[u8], at: usize, packing: Packing) -> Option<EffectSprite
     sprite_record_with(rom, at, packing, EFFECT_ANIMATIONS)
 }
 
+/// The sprite whose record Rev 1 keeps at `at`, read where `rom`'s release
+/// keeps it.
 fn sprite_record_with(
     rom: &[u8],
     at: usize,
     packing: Packing,
     animations: usize,
 ) -> Option<EffectSprite> {
+    let at = locate(rom, at);
     let record = rom.get(at..at + EFFECT_LEN)?;
     let pointer = |at: usize| rom_offset(&record[at..at + 4]);
     let tile_bytes = match packing {
@@ -348,7 +357,7 @@ pub fn screen_sprite(rom: &[u8], id: usize) -> Option<EffectSprite> {
     if id >= SCREEN_SPRITE_COUNT {
         return None;
     }
-    let at = SCREEN_SPRITES + id * SCREEN_SPRITE_LEN;
+    let at = locate(rom, SCREEN_SPRITES + id * SCREEN_SPRITE_LEN);
     let record = rom.get(at..at + SCREEN_SPRITE_LEN)?;
     let pointer = |at: usize| rom_offset(&record[at..at + 4]);
     let size =
@@ -450,7 +459,7 @@ pub(crate) fn read_pieces(rom: &[u8], mut at: usize) -> Option<Vec<EffectPiece>>
 /// Scene `index` of the table, if the ROM has it.
 #[must_use]
 pub fn battle_scene(rom: &[u8], index: usize) -> Option<BattleScene> {
-    let at = SCENES + index * SCENE_LEN;
+    let at = locate(rom, SCENES + index * SCENE_LEN);
     let record = rom.get(at..at + SCENE_LEN)?;
     Some(BattleScene {
         scenery: record[SCENERY_FIELD].wrapping_sub(1),
@@ -529,7 +538,10 @@ pub fn demo_scene(rom: &[u8], demo: usize, scene: usize) -> Option<StagedAttack>
     )
 }
 
+/// The staged attack whose record Rev 1 keeps at `at`, read where `rom`'s
+/// release keeps it.
 fn staged_attack_at(rom: &[u8], at: usize) -> Option<StagedAttack> {
+    let at = locate(rom, at);
     let record = rom.get(at..at + SCENE_LEN)?;
     Some(StagedAttack {
         party: staged_side(&record[..STAGED_SIDE_LEN]),
@@ -570,7 +582,8 @@ pub fn scenery_picture(rom: &[u8], scenery: u8) -> Option<(BattleImage, usize)> 
         })
         .collect();
     let entry = SCENERY_PALETTES + slot;
-    let destination = rom.get(entry + 4..entry + 8)?;
+    let destination_at = locate(rom, entry + 4);
+    let destination = rom.get(destination_at..destination_at + 4)?;
     let destination = u32::from_le_bytes(destination.try_into().ok()?);
     let start = usize::try_from(destination.checked_sub(PALETTE_RAM)? / 2).ok()?;
     let palette = decompress_at(rom, entry)?
@@ -605,7 +618,10 @@ fn image(rom: &[u8], tiles: usize, palette: usize) -> Option<BattleImage> {
         .then_some(BattleImage { tiles, palette })
 }
 
+/// The LZ77 block the pointer Rev 1 keeps at `pointer_at` leads to, read
+/// where `rom`'s release keeps the pointer.
 fn decompress_at(rom: &[u8], pointer_at: usize) -> Option<Vec<u8>> {
+    let pointer_at = locate(rom, pointer_at);
     let pointer = rom.get(pointer_at..pointer_at + 4)?;
     let address = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]);
     let offset = usize::try_from(address.checked_sub(ROM_BASE)?).ok()?;
@@ -668,7 +684,7 @@ const STAFF_END: u8 = 0xFF;
 pub fn staff_roll(rom: &[u8]) -> Option<Vec<StaffGroup>> {
     let mut groups = Vec::new();
     for index in 0.. {
-        let at = STAFF_ROLL + index * STAFF_GROUP_LEN;
+        let at = locate(rom, STAFF_ROLL + index * STAFF_GROUP_LEN);
         let record = rom.get(at..at + STAFF_GROUP_LEN)?;
         if record[0] == STAFF_END {
             return Some(groups);
@@ -715,7 +731,7 @@ pub struct FirePart {
 /// Part `part`'s fire record.
 #[must_use]
 pub fn fire_part(rom: &[u8], part: u16) -> Option<FirePart> {
-    let at = FIRE_PARTS + usize::from(part) * FIRE_PART_LEN;
+    let at = locate(rom, FIRE_PARTS + usize::from(part) * FIRE_PART_LEN);
     let record = rom.get(at..at + FIRE_PART_LEN)?;
     let half = |i: usize| u16::from_le_bytes([record[i], record[i + 1]]);
     Some(FirePart {
@@ -766,7 +782,7 @@ pub fn shot_animation(rom: &[u8], index: u8, missed: bool) -> Option<Vec<Option<
     } else {
         SHOT_ANIMATIONS
     };
-    let at = table + usize::from(index) * SHOT_ANIMATION_LEN;
+    let at = locate(rom, table + usize::from(index) * SHOT_ANIMATION_LEN);
     let record = rom.get(at..at + SHOT_ANIMATION_LEN)?;
     let half = |i: usize| u16::from_le_bytes([record[i], record[i + 1]]);
     Some(
@@ -797,7 +813,7 @@ pub fn shot_animation(rom: &[u8], index: u8, missed: bool) -> Option<Vec<Option<
 /// the horizontal and the vertical mode.
 #[must_use]
 pub fn shot_spread(rom: &[u8], zoid: u16) -> Option<(u8, u8)> {
-    let at = SPREADS + usize::from(zoid) * 4;
+    let at = locate(rom, SPREADS + usize::from(zoid) * 4);
     let record = rom.get(at..at + 2)?;
     Some((record[0], record[1]))
 }
@@ -806,7 +822,7 @@ pub fn shot_spread(rom: &[u8], zoid: u16) -> Option<(u8, u8)> {
 /// halves) the flying Zoids bob by (`0x08043038`).
 #[must_use]
 pub fn wave(rom: &[u8], index: u8) -> Option<i16> {
-    let at = WAVE + usize::from(index) * 2;
+    let at = locate(rom, WAVE + usize::from(index) * 2);
     let bytes = rom.get(at..at + 2)?;
     Some(i16::from_le_bytes([bytes[0], bytes[1]]))
 }
@@ -825,6 +841,7 @@ const SHAKES: [(usize, usize); 5] = [
 #[must_use]
 pub fn shake_steps(rom: &[u8], kind: u8) -> Option<Vec<i16>> {
     let (at, count) = *SHAKES.get(usize::from(kind).checked_sub(1)?)?;
+    let at = locate(rom, at);
     let bytes = rom.get(at..at + count * 2)?;
     Some(
         bytes

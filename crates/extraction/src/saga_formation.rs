@@ -27,6 +27,7 @@
 use formats::bgr555::parse_palette;
 use formats::tile::Tileset;
 
+use crate::revision::locate;
 use crate::saga::{read_steps, rom_offset};
 use crate::saga_battle::{EffectSprite, read_pieces};
 
@@ -135,12 +136,19 @@ pub fn battle_field(rom: &[u8]) -> Option<BattleField> {
     })
 }
 
+/// The layer whose tiles, palette and map Rev 1 keeps where `record`
+/// says, read where `rom`'s release keeps them.
 fn field_layer(rom: &[u8], record: &LayerRecord) -> Option<FieldLayer> {
-    let tiles = rom.get(record.tiles..record.tiles + LAYER_TILES * TILE_LEN)?;
-    let palette = parse_palette(rom.get(record.palette..record.palette + PALETTE_BYTES)?)?;
+    let (tiles_at, palette_at, map_at) = (
+        locate(rom, record.tiles),
+        locate(rom, record.palette),
+        locate(rom, record.map),
+    );
+    let tiles = rom.get(tiles_at..tiles_at + LAYER_TILES * TILE_LEN)?;
+    let palette = parse_palette(rom.get(palette_at..palette_at + PALETTE_BYTES)?)?;
     let cells = record.columns * record.rows;
     let map = rom
-        .get(record.map..record.map + cells * 2)?
+        .get(map_at..map_at + cells * 2)?
         .chunks_exact(2)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
         .collect();
@@ -162,7 +170,7 @@ pub fn slot_anchor(rom: &[u8], slot: usize) -> Option<(i32, i32)> {
     if slot >= SLOTS {
         return None;
     }
-    let at = SLOT_TABLE + slot * SLOT_LEN;
+    let at = locate(rom, SLOT_TABLE + slot * SLOT_LEN);
     let record = rom.get(at..at + SLOT_LEN)?;
     let whole = |at: usize| {
         let value =
@@ -175,7 +183,8 @@ pub fn slot_anchor(rom: &[u8], slot: usize) -> Option<(i32, i32)> {
 /// The cursor that marks a slot.
 #[must_use]
 pub fn slot_cursor(rom: &[u8]) -> Option<EffectSprite> {
-    let record = rom.get(CURSOR_RECORD..CURSOR_RECORD + CURSOR_RECORD_LEN)?;
+    let record_at = locate(rom, CURSOR_RECORD);
+    let record = rom.get(record_at..record_at + CURSOR_RECORD_LEN)?;
     let pointer = |at: usize| rom_offset(&record[at..at + 4]);
     let palette_at = pointer(CURSOR_PALETTE)?;
     let palette = parse_palette(rom.get(palette_at..palette_at + PALETTE_BYTES)?)?;

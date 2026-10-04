@@ -3,6 +3,7 @@
 //! will answer first once they exist. Game logic never reads the ROM
 //! through anything else (see `docs/extensibility.md`).
 
+use extraction::revision::{locate, locate_address};
 use extraction::saga::{
     self, BootError, FontReadError, Logo, MapError, MapObject, MapRecord, NameEntryGraphics,
     PauseWallpaper, Portrait, PortraitError, Scene, SceneError, SpriteSheet, SpriteSheetError,
@@ -83,13 +84,13 @@ impl<'rom> GameData<'rom> {
     }
 
     /// The `count` objects a cutscene places from its own list at ROM
-    /// address `address`.
+    /// address `address`, where Rev 1 keeps it.
     ///
     /// # Errors
     ///
     /// Returns [`MapError`] when the list is outside the ROM.
     pub fn objects_at(&self, address: u32, count: usize) -> Result<Vec<MapObject>, MapError> {
-        saga::objects_at(self.rom, address, count)
+        saga::objects_at(self.rom, locate_address(self.rom, address), count)
     }
 
     /// Scene `scene` (tiles, maps, attributes).
@@ -391,16 +392,17 @@ impl<'rom> GameData<'rom> {
     /// volume.
     #[must_use]
     pub fn sound_layout(&self) -> DriverLayout {
+        let at = |offset: usize| locate(self.rom, offset);
         DriverLayout {
-            song_table: saga::SONG_TABLE,
+            song_table: at(saga::SONG_TABLE),
             song_count: saga::SONG_COUNT,
             master_volume: saga::MASTER_VOLUME,
-            key_table: saga::SOUND_KEY_TABLE,
-            frequency_table: saga::SOUND_FREQUENCY_TABLE,
-            cgb_key_table: saga::SOUND_TONE_KEY_TABLE,
-            cgb_frequency_table: saga::SOUND_TONE_FREQUENCY_TABLE,
-            noise_table: saga::SOUND_NOISE_TABLE,
-            wave_volume_table: saga::SOUND_WAVE_VOLUME_TABLE,
+            key_table: at(saga::SOUND_KEY_TABLE),
+            frequency_table: at(saga::SOUND_FREQUENCY_TABLE),
+            cgb_key_table: at(saga::SOUND_TONE_KEY_TABLE),
+            cgb_frequency_table: at(saga::SOUND_TONE_FREQUENCY_TABLE),
+            noise_table: at(saga::SOUND_NOISE_TABLE),
+            wave_volume_table: at(saga::SOUND_WAVE_VOLUME_TABLE),
         }
     }
 
@@ -412,7 +414,7 @@ impl<'rom> GameData<'rom> {
     /// Returns [`StringTableError`] when the table cannot be read.
     pub fn script_offsets(&self, table: &str) -> Result<Option<Vec<usize>>, StringTableError> {
         Ok(Some(match table {
-            TITLE_TABLE => vec![saga::TITLE_MENU_SCRIPT_OFFSET],
+            TITLE_TABLE => vec![locate(self.rom, saga::TITLE_MENU_SCRIPT_OFFSET)],
             NAME_ENTRY_TABLE => saga::NAME_ENTRY_SCRIPTS.offsets(self.rom)?,
             PAUSE_MENU_TABLE => saga::PAUSE_MENU_SCRIPTS.offsets(self.rom)?,
             PART_TABLE => saga::PART_NAME_SCRIPTS.offsets(self.rom)?,

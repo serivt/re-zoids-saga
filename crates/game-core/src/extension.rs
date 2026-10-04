@@ -154,7 +154,9 @@ pub trait Extension {
         let _ = event;
     }
 
-    /// Text to show for a message instead of the ROM's.
+    /// Text to show for a message instead of the ROM's: the one `offset`
+    /// bytes into string `index` of script table `table`, the offset being
+    /// where Rev 1 keeps the message in either release.
     fn translate_message(&self, table: &str, index: usize, offset: usize) -> Option<String> {
         let _ = (table, index, offset);
         None

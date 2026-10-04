@@ -6,6 +6,8 @@ use formats::progress::STATE_LEN;
 use formats::{Progress, SaveLayout};
 use thiserror::Error;
 
+use crate::revision::locate;
+
 /// The save descriptor: the bytes one copy takes, then address and size
 /// pairs ending at a zero address; the first pair is the header string in
 /// ROM, the others are the RAM blocks of a copy.
@@ -66,6 +68,7 @@ pub enum SaveDataError {
 /// add up.
 pub fn save_layout(rom: &[u8]) -> Result<SaveLayout, SaveDataError> {
     let word = |at: usize, what: &'static str| {
+        let at = locate(rom, at);
         rom.get(at..at + 4)
             .map(|bytes| u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
             .ok_or(SaveDataError::TooShort {
@@ -125,8 +128,9 @@ pub fn new_game_state(rom: &[u8]) -> Result<Vec<u8>, SaveDataError> {
         what,
     };
     let mut state = vec![0; STATE_LEN];
+    let roster_at = locate(rom, ROSTER);
     let roster = rom
-        .get(ROSTER..ROSTER + ROSTER_RECORDS * ROSTER_RECORD_LEN)
+        .get(roster_at..roster_at + ROSTER_RECORDS * ROSTER_RECORD_LEN)
         .ok_or_else(|| too_short("member records"))?;
     state[ROSTER_FIELD..ROSTER_FIELD + roster.len()].copy_from_slice(roster);
     for entry in 0..CHARACTERS {
@@ -173,7 +177,7 @@ pub fn listed_characters(rom: &[u8], lists: usize) -> Option<Vec<u8>> {
 }
 
 fn character_list(rom: &[u8], list: usize) -> Option<Vec<u8>> {
-    let at = CHARACTER_LISTS + list * 4;
+    let at = locate(rom, CHARACTER_LISTS + list * 4);
     let pointer = rom.get(at..at + 4)?;
     let address = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]);
     let start = to_usize(address.checked_sub(ROM_BASE)?);

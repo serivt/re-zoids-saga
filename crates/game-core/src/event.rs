@@ -567,7 +567,7 @@ pub enum Op {
         map: usize,
         /// The player's metatile.
         player: (usize, usize),
-        /// ROM address of the object list.
+        /// ROM address of the object list, where Rev 1 keeps it.
         objects: u32,
         /// Objects in the list.
         count: usize,
@@ -579,7 +579,7 @@ pub enum Op {
         map: usize,
         /// The player's metatile.
         player: (usize, usize),
-        /// ROM address of the object list.
+        /// ROM address of the object list, where Rev 1 keeps it.
         objects: u32,
         /// Objects in the list.
         count: usize,

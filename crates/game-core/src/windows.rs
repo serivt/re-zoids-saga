@@ -10,6 +10,7 @@
 
 use std::collections::HashSet;
 
+use extraction::Revision;
 use extraction::saga::Portrait;
 use platform::{Frame, Rgb};
 
@@ -887,6 +888,7 @@ impl ScriptHost for ScriptWindows<'_> {
     }
 
     fn translate(&self, table: &str, index: usize, offset: usize) -> Option<String> {
+        let offset = Revision::of(self.rom).message_offset(table, index, offset);
         self.extensions
             .borrow()
             .translate_message(table, index, offset)

@@ -3,6 +3,7 @@
 
 use formats::tile::{TILE_PIXELS, TILE_SIZE, TileImage, TilePiece, Tileset};
 
+use crate::revision::locate;
 use crate::saga::{AnimationStep, BootError, read_animations};
 use crate::string_table::StringTable;
 
@@ -205,6 +206,7 @@ pub fn zoid_parts(rom: &[u8], id: usize) -> Result<Vec<ZoidPart>, BootError> {
         what,
     };
     let half = |at: usize| {
+        let at = locate(rom, at);
         rom.get(at..at + 2)
             .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
     };
@@ -215,7 +217,7 @@ pub fn zoid_parts(rom: &[u8], id: usize) -> Result<Vec<ZoidPart>, BootError> {
         if part == 0 || part == NO_PART {
             continue;
         }
-        let record = table + usize::from(part) * PART_RECORD_LEN;
+        let record = locate(rom, table + usize::from(part) * PART_RECORD_LEN);
         let pointer = |index: usize| record_pointer(rom, record + index * 4);
         let (Some(tiles), Some(palette), Some(animations), Some(frames)) =
             (pointer(0), pointer(1), pointer(2), pointer(3))
@@ -315,10 +317,13 @@ pub fn zoid_picture(rom: &[u8], id: usize) -> Result<Option<GuidePicture>, BootE
 ///
 /// Returns [`BootError`] when a block cannot be read.
 pub fn zoid_backdrop(rom: &[u8], id: usize) -> Result<Option<GuidePicture>, BootError> {
-    let Some(terrain) = rom.get(ZOID_TERRAIN + id) else {
+    let Some(terrain) = rom.get(locate(rom, ZOID_TERRAIN + id)) else {
         return Ok(None);
     };
-    let Some(variant) = rom.get(ZOID_RECORDS + id * ZOID_RECORD_LEN + ZOID_VARIANT_FIELD) else {
+    let Some(variant) = rom.get(locate(
+        rom,
+        ZOID_RECORDS + id * ZOID_RECORD_LEN + ZOID_VARIANT_FIELD,
+    )) else {
         return Ok(None);
     };
     let index = usize::from(*terrain) * BACKDROP_VARIANTS + usize::from(*variant);
@@ -337,8 +342,9 @@ fn picture(
     };
     let tile_bytes = lz77(rom, tiles, "guide picture tiles")?;
     let palette_bytes = lz77(rom, palette, "guide picture palette")?;
+    let map_at = locate(rom, PICTURE_MAP);
     let map = rom
-        .get(PICTURE_MAP..PICTURE_MAP + PICTURE_TILES * PICTURE_TILES * 2)
+        .get(map_at..map_at + PICTURE_TILES * PICTURE_TILES * 2)
         .ok_or(BootError::TooShort {
             len: rom.len(),
             what: "guide picture map",
@@ -361,8 +367,10 @@ fn picture(
     }))
 }
 
+/// The pointer of record `index` of the table Rev 1 keeps at `table`,
+/// read where `rom`'s release keeps it.
 fn record(rom: &[u8], table: usize, index: usize) -> Option<usize> {
-    record_pointer(rom, table + index * RECORD_LEN)
+    record_pointer(rom, locate(rom, table + index * RECORD_LEN))
 }
 
 fn lz77(rom: &[u8], offset: usize, what: &'static str) -> Result<Vec<u8>, BootError> {

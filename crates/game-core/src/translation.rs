@@ -13,6 +13,8 @@ use std::fmt::Write as _;
 
 use std::collections::HashSet;
 
+use extraction::Revision;
+
 use crate::data::GameData;
 use crate::extension::{Extension, Rect};
 use crate::port_text::{self, PORT_PREFIX};
@@ -225,7 +227,8 @@ fn spreads_over(window: &Opened, grown: &Opened, other: &Opened) -> bool {
 }
 
 /// The key of a message: table, string index and the message's offset from
-/// the string's start.
+/// the string's start, where Rev 1 keeps it (see
+/// [`Revision::message_offset`]).
 #[must_use]
 pub fn key(table: &str, index: usize, offset: usize) -> String {
     format!("{table}/{index}/{offset:#x}")
@@ -684,6 +687,7 @@ impl<'a> Walker<'a> {
                 .filter(|(other, _)| **other != id)
                 .map(|(_, other)| *other)
                 .collect();
+            let offset = Revision::of(self.rom).message_offset(self.table, index, offset);
             self.placements.insert(
                 key(self.table, index, offset),
                 Placement {
@@ -813,6 +817,7 @@ impl Scope {
 /// tables cannot be read.
 pub fn template(data: &GameData<'_>, scopes: &[Scope]) -> Result<String, TranslationError> {
     let rom = data.bytes();
+    let revision = Revision::of(rom);
     let mut out = String::from(TEMPLATE_HEADER);
     for scope in scopes {
         if scope.table == PORT_SCOPE {
@@ -835,6 +840,7 @@ pub fn template(data: &GameData<'_>, scopes: &[Scope]) -> Result<String, Transla
                 .unwrap_or(start + STRING_LIMIT)
                 .min(rom.len());
             for (offset, text) in messages(rom, start, end) {
+                let offset = revision.message_offset(&scope.table, index, offset);
                 let _ = writeln!(out, "#: {}+{offset:#x}", scope.table);
                 let _ = writeln!(out, "msgctxt {}", quote(&key(&scope.table, index, offset)));
                 let _ = writeln!(out, "msgid {}", quote(&text));

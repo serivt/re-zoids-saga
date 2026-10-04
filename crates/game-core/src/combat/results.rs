@@ -14,6 +14,7 @@
 //! map in a reference emulator (its calls and task states frame by frame).
 //! See `docs/combat.md`.
 
+use extraction::revision::locate;
 use extraction::saga::EXPERIENCE_TABLE;
 use extraction::saga_combat::SLOTS;
 use extraction::saga_encounter::{self, Formation, Lineup};
@@ -374,7 +375,10 @@ impl Combat {
         } else {
             SPOIL_KINDS
         };
-        let kind = rom.get(table + usize::from(roll)).copied().unwrap_or(0);
+        let kind = rom
+            .get(locate(rom, table + usize::from(roll)))
+            .copied()
+            .unwrap_or(0);
         let spoil = match kind {
             1 => found.item.map(Spoil::Item),
             2 => found.core.map(Spoil::Core),
@@ -536,7 +540,7 @@ impl Combat {
         let level = u16::from(self.state.get(LEVEL).copied().unwrap_or(0));
         for (companion, &block) in COMPANIONS.iter().enumerate() {
             for stat in 0..5 {
-                let at = GROWTH + companion * 10 + stat * 2;
+                let at = locate(rom, GROWTH + companion * 10 + stat * 2);
                 let growth = rom
                     .get(at..at + 2)
                     .map_or(0, |bytes| u16::from_le_bytes([bytes[0], bytes[1]]));
@@ -704,7 +708,7 @@ fn unit_record(
 pub(super) fn experience_table(rom: &[u8]) -> Vec<u32> {
     (0..usize::from(TOP_LEVEL))
         .map(|level| {
-            let at = EXPERIENCE_TABLE + level * 4;
+            let at = locate(rom, EXPERIENCE_TABLE + level * 4);
             rom.get(at..at + 4).map_or(u32::MAX, |bytes| {
                 u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
             })

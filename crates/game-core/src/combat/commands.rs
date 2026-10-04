@@ -24,6 +24,7 @@ use super::attack::{self, Blow};
 use super::turn::{Glow, Task};
 use super::units::{BattleUnit, Effect};
 use super::{Act, Call, Combat};
+use extraction::revision::locate;
 use extraction::saga_combat::SLOTS;
 use platform::Button;
 
@@ -214,7 +215,7 @@ pub(super) fn deck_of(state: &[u8]) -> [u8; DECK_SLOTS] {
 fn command_records(rom: &[u8]) -> Vec<[u32; 3]> {
     (0..COMMANDS)
         .map(|command| {
-            let at = RECORDS + command * RECORD_SIZE;
+            let at = locate(rom, RECORDS + command * RECORD_SIZE);
             std::array::from_fn(|index| {
                 rom.get(at + index * 4..at + index * 4 + 4)
                     .and_then(|bytes| bytes.try_into().ok())

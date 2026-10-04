@@ -30,6 +30,7 @@ use formats::bgr555::parse_palette;
 use formats::lz77;
 use formats::tile::Tileset;
 
+use crate::revision::locate;
 use crate::saga::rom_offset;
 use crate::saga_formation::FieldLayer;
 
@@ -79,7 +80,7 @@ pub struct Grounds {
 /// its own terrain, so both are read and the caller picks.
 #[must_use]
 pub fn grounds(rom: &[u8], terrain: u8) -> Option<Grounds> {
-    let record = GROUNDS + usize::from(terrain) * GROUND_RECORD_LEN;
+    let record = locate(rom, GROUNDS + usize::from(terrain) * GROUND_RECORD_LEN);
     let pointer = |at: usize| rom.get(record + at..record + at + 4).and_then(rom_offset);
     let layer = |first: usize, origin, bank| -> Option<FieldLayer> {
         let palette_at = pointer(first)?;
@@ -122,9 +123,11 @@ pub struct PanelGraphics {
 /// The panels' graphics, if the ROM has them.
 #[must_use]
 pub fn panel_graphics(rom: &[u8]) -> Option<PanelGraphics> {
-    let (tiles, _) = lz77::decompress(rom.get(PANEL_TILES..)?).ok()?;
-    let palette = parse_palette(rom.get(PANEL_PALETTE..PANEL_PALETTE + PALETTE_BYTES)?)?;
+    let (tiles, _) = lz77::decompress(rom.get(locate(rom, PANEL_TILES)..)?).ok()?;
+    let palette_at = locate(rom, PANEL_PALETTE);
+    let palette = parse_palette(rom.get(palette_at..palette_at + PALETTE_BYTES)?)?;
     let half = |at: usize| {
+        let at = locate(rom, at);
         rom.get(at..at + 2)
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
     };
@@ -180,7 +183,10 @@ pub fn slot_anchor(rom: &[u8], enemy: bool, slot: usize) -> Option<(i32, i32)> {
     if slot >= SLOTS {
         return None;
     }
-    let at = SLOT_TABLE + (usize::from(enemy) * SLOTS + slot) * SLOT_LEN;
+    let at = locate(
+        rom,
+        SLOT_TABLE + (usize::from(enemy) * SLOTS + slot) * SLOT_LEN,
+    );
     let record = rom.get(at..at + SLOT_LEN)?;
     let whole = |at: usize| {
         i32::from_le_bytes([record[at], record[at + 1], record[at + 2], record[at + 3]]) >> 16
@@ -210,8 +216,10 @@ const ZOID_STATS: usize = 0x40;
 /// The battle's view of Zoid `zoid`'s record, if the ROM has it.
 #[must_use]
 pub fn zoid_battle_record(rom: &[u8], zoid: u16) -> Option<ZoidBattleRecord> {
-    let at =
-        crate::saga_party::ZOID_RECORDS + usize::from(zoid) * crate::saga_party::ZOID_RECORD_LEN;
+    let at = locate(
+        rom,
+        crate::saga_party::ZOID_RECORDS + usize::from(zoid) * crate::saga_party::ZOID_RECORD_LEN,
+    );
     let record = rom.get(at..at + crate::saga_party::ZOID_RECORD_LEN)?;
     let word = |at: usize| {
         u32::from_le_bytes([record[at], record[at + 1], record[at + 2], record[at + 3]])

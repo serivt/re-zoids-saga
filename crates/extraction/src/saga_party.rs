@@ -27,6 +27,8 @@
 
 use formats::progress::STATE_LEN;
 
+use crate::revision::locate;
+
 const UNITS: usize = 0xD2C;
 /// Bytes of a unit in the game-state block.
 pub const UNIT_LEN: usize = 0x38;
@@ -164,7 +166,8 @@ pub fn form_party(rom: &[u8], state: &mut [u8], choice: usize) -> Option<()> {
 fn grow_members(rom: &[u8], state: &mut [u8]) -> Option<()> {
     let level = u16::from(state[PARTY_LEVEL]);
     for member in 0..WARRIORS {
-        let growth = rom.get(GROWTH + member * GROWTH_LEN..GROWTH + (member + 1) * GROWTH_LEN)?;
+        let growth_at = locate(rom, GROWTH + member * GROWTH_LEN);
+        let growth = rom.get(growth_at..growth_at + GROWTH_LEN)?;
         let record = MEMBER_RECORDS + (member + 1) * MEMBER_RECORD_LEN;
         for value in 0..PILOT_VALUES {
             let bonus = half(growth, value * 2).wrapping_mul(level);
@@ -355,7 +358,7 @@ pub struct PartSlot {
 /// Part `id` as its record gives it, which the stock list shows.
 #[must_use]
 pub fn part_record(rom: &[u8], id: u16) -> Option<Part> {
-    let at = PART_RECORDS + usize::from(id) * PART_RECORD_LEN;
+    let at = locate(rom, PART_RECORDS + usize::from(id) * PART_RECORD_LEN);
     let record = rom.get(at..at + PART_RECORD_LEN)?;
     let signed = |at: usize| i16::from_ne_bytes(half(record, at).to_ne_bytes());
     Some(Part {
@@ -520,7 +523,7 @@ pub fn stocked_parts(rom: &[u8], state: &[u8], mask: u32) -> Vec<u16> {
         .filter_map(|id| u16::try_from(id).ok())
         .filter(|&id| stock(state, id) > 0)
         .filter(|&id| {
-            let at = PART_RECORDS + usize::from(id) * PART_RECORD_LEN;
+            let at = locate(rom, PART_RECORDS + usize::from(id) * PART_RECORD_LEN);
             rom.get(at..at + 4)
                 .is_some_and(|flags| word(flags, 0) & mask != 0)
         })
@@ -812,7 +815,7 @@ pub fn zoid_class(rom: &[u8], zoid: u16) -> Option<(u16, u8)> {
 }
 
 fn zoid_record(rom: &[u8], zoid: u16) -> Option<&[u8]> {
-    let at = ZOID_RECORDS + usize::from(zoid) * ZOID_RECORD_LEN;
+    let at = locate(rom, ZOID_RECORDS + usize::from(zoid) * ZOID_RECORD_LEN);
     rom.get(at..at + ZOID_RECORD_LEN)
 }
 
@@ -900,7 +903,7 @@ fn compute_stats(rom: &[u8], state: &mut [u8], character: u8, unit: u8) -> Optio
         if part == NO_PART {
             continue;
         }
-        let part_at = PART_RECORDS + usize::from(part) * PART_RECORD_LEN;
+        let part_at = locate(rom, PART_RECORDS + usize::from(part) * PART_RECORD_LEN);
         let record = rom.get(part_at..part_at + PART_RECORD_LEN)?;
         let flags = word(record, 0);
         if flags & PART_ACTIVE == 0 {
@@ -991,7 +994,10 @@ fn pilot_record(rom: &[u8], state: &[u8], character: u8) -> Option<Vec<u8>> {
     }
     let chapter = usize::from(state[AREA].wrapping_sub(1));
     let chapter = if chapter > PILOT_CHAPTERS { 0 } else { chapter };
-    let at = PILOT_TABLE + (character * PILOT_CHAPTERS + chapter) * 4;
+    let at = locate(
+        rom,
+        PILOT_TABLE + (character * PILOT_CHAPTERS + chapter) * 4,
+    );
     let pointer = word(rom.get(at..at + 4)?, 0);
     let start = usize::try_from(pointer.checked_sub(ROM_BASE)?).ok()?;
     Some(rom.get(start..start + MEMBER_RECORD_LEN)?.to_vec())
@@ -1164,7 +1170,7 @@ pub fn companion(rom: &[u8], index: usize) -> Option<Companion> {
     if index >= COMPANION_COUNT {
         return None;
     }
-    let at = COMPANIONS + index * COMPANION_LEN;
+    let at = locate(rom, COMPANIONS + index * COMPANION_LEN);
     let record = rom.get(at..at + COMPANION_LEN)?;
     Some(Companion {
         character: u8::try_from(half(record, 0)).ok()?,
@@ -1284,7 +1290,7 @@ fn unassign(rom: &[u8], state: &mut [u8], character: u8) -> Option<()> {
 /// The entries of starting list `list` (ROM `0x67E380`): the character's
 /// flag bits, the character and its Zoid.
 fn starting_list(rom: &[u8], list: usize) -> Option<Vec<(u8, u16, u16)>> {
-    let at = STARTING_LISTS + list * 4;
+    let at = locate(rom, STARTING_LISTS + list * 4);
     let pointer = word(rom.get(at..at + 4)?, 0);
     let mut at = usize::try_from(pointer.checked_sub(ROM_BASE)?).ok()?;
     let mut entries = Vec::new();
@@ -1344,7 +1350,7 @@ pub struct Development {
 /// from `+0x24`), `None` outside `rom`.
 #[must_use]
 pub fn development(rom: &[u8], zoid: u8) -> Option<Development> {
-    let at = ZOID_RECORDS + usize::from(zoid) * ZOID_RECORD_LEN;
+    let at = locate(rom, ZOID_RECORDS + usize::from(zoid) * ZOID_RECORD_LEN);
     let record = rom.get(at..at + ZOID_RECORD_LEN)?;
     let money = record.get(DEVELOPMENT_MONEY..DEVELOPMENT_MONEY + 4)?;
     Some(Development {
@@ -1413,7 +1419,10 @@ pub fn development_bases(rom: &[u8], state: &[u8], zoid: u8) -> Vec<u8> {
     let kinds: Vec<u16> = if needed.zoid < SPECIAL_KINDS_FROM {
         vec![u16::from(needed.zoid)]
     } else {
-        let at = SPECIAL_KINDS + usize::from(needed.zoid - SPECIAL_KINDS_FROM) * SPECIAL_KIND_LEN;
+        let at = locate(
+            rom,
+            SPECIAL_KINDS + usize::from(needed.zoid - SPECIAL_KINDS_FROM) * SPECIAL_KIND_LEN,
+        );
         rom.get(at..)
             .unwrap_or_default()
             .iter()

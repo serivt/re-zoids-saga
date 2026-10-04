@@ -4,6 +4,8 @@
 use formats::script_text::{Script, ScriptTextError};
 use thiserror::Error;
 
+use crate::revision::Revision;
+
 const ROM_BASE: u32 = 0x0800_0000;
 const POINTER_LEN: usize = 4;
 
@@ -12,7 +14,8 @@ const POINTER_LEN: usize = 4;
 pub struct StringTable {
     /// Identifier used to build string IDs, e.g. `dialogue`.
     pub name: &'static str,
-    /// Offset of the pointer array from the start of the ROM.
+    /// Offset of the pointer array from the start of the ROM, where Rev 1
+    /// keeps it (see [`crate::revision`]).
     pub offset: usize,
     /// Number of pointers in the array.
     pub count: usize,
@@ -77,17 +80,8 @@ impl StringTable {
     /// Returns [`StringTableError`] when the table or a pointer falls outside
     /// the ROM, or a string does not decode.
     pub fn read(&self, rom: &[u8]) -> Result<Vec<TableString>, StringTableError> {
-        let end = self
-            .offset
-            .checked_add(self.count.saturating_mul(POINTER_LEN))
-            .filter(|end| *end <= rom.len())
-            .ok_or(StringTableError::TableOutOfBounds {
-                name: self.name,
-                offset: self.offset,
-                count: self.count,
-            })?;
-        rom[self.offset..end]
-            .chunks_exact(POINTER_LEN)
+        self.pointers(rom)?
+            .into_iter()
             .enumerate()
             .map(|(index, pointer)| self.read_entry(rom, index, pointer))
             .collect()
@@ -101,20 +95,10 @@ impl StringTable {
     /// Returns [`StringTableError`] when the table or a pointer falls
     /// outside the ROM.
     pub fn offsets(&self, rom: &[u8]) -> Result<Vec<usize>, StringTableError> {
-        let end = self
-            .offset
-            .checked_add(self.count.saturating_mul(POINTER_LEN))
-            .filter(|end| *end <= rom.len())
-            .ok_or(StringTableError::TableOutOfBounds {
-                name: self.name,
-                offset: self.offset,
-                count: self.count,
-            })?;
-        rom[self.offset..end]
-            .chunks_exact(POINTER_LEN)
+        self.pointers(rom)?
+            .into_iter()
             .enumerate()
-            .map(|(index, bytes)| {
-                let pointer = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            .map(|(index, pointer)| {
                 if pointer == 0 {
                     return Ok(0);
                 }
@@ -130,14 +114,38 @@ impl StringTable {
             .collect()
     }
 
+    /// The table's pointers, each read where the image's release keeps it;
+    /// an entry the release lacks (one Rev 1 added) reads as null.
+    fn pointers(&self, rom: &[u8]) -> Result<Vec<u32>, StringTableError> {
+        let out_of_bounds = || StringTableError::TableOutOfBounds {
+            name: self.name,
+            offset: self.offset,
+            count: self.count,
+        };
+        let revision = Revision::of(rom);
+        (0..self.count)
+            .map(|index| {
+                let at = index
+                    .checked_mul(POINTER_LEN)
+                    .and_then(|start| self.offset.checked_add(start))
+                    .ok_or_else(out_of_bounds)?;
+                if revision.lacks(at) {
+                    return Ok(0);
+                }
+                let at = revision.locate(at);
+                let bytes = rom.get(at..at + POINTER_LEN).ok_or_else(out_of_bounds)?;
+                Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+            })
+            .collect()
+    }
+
     fn read_entry(
         &self,
         rom: &[u8],
         index: usize,
-        pointer: &[u8],
+        pointer: u32,
     ) -> Result<TableString, StringTableError> {
         let id = format!("{}_{index:05}", self.name);
-        let pointer = u32::from_le_bytes([pointer[0], pointer[1], pointer[2], pointer[3]]);
         if pointer == 0 {
             return Ok(TableString {
                 id,

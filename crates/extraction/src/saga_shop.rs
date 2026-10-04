@@ -17,6 +17,7 @@
 //! The armaments shops sell parts at their record's price (`+4` of the
 //! 24-byte records at ROM `0x66C8F8`) into the parts' stock.
 
+use crate::revision::locate;
 use crate::saga_party::{STOCK_LIMIT, STOCKED_PARTS};
 
 const ITEM_SHOPS: usize = 0x0075_BCD4;
@@ -77,7 +78,7 @@ pub struct Item {
 /// `0xFF`. `None` when the table lies outside `rom`.
 #[must_use]
 pub fn item_shop(rom: &[u8], shop: u8) -> Option<Vec<Item>> {
-    let at = ITEM_SHOPS + usize::from(shop) * ITEM_SHOP_LEN;
+    let at = locate(rom, ITEM_SHOPS + usize::from(shop) * ITEM_SHOP_LEN);
     let record = rom.get(at..at + ITEM_SHOP_LEN)?;
     Some(
         record
@@ -100,7 +101,7 @@ pub fn item_shop(rom: &[u8], shop: u8) -> Option<Vec<Item>> {
 /// table lies outside `rom`.
 #[must_use]
 pub fn arms_shop(rom: &[u8], shop: u8) -> Option<Vec<u16>> {
-    let at = ARMS_SHOPS + usize::from(shop) * ARMS_SHOP_LEN;
+    let at = locate(rom, ARMS_SHOPS + usize::from(shop) * ARMS_SHOP_LEN);
     let record = rom.get(at..at + ARMS_SHOP_LEN)?;
     Some(
         record
@@ -118,8 +119,11 @@ pub fn arms_shop(rom: &[u8], shop: u8) -> Option<Vec<u16>> {
 /// `None` when the table lies outside `rom`.
 #[must_use]
 pub fn rotating_arms_shop(rom: &[u8], wins: u16) -> Option<u8> {
-    rom.get(ROTATING_ARMS_SHOPS + usize::from(wins % ROTATING_ARMS_SHOP_COUNT))
-        .copied()
+    rom.get(locate(
+        rom,
+        ROTATING_ARMS_SHOPS + usize::from(wins % ROTATING_ARMS_SHOP_COUNT),
+    ))
+    .copied()
 }
 
 /// What `item` costs; the shops buy it back for half.
@@ -190,7 +194,10 @@ fn count_at(item: Item) -> usize {
     table + usize::from(item.id)
 }
 
+/// The word Rev 1 keeps at `at`, read where `rom`'s release keeps it; 0
+/// outside the ROM.
 fn word_at(rom: &[u8], at: usize) -> u32 {
+    let at = locate(rom, at);
     rom.get(at..at + 4).map_or(0, |bytes| {
         u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
     })

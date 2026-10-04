@@ -30,6 +30,8 @@
 //! battle's controller; checked against a battle a reference emulator set
 //! up as the first of them).
 
+use crate::revision::locate;
+
 const FORMATION_TABLES: usize = 0x0068_38C8;
 const AREA_TABLE_LEN: usize = 0x30;
 const LAST_AREA: usize = 10;
@@ -120,7 +122,7 @@ pub fn story_battle(rom: &[u8], index: u8) -> Option<StoryBattle> {
     if usize::from(index) >= STORY_BATTLE_COUNT {
         return None;
     }
-    let start = STORY_BATTLES + usize::from(index) * FORMATION_LEN;
+    let start = locate(rom, STORY_BATTLES + usize::from(index) * FORMATION_LEN);
     Some(StoryBattle {
         index,
         record: rom.get(start..start + FORMATION_LEN)?.try_into().ok()?,
@@ -149,9 +151,12 @@ impl Lineup {
                 if slot >= SLOTS || record == NO_RECORD {
                     return None;
                 }
-                let start = STORY_ENEMIES
-                    + usize::from(battle.index) * STORY_ENEMIES_LEN
-                    + usize::from(record) * ENEMY_RECORD_LEN;
+                let start = locate(
+                    rom,
+                    STORY_ENEMIES
+                        + usize::from(battle.index) * STORY_ENEMIES_LEN
+                        + usize::from(record) * ENEMY_RECORD_LEN,
+                );
                 rom.get(start..start + ENEMY_RECORD_LEN)?.try_into().ok()
             }
         }
@@ -183,7 +188,10 @@ impl Lineup {
 pub fn formations(rom: &[u8], area: u8, column: u8) -> Option<Vec<Formation>> {
     let index = usize::from(area.wrapping_sub(1));
     let index = if index > LAST_AREA { 0 } else { index };
-    let pointer = FORMATION_TABLES + index * AREA_TABLE_LEN + usize::from(column) * 4;
+    let pointer = locate(
+        rom,
+        FORMATION_TABLES + index * AREA_TABLE_LEN + usize::from(column) * 4,
+    );
     let table = rom_pointer(rom, pointer)?;
     (0..FORMATIONS_PER_COLUMN)
         .map(|at| {
@@ -238,8 +246,10 @@ pub fn enemy_record(
     if record == NO_RECORD {
         return None;
     }
-    let start =
-        table + usize::from(group) * RECORD_GROUP_LEN + usize::from(record) * ENEMY_RECORD_LEN;
+    let start = locate(
+        rom,
+        table + usize::from(group) * RECORD_GROUP_LEN + usize::from(record) * ENEMY_RECORD_LEN,
+    );
     rom.get(start..start + ENEMY_RECORD_LEN)?.try_into().ok()
 }
 
@@ -259,8 +269,10 @@ pub fn spoils_record(
             (MEMBER_RECORDS, *formation.get(at)?, *formation.get(at + 1)?)
         }
     };
-    let start =
-        table + usize::from(group) * RECORD_GROUP_LEN + usize::from(record) * ENEMY_RECORD_LEN;
+    let start = locate(
+        rom,
+        table + usize::from(group) * RECORD_GROUP_LEN + usize::from(record) * ENEMY_RECORD_LEN,
+    );
     rom.get(start..start + ENEMY_RECORD_LEN)?.try_into().ok()
 }
 
@@ -348,7 +360,7 @@ pub fn return_point(rom: &[u8], index: usize) -> Option<ReturnPoint> {
     if index >= RETURN_POINT_COUNT {
         return None;
     }
-    let start = RETURN_POINTS + index * RETURN_POINT_LEN;
+    let start = locate(rom, RETURN_POINTS + index * RETURN_POINT_LEN);
     let record = rom.get(start..start + RETURN_POINT_LEN)?;
     let half = |at: usize| usize::from(u16::from_le_bytes([record[at], record[at + 1]]));
     Some(ReturnPoint {

@@ -1,4 +1,6 @@
-//! ROM layout of Zoids Saga (Japan, Rev 1).
+//! ROM layout of Zoids Saga (Japan, Rev 1). Every offset here is Rev 1's;
+//! the readers move each to where the image's own release keeps it
+//! ([`crate::revision`]).
 
 use formats::bgr555::{PALETTE_LEN, parse_palette, parse_palettes};
 use formats::font::{FontError, Glyph, GlyphIndex, RANGE_ENTRY_LEN, TILE_LEN};
@@ -7,6 +9,7 @@ use formats::tile::{TileImage, TilePiece, Tileset};
 use formats::tilemap::TileMap;
 use thiserror::Error;
 
+use crate::revision::locate;
 use crate::string_table::StringTable;
 
 /// The script string tables located so far, in the order they appear in the ROM.
@@ -71,13 +74,12 @@ pub enum FontReadError {
 /// Returns [`FontReadError`] when the ROM is too short or the table is malformed.
 pub fn font(rom: &[u8]) -> Result<(GlyphIndex, Glyph), FontReadError> {
     let too_short = || FontReadError::TooShort { len: rom.len() };
-    let table_end = FONT_RANGE_TABLE_OFFSET + FONT_RANGE_COUNT * RANGE_ENTRY_LEN;
-    let table = rom
-        .get(FONT_RANGE_TABLE_OFFSET..table_end)
-        .ok_or_else(too_short)?;
+    let table_start = locate(rom, FONT_RANGE_TABLE_OFFSET);
+    let table_end = table_start + FONT_RANGE_COUNT * RANGE_ENTRY_LEN;
+    let table = rom.get(table_start..table_end).ok_or_else(too_short)?;
     let index = GlyphIndex::parse(table)?;
-    let top = tile(rom, FALLBACK_GLYPH_TOP).ok_or_else(too_short)?;
-    let bottom = tile(rom, FALLBACK_GLYPH_BOTTOM).ok_or_else(too_short)?;
+    let top = tile(rom, locate(rom, FALLBACK_GLYPH_TOP)).ok_or_else(too_short)?;
+    let bottom = tile(rom, locate(rom, FALLBACK_GLYPH_BOTTOM)).ok_or_else(too_short)?;
     Ok((index, Glyph::from_tiles(top, bottom)))
 }
 
@@ -118,10 +120,13 @@ pub enum WindowSkinError {
 /// Returns [`WindowSkinError`] when the ROM is too short or the tileset does not decompress.
 pub fn window_skin(rom: &[u8]) -> Result<WindowSkin, WindowSkinError> {
     let too_short = || WindowSkinError::TooShort { len: rom.len() };
-    let compressed = rom.get(WINDOW_TILESET_OFFSET..).ok_or_else(too_short)?;
+    let compressed = rom
+        .get(locate(rom, WINDOW_TILESET_OFFSET)..)
+        .ok_or_else(too_short)?;
     let (tile_bytes, _) = formats::lz77::decompress(compressed)?;
+    let palette_at = locate(rom, WINDOW_PALETTE_OFFSET);
     let palette = rom
-        .get(WINDOW_PALETTE_OFFSET..WINDOW_PALETTE_OFFSET + PALETTE_LEN)
+        .get(palette_at..palette_at + PALETTE_LEN)
         .and_then(parse_palette)
         .ok_or_else(too_short)?;
     Ok(WindowSkin {
@@ -214,7 +219,7 @@ pub fn portrait(
             expression,
         })?;
     let too_short = || PortraitError::TooShort { len: rom.len() };
-    let offset = PORTRAIT_TABLE_OFFSET + record * PORTRAIT_RECORD_LEN;
+    let offset = locate(rom, PORTRAIT_TABLE_OFFSET + record * PORTRAIT_RECORD_LEN);
     let entry = rom.get(offset..offset + 8).ok_or_else(too_short)?;
     if entry[..4] == [0; 4] {
         return Err(PortraitError::NoSuchPortrait {
@@ -415,7 +420,7 @@ pub fn scene(rom: &[u8], index: usize) -> Result<Scene, SceneError> {
         len: rom.len(),
         index,
     };
-    let offset = SCENE_TABLE_OFFSET + index * SCENE_RECORD_LEN;
+    let offset = locate(rom, SCENE_TABLE_OFFSET + index * SCENE_RECORD_LEN);
     let record = rom
         .get(offset..offset + SCENE_RECORD_LEN)
         .ok_or_else(too_short)?;
@@ -517,7 +522,7 @@ pub fn map_record(rom: &[u8], index: usize) -> Result<MapRecord, MapError> {
     if index >= MAP_COUNT {
         return Err(MapError::NoSuchMap { index });
     }
-    let offset = MAP_TABLE_OFFSET + index * MAP_RECORD_LEN;
+    let offset = locate(rom, MAP_TABLE_OFFSET + index * MAP_RECORD_LEN);
     let record = rom
         .get(offset..offset + MAP_RECORD_LEN)
         .ok_or(MapError::TooShort {
@@ -549,7 +554,7 @@ pub fn warp(rom: &[u8], map: usize, exit: usize) -> Result<Warp, MapError> {
         len: rom.len(),
         index: map,
     };
-    let pointer = WARP_TABLE_OFFSET + map * 4;
+    let pointer = locate(rom, WARP_TABLE_OFFSET + map * 4);
     let table =
         rom_offset(rom.get(pointer..pointer + 4).ok_or_else(too_short)?).ok_or_else(too_short)?;
     let offset = table + exit * WARP_LEN;
@@ -859,20 +864,25 @@ pub fn kana_table(rom: &[u8]) -> Result<Vec<Vec<char>>, BootError> {
         .collect())
 }
 
+/// The `len` bytes Rev 1 keeps at `offset`, from where `rom`'s release
+/// keeps them.
 fn slice<'a>(
     rom: &'a [u8],
     offset: usize,
     len: usize,
     what: &'static str,
 ) -> Result<&'a [u8], BootError> {
+    let offset = locate(rom, offset);
     rom.get(offset..offset + len).ok_or(BootError::TooShort {
         len: rom.len(),
         what,
     })
 }
 
+/// The LZ77 block Rev 1 keeps at `offset`, decompressed from where `rom`'s
+/// release keeps it.
 fn lz77_block(rom: &[u8], offset: usize, what: &'static str) -> Result<Vec<u8>, BootError> {
-    let compressed = rom.get(offset..).ok_or(BootError::TooShort {
+    let compressed = rom.get(locate(rom, offset)..).ok_or(BootError::TooShort {
         len: rom.len(),
         what,
     })?;
@@ -954,7 +964,10 @@ pub fn map_music(rom: &[u8], map: usize) -> Option<usize> {
     if map >= MAP_COUNT {
         return None;
     }
-    let at = MAP_TABLE_OFFSET + map * MAP_RECORD_LEN + MAP_MUSIC_FIELD;
+    let at = locate(
+        rom,
+        MAP_TABLE_OFFSET + map * MAP_RECORD_LEN + MAP_MUSIC_FIELD,
+    );
     let field = rom.get(at..at + 2)?;
     Some(usize::from(u16::from_le_bytes([field[0], field[1]])))
 }
@@ -973,7 +986,7 @@ pub fn experience_to_next(rom: &[u8], level: usize) -> Option<u32> {
     if level >= EXPERIENCE_LEVELS {
         return None;
     }
-    let at = EXPERIENCE_TABLE + level * 4;
+    let at = locate(rom, EXPERIENCE_TABLE + level * 4);
     let bytes = rom.get(at..at + 4)?;
     Some(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
@@ -1269,7 +1282,7 @@ pub fn sprite_sheet(rom: &[u8], id: usize) -> Result<SpriteSheet, SpriteSheetErr
         return Err(SpriteSheetError::NoSuchSprite { id });
     }
     let too_short = || SpriteSheetError::TooShort { len: rom.len(), id };
-    let offset = SPRITE_TABLE_OFFSET + id * SPRITE_RECORD_LEN;
+    let offset = locate(rom, SPRITE_TABLE_OFFSET + id * SPRITE_RECORD_LEN);
     let record = rom
         .get(offset..offset + SPRITE_RECORD_LEN)
         .ok_or_else(too_short)?;
@@ -1372,7 +1385,7 @@ pub fn zoid_status_sprite(rom: &[u8], zoid: usize) -> Result<SpriteSheet, Sprite
         len: rom.len(),
         id: zoid,
     };
-    let offset = ZOID_RECORDS + zoid * ZOID_RECORD_LEN;
+    let offset = locate(rom, ZOID_RECORDS + zoid * ZOID_RECORD_LEN);
     let record = rom
         .get(offset..offset + ZOID_RECORD_LEN)
         .ok_or_else(too_short)?;
@@ -1426,7 +1439,7 @@ const ZOID_SPRITE_TILES: usize = 64;
 pub fn sprite_sheet_by_tag(rom: &[u8], tag: &str) -> Result<SpriteSheet, SpriteSheetError> {
     (1..SPRITE_COUNT)
         .find(|id| {
-            let offset = SPRITE_TABLE_OFFSET + id * SPRITE_RECORD_LEN + 16;
+            let offset = locate(rom, SPRITE_TABLE_OFFSET + id * SPRITE_RECORD_LEN + 16);
             rom.get(offset..offset + SPRITE_TAG_LEN) == Some(tag.as_bytes())
         })
         .map_or_else(
@@ -1572,7 +1585,7 @@ pub const CHEST_FLAG_BASE: u16 = 0x1E;
 /// Reads what chest `chest` holds.
 #[must_use]
 pub fn treasure(rom: &[u8], chest: usize) -> Option<Treasure> {
-    let at = TREASURE_TABLE + chest * TREASURE_LEN;
+    let at = locate(rom, TREASURE_TABLE + chest * TREASURE_LEN);
     let bytes = rom.get(at..at + TREASURE_LEN)?;
     let byte = |value: u8| (value != NO_TREASURE_BYTE).then_some(value);
     let part = u16::from_le_bytes([bytes[6], bytes[7]]);
@@ -1685,7 +1698,7 @@ pub fn map_objects(rom: &[u8], map: usize) -> Result<Vec<MapObject>, MapError> {
         len: rom.len(),
         index: map,
     };
-    let entry = OBJECT_TABLE_OFFSET + map * OBJECT_TABLE_ENTRY_LEN;
+    let entry = locate(rom, OBJECT_TABLE_OFFSET + map * OBJECT_TABLE_ENTRY_LEN);
     let entry = rom
         .get(entry..entry + OBJECT_TABLE_ENTRY_LEN)
         .ok_or_else(too_short)?;

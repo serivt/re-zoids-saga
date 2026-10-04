@@ -17,6 +17,7 @@
 //! bit 15 set), facing left, on the palette slot after the list's, at the
 //! cell the table at ROM `0x32AED4` gives for that many members.
 
+use crate::revision::{locate, locate_address};
 use crate::saga::{MapError, MapObject, objects_at};
 use crate::saga_party::{FORMATION_SLOTS, ZOID_RECORD_LEN, ZOID_RECORDS, formation, unit_record};
 
@@ -100,11 +101,15 @@ const REGULATIONS: [Regulation; MATCHES] = [
     Regulation::AtMost(3),
 ];
 
+/// The half-word Rev 1 keeps at `at`, read where `rom`'s release keeps it.
 fn half(rom: &[u8], at: usize) -> Option<u16> {
+    let at = locate(rom, at);
     Some(u16::from_le_bytes([*rom.get(at)?, *rom.get(at + 1)?]))
 }
 
+/// The word Rev 1 keeps at `at`, read where `rom`'s release keeps it.
 fn word(rom: &[u8], at: usize) -> Option<u32> {
+    let at = locate(rom, at);
     Some(u32::from_le_bytes(rom.get(at..at + 4)?.try_into().ok()?))
 }
 
@@ -125,7 +130,7 @@ pub fn colosseum_match(rom: &[u8], n: usize) -> Option<Match> {
         closing: (closing != 0).then_some(closing),
         enemies: word(rom, at + 4)?,
         enemy_count: bytes / OBJECT_LEN,
-        battle: *rom.get(battle)?,
+        battle: *rom.get(locate(rom, battle))?,
         flag: u16::try_from(word(rom, battle + 4)?).ok()?,
     })
 }
@@ -144,13 +149,16 @@ fn zoid_flags(rom: &[u8], zoid: u8) -> u16 {
 }
 
 fn zoid_size(rom: &[u8], zoid: u8) -> u8 {
-    rom.get(ZOID_RECORDS + usize::from(zoid) * ZOID_RECORD_LEN + SIZE)
-        .copied()
-        .unwrap_or(0)
+    rom.get(locate(
+        rom,
+        ZOID_RECORDS + usize::from(zoid) * ZOID_RECORD_LEN + SIZE,
+    ))
+    .copied()
+    .unwrap_or(0)
 }
 
 fn cat(rom: &[u8], zoid: u8) -> bool {
-    rom.get(CAT_ZOIDS..)
+    rom.get(locate(rom, CAT_ZOIDS)..)
         .unwrap_or_default()
         .iter()
         .take_while(|&&listed| listed != LIST_END)
@@ -194,7 +202,7 @@ pub fn arena_objects(rom: &[u8], state: &[u8], n: usize) -> Result<Vec<MapObject
     };
     let game = colosseum_match(rom, n).ok_or_else(too_short)?;
     let mut objects = objects_at(rom, game.enemies, game.enemy_count)?;
-    let template = objects_at(rom, MEMBER_TEMPLATE, 1)?
+    let template = objects_at(rom, locate_address(rom, MEMBER_TEMPLATE), 1)?
         .pop()
         .ok_or_else(too_short)?;
     let members: Vec<u8> = formation(state)
